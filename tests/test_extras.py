@@ -7211,9 +7211,17 @@ def test_a_stale_editable_install_is_reported_rather_than_silent():
     from certo import cli, doctor
 
     real = certo.__version__
+    # The INSTALL is simulated, because the suite runs from a checkout where
+    # the metadata comes from an `egg-info` in the source tree -- which is a
+    # third answer now, and not this one. Asserting a stale install while
+    # standing in a source tree was asserting the wrong thing and passing by
+    # coincidence.
+    real_source = doctor._metadata_source
     try:
         certo.__version__ = "99.0.0"
         cli.__version__ = "99.0.0"
+        doctor._metadata_source = lambda: (
+            real, True, pathlib.Path("/site-packages"))
 
         buf = io.StringIO()
         with redirect_stdout(buf):
@@ -7229,10 +7237,16 @@ def test_a_stale_editable_install_is_reported_rather_than_silent():
     finally:
         certo.__version__ = real
         cli.__version__ = real
+        doctor._metadata_source = real_source
 
     # and it is quiet when they agree
-    ok, detail = doctor._installed_metadata()
-    assert ok is True and real in detail
+    try:
+        doctor._metadata_source = lambda: (
+            real, True, pathlib.Path("/site-packages"))
+        ok, detail = doctor._installed_metadata()
+        assert ok is True and real in detail
+    finally:
+        doctor._metadata_source = real_source
 
 
 def test_the_metadata_check_does_not_fail_an_uninstalled_checkout():
@@ -9528,8 +9542,13 @@ def test_repair_previews_and_removes_nothing_by_default():
         (root / "~erto" / "__init__.py").write_text("", encoding="utf-8")
         (root / "certo").mkdir()          # the real one, which must not move
 
+        # BOTH, or the test reads the real machine: `_script_dirs` unpatched
+        # returns this interpreter's `Scripts`, whose contents then appear in
+        # the list a fixture is asserting about.
         real = doctor._site_roots
+        real_scripts = doctor._script_dirs
         doctor._site_roots = lambda: [root]
+        doctor._script_dirs = lambda: []
         try:
             rep = doctor.repair()
             assert rep["applied"] is False
@@ -9538,6 +9557,7 @@ def test_repair_previews_and_removes_nothing_by_default():
             assert (root / "~erto").is_dir()      # still there
         finally:
             doctor._site_roots = real
+            doctor._script_dirs = real_scripts
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -9558,8 +9578,14 @@ def test_repair_touches_only_what_pip_abandoned():
         for keep in ("certo", "numpy", "z3", "certo_math-0.1.dist-info"):
             (root / keep).mkdir()
 
+        # `_script_dirs` too, and here it MATTERS: this calls `apply=True`,
+        # and unpatched it would delete `.deleteme` files out of whoever is
+        # running the suite. A test that reaches outside its fixture to
+        # remove things is worse than the bug it is guarding.
         real = doctor._site_roots
+        real_scripts = doctor._script_dirs
         doctor._site_roots = lambda: [root]
+        doctor._script_dirs = lambda: []
         try:
             rep = doctor.repair(apply=True)
             assert sorted(pathlib.Path(p).name for p in rep["removed"]) == [
@@ -9567,6 +9593,7 @@ def test_repair_touches_only_what_pip_abandoned():
             assert not rep["failed"]
         finally:
             doctor._site_roots = real
+            doctor._script_dirs = real_scripts
 
         survivors = sorted(p.name for p in root.iterdir())
         assert survivors == ["certo", "certo_math-0.1.dist-info", "numpy", "z3"]
@@ -9592,12 +9619,14 @@ def test_a_leftover_that_points_outside_the_tree_is_left_alone():
         except (OSError, NotImplementedError):
             return                        # no symlink privilege: nothing to test
 
-        real = doctor._site_roots
+        real, real_scripts = doctor._site_roots, doctor._script_dirs
         doctor._site_roots = lambda: [root]
+        doctor._script_dirs = lambda: []
         try:
             assert doctor.repair()["leftovers"] == []
         finally:
             doctor._site_roots = real
+            doctor._script_dirs = real_scripts
         assert (elsewhere / "precious").is_dir()
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -9616,13 +9645,15 @@ def test_the_same_leftover_is_counted_once():
     root = pathlib.Path(tempfile.mkdtemp())
     try:
         (root / "~erto").mkdir()
-        real = doctor._site_roots
+        real, real_scripts = doctor._site_roots, doctor._script_dirs
         # the same root handed over twice, which is what the real helper does
         doctor._site_roots = lambda: [root, root]
+        doctor._script_dirs = lambda: []
         try:
             assert len(doctor.repair()["leftovers"]) == 1
         finally:
             doctor._site_roots = real
+            doctor._script_dirs = real_scripts
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -9902,23 +9933,118 @@ def test_an_interrupted_launcher_is_a_leftover_too():
     try:
         site = root / "Lib" / "site-packages"
         site.mkdir(parents=True)
-        (root / "Lib" / "Scripts").mkdir()
+        (root / "Scripts").mkdir()          # where they really live
         (site / "~erto").mkdir()
-        (root / "Lib" / "Scripts" / "certo.exe.deleteme").write_text("x")
-        (root / "Lib" / "Scripts" / "certo.exe").write_text("x")
+        (root / "Scripts" / "certo.exe.deleteme").write_text("x")
+        (root / "Scripts" / "certo.exe").write_text("x")
 
-        real = doctor._site_roots
+        # BOTH helpers are patched, and the second is the point. The first
+        # version of this test built `Lib/Scripts` because that is where the
+        # code looked -- derived from site-packages by going up one -- and
+        # the launchers live at `<prefix>/Scripts`, one level further up. The
+        # fixture agreed with the bug, so the test passed and the marker was
+        # never found on a real install. `sysconfig` is asked now.
+        real_sites, real_scripts = doctor._site_roots, doctor._script_dirs
         doctor._site_roots = lambda: [site]
+        doctor._script_dirs = lambda: [root / "Scripts"]
         try:
             names = sorted(pathlib.Path(p).name
                            for p in doctor.repair()["leftovers"])
         finally:
-            doctor._site_roots = real
+            doctor._site_roots = real_sites
+            doctor._script_dirs = real_scripts
         assert names == ["certo.exe.deleteme", "~erto"]
         # the orphan launcher itself is NOT ours to remove
-        assert (root / "Lib" / "Scripts" / "certo.exe").exists()
+        assert (root / "Scripts" / "certo.exe").exists()
     finally:
         shutil.rmtree(root, ignore_errors=True)
+
+
+# --- metadata from a source tree is not an install -------------------------
+
+
+def test_metadata_from_a_source_tree_is_not_reported_as_an_install():
+    """The check that exists to catch a stale install hid an absent one.
+
+    `importlib.metadata` searches `sys.path`, and `src/<name>.egg-info` turns
+    up the moment anybody runs `python -m build`. With `PYTHONPATH=src` it
+    answered like a package, so `doctor` said `[ok] 0.11.6, matching the code`
+    on a machine where `pip show certo-math` returned nothing and `import
+    certo` failed. The state it was written to detect is the state it hid.
+    """
+    from certo import doctor
+
+    real = doctor._metadata_source
+    try:
+        doctor._metadata_source = lambda: (
+            "9.9.9", False, pathlib.Path("/somewhere/checkout/src"))
+        ok, detail = doctor._installed_metadata()
+        assert ok is False
+        assert "SOURCE TREE" in detail or "ÁRBOL FUENTE" in detail
+        assert "9.9.9" in detail
+    finally:
+        doctor._metadata_source = real
+
+
+def test_an_installed_version_is_still_compared_against_the_code():
+    """The original question survives: a stale install is a stale install."""
+    from certo import __version__, doctor
+
+    real = doctor._metadata_source
+    try:
+        doctor._metadata_source = lambda: (__version__, True,
+                                           pathlib.Path("/site-packages"))
+        ok, detail = doctor._installed_metadata()
+        assert ok is True and __version__ in detail
+
+        doctor._metadata_source = lambda: ("0.0.1", True,
+                                           pathlib.Path("/site-packages"))
+        ok, detail = doctor._installed_metadata()
+        assert ok is False and "0.0.1" in detail and __version__ in detail
+
+        doctor._metadata_source = lambda: (None, False, None)
+        ok, _detail = doctor._installed_metadata()
+        assert ok is True          # no install at all is normal, not broken
+    finally:
+        doctor._metadata_source = real
+
+
+def test_the_source_of_the_metadata_is_located_not_assumed():
+    """Where it was read from is what separates the three answers, so it is
+    asked of the distribution rather than guessed."""
+    from certo import doctor
+
+    version, installed, where = doctor._metadata_source()
+    assert version is None or isinstance(version, str)
+    if version is not None and where is not None:
+        roots = doctor._site_roots()
+        under = any(where == r or r in where.parents for r in roots)
+        assert installed is under
+
+
+def test_one_implementation_answers_where_the_metadata_came_from():
+    """`cli.installed_version` asked `importlib.metadata` itself, and so
+    inherited the defect `doctor`'s check exists to catch: a source tree's
+    `egg-info` answering like an install. Two implementations of one question
+    is how they came to disagree in the first place."""
+    from certo import cli, doctor
+
+    real = doctor._metadata_source
+    try:
+        doctor._metadata_source = lambda: ("7.7.7", True, pathlib.Path("/sp"))
+        assert cli.installed_version() == "7.7.7"
+
+        # read from a source tree: not an installed version, so it does not
+        # travel -- comparing it against `__version__` would report drift
+        # between a number and itself
+        doctor._metadata_source = lambda: ("7.7.7", False,
+                                           pathlib.Path("/checkout/src"))
+        assert cli.installed_version() is None
+
+        doctor._metadata_source = lambda: (None, False, None)
+        assert cli.installed_version() is None
+    finally:
+        doctor._metadata_source = real
 
 
 if __name__ == "__main__":

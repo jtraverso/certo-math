@@ -1226,6 +1226,7 @@
   "doctor.without.metadata": "un reporte de error nombrará la versión equivocada, y también lo hará cualquier cosa que lea la metadata del paquete en vez de preguntarle a la herramienta",
   "doctor.detail.metadata_ok": "{version}, coincide con el código",
   "doctor.detail.metadata_stale": "la metadata instalada dice {installed} y este código es {running}. Una instalación editable se queda obsoleta sola: vuelve a correr `pip install -e .`",
+  "doctor.detail.metadata_source_tree": "{version} leída de un ÁRBOL FUENTE, no de una instalación: {path}. `importlib.metadata` busca en sys.path, y un `egg-info` que dejó `python -m build` responde como un paquete instalado. `pip show certo-math` es la segunda opinión",
   "doctor.detail.metadata_absent": "no está instalado como paquete ({why}), así que no hay metadata con la que discrepar",
   "status.hollow.lean": "`{name}` enuncia True y nada más, en la línea {line}: compila, no lleva `sorry` y pasa una auditoría de axiomas, así que toda puerta que corra una formalización lo dará por bueno",
   "cli.status.lean_hollow": "{n} enunciado(s) Lean aquí dicen True y nada más. Cada uno compila, no lleva `sorry` y pasa una auditoría de axiomas, así que toda puerta que corra una formalización los da por buenos:",

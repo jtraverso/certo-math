@@ -7,6 +7,53 @@ payload — each such change says so and what still reads the old shape.
 ## [Unreleased]
 
 
+## [0.11.7] — 2026-09-20
+
+**Three defects in the diagnostics, all found by installing 0.11.6 on
+the machine that built it** -- and two of them had a test that agreed
+with the bug.
+
+### `doctor` reported an install that was not there
+
+All three found while installing 0.11.6 on the machine that built it.
+
+**The metadata check hid the state it was written to detect.**
+`importlib.metadata` searches `sys.path`, and a source tree carries
+`src/<name>.egg-info` the moment anybody runs `python -m build`. With
+`PYTHONPATH=src` that egg-info answered like a package, so `doctor` reported
+`metadata [ok] 0.11.6, matching the code` on a machine where `pip show
+certo-math` returned nothing and `import certo` failed.
+
+There are three answers, not two, and the third was being given as the first:
+installed and agreeing, installed and stale, and **not installed at all** --
+which is now told apart by asking the distribution WHERE its metadata was
+read from, and comparing that against the site-packages roots.
+
+**The `.deleteme` marker was never found on a real install.** It derived the
+launcher directory from site-packages by going up one: from
+`<prefix>/Lib/site-packages` that lands on `<prefix>/Lib/Scripts`, which does
+not exist. They live at `<prefix>/Scripts`, and on POSIX the layout differs
+again. `sysconfig` is asked now.
+
+The test did not catch it because the test built its fixture the same wrong
+way -- a test that confirms the bug rather than finding it. And four `--repair`
+tests patched only `_site_roots`, so they read the real machine; one of them
+calls `apply=True` and would have deleted `.deleteme` files out of whoever ran
+the suite. A test that reaches outside its fixture to remove things is worse
+than the bug it guards.
+
+**And the same defect was in a second place.** `cli.installed_version`, which
+drives the drift banner on `certo --version`, asked `importlib.metadata`
+itself -- so it read the source tree's `egg-info` as an install exactly as
+`doctor` did. There is one implementation now: two answers to one question is
+how they came to disagree, which is the failure this guard exists for.
+
+**Third time for the same Windows short-name mismatch.** A resolved child
+compared against an unresolved parent is false whenever `JTRAVE~1` and
+`jtraverso` are the same directory under two spellings. Neither side trusts
+its caller now.
+
+
 ## [0.11.6] — 2026-09-20
 
 **The header contradicted the certificate, a pointer checked nothing,

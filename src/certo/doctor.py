@@ -191,6 +191,34 @@ def _site_roots():
     return out
 
 
+def _script_dirs():
+    """Where the launchers live, ASKED rather than derived.
+
+    The first version of this took site-packages and went up one: from
+    `<prefix>/Lib/site-packages` that lands on `<prefix>/Lib/Scripts`, which
+    does not exist -- the launchers are at `<prefix>/Scripts`, one level
+    further up, and on POSIX the layout differs again. So the `.deleteme`
+    marker was never found on a real install.
+
+    The test did not catch it because the test built the fixture the same
+    wrong way. `sysconfig` knows the answer and every platform's version of
+    it; deriving it was inventing one.
+    """
+    import sysconfig
+
+    out = []
+    for scheme in (None, "nt_user" if os.name == "nt" else "posix_user"):
+        try:
+            path = (sysconfig.get_path("scripts") if scheme is None
+                    else sysconfig.get_path("scripts", scheme))
+            real = Path(path).resolve()
+        except (KeyError, OSError):
+            continue
+        if real.is_dir() and real not in out:
+            out.append(real)
+    return out
+
+
 def leftovers() -> list:
     """The `~`-prefixed directories pip abandons when an install is stopped.
 
@@ -211,20 +239,23 @@ def leftovers() -> list:
     # exactly that pair and could not run `certo doctor` to diagnose it,
     # because the thing to diagnose was the missing package -- so the second
     # marker is looked for here, for the runs where certo does still start.
-    for given in _site_roots():
+    for given in _script_dirs():
+        # RESOLVED HERE, like the roots below and for the same reason: a
+        # comparison between a resolved child and an unresolved parent is
+        # false whenever Windows hands back a short name. This is the third
+        # place that has bitten, so neither side trusts its caller.
         try:
-            scripts = Path(given).resolve().parent / "Scripts"
+            scripts = Path(given).resolve()
         except OSError:
-            scripts = None
-        if scripts is not None and scripts.is_dir():
-            for entry in sorted(scripts.glob("*.deleteme")):
-                try:
-                    real = entry.resolve()
-                except OSError:
-                    continue
-                if real.parent == scripts and real not in seen:
-                    seen.add(real)
-                    out.append(real)
+            continue
+        for entry in sorted(scripts.glob("*.deleteme")):
+            try:
+                real = entry.resolve()
+            except OSError:
+                continue
+            if real.parent == scripts and real not in seen:
+                seen.add(real)
+                out.append(real)
     for given in _site_roots():
         # RESOLVED HERE rather than trusted from the caller. Windows hands out
         # 8.3 short names -- `C:\Users\JTRAVE~1\...` for `C:\Users\jtraverso`
@@ -336,34 +367,82 @@ def _partial_install():
 DISTRIBUTION = "certo-math"
 
 
+def _metadata_source():
+    """The distribution's metadata, and WHERE it was read from.
+
+    `importlib.metadata` searches `sys.path`, and a source tree carries
+    `src/<name>.egg-info` the moment anybody runs `python -m build`. With
+    `PYTHONPATH=src` that egg-info is found first and answers as though it
+    were an install -- so this check, which exists to catch an install that
+    has gone stale, reported `[ok] matching the code` on a machine where the
+    package was ABSENT and `pip show` returned nothing. The state it was
+    written to detect is the state it hid.
+
+    So the question is not only "what version does the metadata say" but
+    "is that metadata an INSTALL". Anything outside a site-packages root is
+    not one.
+
+    Returns `(version, installed, path)`; `version` is None when nothing was
+    found at all.
+    """
+    try:
+        from importlib.metadata import PackageNotFoundError, distribution
+    except ImportError:
+        # No metadata machinery at all: nothing to disagree with, which is
+        # the quiet branch and not a failure. The import was outside the
+        # guard for one commit and an interpreter without it crashed here.
+        return None, False, None
+
+    dist = None
+    for name in (DISTRIBUTION, "certo"):
+        # Installs made before the distribution was renamed still carry the
+        # old name. Without this the check would find nothing, take the quiet
+        # branch, and stop working -- a guard that goes silent is worse than
+        # one that was never written.
+        try:
+            dist = distribution(name)
+            break
+        except PackageNotFoundError:
+            continue
+        except Exception:  # noqa: BLE001  -- a broken .dist-info
+            continue
+    if dist is None:
+        return None, False, None
+
+    try:
+        where = Path(str(dist.locate_file(""))).resolve()
+    except (OSError, AttributeError):
+        return dist.version, True, None
+
+    roots = _site_roots()
+    installed = any(where == r or r in where.parents for r in roots)
+    return dist.version, installed, where
+
+
 def _installed_metadata():
-    """Does `pip show certo` agree with the code that is running?
+    """Does `pip show certo-math` agree with the code that is running?
 
     They are declared once now, so they cannot be WRITTEN apart -- but an
     editable install goes stale on its own the moment the version moves, and
     a user found ours reporting 0.6.0 while the tool reported 0.9.0. A
     disagreement here is not a broken install; it is a stale one, and saying
     which is the whole value of the check.
+
+    And a version that came from a source tree is not an install at all,
+    which is a third answer this used to give as the first.
     """
     from . import __version__
 
-    try:
-        from importlib.metadata import version
-
-        installed = version(DISTRIBUTION)
-    except Exception:  # noqa: BLE001
-        try:
-            # Installs made before the distribution was renamed still carry
-            # the old name. Without this the check would find nothing, take
-            # the quiet branch, and stop working -- a guard that goes silent
-            # is worse than one that was never written.
-            installed = version("certo")
-        except Exception as e:  # noqa: BLE001
-            return True, t("doctor.detail.metadata_absent",
-                           why=type(e).__name__)
-    if installed == __version__:
-        return True, t("doctor.detail.metadata_ok", version=installed)
-    return False, t("doctor.detail.metadata_stale", installed=installed,
+    version, installed, where = _metadata_source()
+    if version is None:
+        return True, t("doctor.detail.metadata_absent",
+                       why="PackageNotFoundError")
+    if not installed:
+        return False, t("doctor.detail.metadata_source_tree",
+                        version=version, path=str(where or "?"))
+    if version == __version__:
+        return True, t("doctor.detail.metadata_ok", version=version)
+    return False, t("doctor.detail.metadata_stale", installed=version,
                     running=__version__)
 
 

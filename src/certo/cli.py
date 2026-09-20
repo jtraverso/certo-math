@@ -2479,20 +2479,20 @@ def installed_version():
     would then make the CLI report the OLD number confidently, which is worse
     than reporting a disagreement.
     """
-    from importlib.metadata import PackageNotFoundError, version
+    # ONE implementation, in `doctor`. This used to ask
+    # `importlib.metadata` itself, and so inherited the defect that module's
+    # check was written to catch: `importlib.metadata` searches `sys.path`,
+    # and `src/<name>.egg-info` answers like an install the moment anybody
+    # runs `python -m build`. Two implementations of one question is how they
+    # came to disagree, which is the failure this whole guard exists for.
+    #
+    # A version read from a source tree is not an installed version, so it
+    # does not travel: comparing it against `__version__` would report drift
+    # between a number and itself.
+    from .doctor import _metadata_source
 
-    from .doctor import DISTRIBUTION
-
-    # Only PackageNotFoundError is swallowed. A blanket `except Exception`
-    # here hid a NameError for one commit and took the drift warning with it
-    # -- the same "guard goes quiet" this check exists to prevent, introduced
-    # while fixing it.
-    for name in (DISTRIBUTION, "certo"):    # the second: an older install
-        try:
-            return version(name)
-        except PackageNotFoundError:
-            continue
-    return None
+    found, installed, _where = _metadata_source()
+    return found if installed else None
 
 
 def main(argv=None) -> int:

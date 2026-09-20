@@ -1226,6 +1226,7 @@
   "doctor.without.metadata": "a bug report will name the wrong version, and so will anything that reads the packaging metadata rather than asking the tool",
   "doctor.detail.metadata_ok": "{version}, matching the code",
   "doctor.detail.metadata_stale": "installed metadata says {installed}, this code is {running}. An editable install goes stale on its own: re-run `pip install -e .`",
+  "doctor.detail.metadata_source_tree": "{version} read from a SOURCE TREE, not an install: {path}. `importlib.metadata` searches sys.path, and an `egg-info` left by `python -m build` answers like a package that is installed. `pip show certo-math` is the second opinion",
   "doctor.detail.metadata_absent": "not installed as a package ({why}), so there is no metadata to disagree",
   "status.hollow.lean": "`{name}` states True and nothing else, at line {line}: it compiles, carries no `sorry`, and passes an axiom audit, so every gate a formalisation runs will call it green",
   "cli.status.lean_hollow": "{n} Lean statement(s) here state True and nothing else. Each one compiles, carries no `sorry`, and passes an axiom audit, so every gate a formalisation runs calls it green:",
