@@ -122,6 +122,65 @@ existiera verifica exactamente igual, y el esquema sigue en 4. Se deriva al
 construir el certificado y `verify` lo **recalcula** — edítalo y el certificado
 se rechaza, como cualquier otro número de aquí.
 
+## Un puntero no es una comprobación
+
+`verify` toma **un certificado y ningún sistema de ficheros**. Es deliberado
+—un artefacto que hay que comprobar teniendo el directorio delante es un
+artefacto que nadie comprueba— y tiene una consecuencia que conviene decir
+claramente: **una ruta o un digest guardados son un campo que nada puede
+recalcular jamás.**
+
+`lean_binding` tenía uno. Dice *esto es lo que asumió AQUEL certificado, y esta
+declaración de Lean lo provee*, y lo que ataba los dos era la cadena
+`"certificate": "out/counting_bound.json"`:
+
+```
+honesto : VALID | certificate = out/counting_bound.json
+forjado : VALID | certificate = out/un_fichero_que_no_existe.json
+```
+
+Mismo veredicto, un fichero que no está, un tipo que nunca fue. La implicación
+se re-preguntaba correctamente desde las fórmulas del payload; era el *eslabón*
+lo que nadie comprobaba.
+
+Ahora el certificado viaja dentro del binding. `verify` re-comprueba el eslabón
+sin disco: la fuente incrustada tiene que verificar por sí misma, ser del tipo
+que se afirma, y llevar la procedencia del spec cuyo hash el binding registró.
+La garantía es **exactamente la del verificador interno, ni más**: manipular el
+`core_smt2` de un `unsat_core` se atrapa, manipular un campo que `unsat_core`
+no mira, no.
+
+Ese mismo razonamiento es por qué las relaciones del manifiesto se **calculan
+del contenido** en vez de declararse. Un digest guardado en el padre habría
+sido este defecto añadido a propósito.
+
+## El Lean que certo emite se comprueba antes de salir
+
+*¿Se puede certificar que el Lean generado es sintácticamente válido, sin
+construirlo?* No como se pregunta, y la razón vale la pena: **la gramática de
+Lean 4 es extensible, así que lo que parsea depende de lo que importes.**
+`!![1, 2; 3, 4]` sin `Mathlib.LinearAlgebra.Matrix.Notation` falla con
+`unexpected token ';'` —un error de *parseo* causado por un import ausente—. No
+existe una noción de «Lean sintácticamente válido» independiente de los
+imports, y `lean` no tiene modo solo-parseo: parsea y elabora juntos.
+
+Lo que sí es decidible sin toolchain es más estrecho y útil: los invariantes
+que la propia emisión de certo debe cumplir. `check_emission` los comprueba en
+milisegundos —namespaces balanceados, toda declaración alcanzando su `:=`, un
+`/--` adosado a una declaración, `sorry` presente exactamente cuando el
+encabezado lo dice, imports coincidiendo con lo que el exportador declara—.
+
+Medido contra el único exportador que tuvo bugs: añadir el de Smith costó
+cuatro vueltas contra un Mathlib real y produjo cinco fallos de emisión. Estas
+reglas atrapan tres. Los otros dos eran una ruta de módulo que se había mudado
+y un import ausente, y eso no lo sabe nadie sin Mathlib en disco.
+
+Esa proporción es el argumento. `tests/run_lean.py` no puede ser puerta de
+release —minutos por fichero, dependencia de toolchain, y fallos que no dicen
+nada sobre si la matemática de certo es correcta— así que nada comprobaba una
+emisión entre una de esas corridas y una publicación. Esto sí, para cada
+exportador registrado, en cada corrida de la suite.
+
 ## Los avisos son parte del artefacto
 
 Un certificado lleva lo que *no* establece, y `verify` lo repite cada vez —meses

@@ -242,7 +242,7 @@ def loads_from_dual(cert) -> dict:
     return {n: v for n, v in zip(names, dual) if str(v) not in ("0", "0.0")}
 
 
-def gap(spec, limits=None):
+def gap(spec, limits=None, target=None):
     """The integrality gap, with BOTH sides certified.
 
     `nu` against `mu*` is the question a packing is usually asked, and it used
@@ -258,7 +258,21 @@ def gap(spec, limits=None):
     from .certificate import gap_certificate
     from .engines import lp, mixed
 
-    frac = lp.opt(spec.to_lp(), limits)
+    # BOTH HALVES ARE BUILT HERE, and that symmetry is the fix for a defect
+    # that reported the strongest possible conclusion in this domain -- a
+    # gap of zero -- from a flag combination.
+    #
+    # The integral half was already constructed explicitly. The fractional
+    # half was inherited from the spec, so a `PackingSpec(integer=True)` gave
+    # `mu` = the INTEGER optimum, compared against itself: `gap 0` where the
+    # gap is 3/2, on a run of seven orders that all came back zero. `--gap`
+    # asks for the relaxation against the integer optimum whatever the spec
+    # says it is, so it builds the relaxation.
+    relaxed = PackingSpec(items=spec.items, capacities=spec.capacities,
+                          sense=spec.sense, integer=False, title=spec.title,
+                          loads=spec.loads)
+    overrode = bool(spec.integer)
+    frac = lp.opt(relaxed.to_lp(), limits)
     if frac.verdict is not Verdict.SATISFIABLE or not frac.meta.get("exact"):
         return None, frac
 
@@ -285,5 +299,32 @@ def gap(spec, limits=None):
     # something nobody meant.
     return cert, {"mu": exact.serialize(mu), "nu": exact.serialize(nu),
                   "gap": exact.serialize(mu - nu),
+                  # The same key `opt` uses for the same number, so one script
+                  # reads both. It was only reachable at
+                  # `certificate.payload.fractional.payload.objective`, which
+                  # is not a path anybody deduces without the source.
+                  "objective": exact.serialize(mu),
+                  # Said rather than done silently: the spec declared itself
+                  # integer and the fractional half ignored that, because that
+                  # is what a gap IS.
+                  "relaxed_for_gap": overrode,
                   "integral_level": integral.meta.get("level"),
-                  "tight": len(cert.payload["tight"])}
+                  "tight": len(cert.payload["tight"]),
+                  # `--target` used to be dropped on this path: the flag was
+                  # accepted, the number never compared, and the verdict came
+                  # back SATISFIABLE either way. A flag that is silently
+                  # ignored is worse than one that is refused.
+                  #
+                  # It compares against `nu`, the integer value ACHIEVED,
+                  # because that is what a packing target asks about. So
+                  # `reached` true means a point was exhibited; false means
+                  # not by what was found -- which is only a refutation when
+                  # the integer optimum is global, and the caller is told
+                  # which of the two it has.
+                  "target": None if target is None else exact.serialize(
+                      exact.to_fraction(target)),
+                  "reached": (None if target is None
+                              else nu >= exact.to_fraction(target)),
+                  "deficit": (None if target is None else exact.serialize(
+                      max(exact.to_fraction(target) - nu,
+                          exact.to_fraction(0))))}

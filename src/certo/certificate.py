@@ -2493,6 +2493,37 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
          t("verify.bind.covers" if got["covers"] else "verify.bind.gap",
            name=p["discharges"], decl=p["declaration"] or "-")),
     ]
+    # The certificate this binding is ABOUT, when it travelled. Without it the
+    # payload named a path and nothing else: a binding pointing at a file that
+    # does not exist, of a kind it never was, verified exactly like an honest
+    # one. Optional, so a binding written before this carries one check fewer
+    # rather than failing.
+    src = p.get("source")
+    if isinstance(src, dict):
+        try:
+            inner = Certificate.from_dict(src)
+            sub = verify(inner, limits)
+        except (KeyError, TypeError, ValueError):
+            inner, sub = None, None
+        # The key is `spec_sha256`, which is what a certificate's provenance
+        # calls it -- `binding` normalises it to `sha256` on the way in, and
+        # reading the normalised name here found nothing and failed the
+        # honest case. A check that rejects the truthful artefact is worse
+        # than no check: it teaches people to ignore the one that fires.
+        prov = (src.get("provenance") or {})
+        recorded = p.get("spec") or {}
+        agrees = (
+            inner is not None and sub is not None and sub.ok
+            and src.get("kind") == p.get("certificate_kind")
+            and (not recorded.get("sha256_then")
+                 or prov.get("spec_sha256") == recorded["sha256_then"])
+        )
+        checks.append((
+            t("verify.bind.source"), bool(agrees),
+            t("verify.bind.source_detail",
+              kind=str(src.get("kind")), digest=(inner.digest() if inner
+                                                 else "-"))))
+
     warnings = [t("verify.bind.bridge", decl=p["declaration"] or "-")]
     if p["spec"].get("stale"):
         warnings.append(t("verify.bind.stale", path=p["spec"]["path"]))

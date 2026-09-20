@@ -7,6 +7,173 @@ payload — each such change says so and what still reads the old shape.
 ## [Unreleased]
 
 
+## [0.11.6] — 2026-09-20
+
+**The header contradicted the certificate, a pointer checked nothing,
+and an install could not be repaired by the tool that diagnosed it.**
+Every item came from somebody running certo on their own problem.
+
+### The header contradicted the certificate
+
+A user put it exactly right: *in a tool whose thesis is "do not trust the
+header, trust the certificate", the header being the thing that misleads is
+the most expensive failure available.* Three instances, all on the surface,
+none in the engine.
+
+**`--gap` reported ZERO when the gap was 3/2.** The integral half of a gap was
+built explicitly; the fractional half was inherited from the spec. So a
+`PackingSpec(integer=True)` compared the integer optimum against itself:
+
+```
+integer=True   ->  mu=1     nu=1  gap=0      | payload.objective=5/2
+integer=False  ->  mu=5/2   nu=1  gap=3/2    | payload.objective=5/2
+```
+
+A gap of zero is the strongest possible conclusion in this domain, and it came
+out of a flag combination; it contaminated a user's first full sweep, seven
+orders, all "gap 0". Both halves are constructed here now, which is what a gap
+IS, and `relaxed_for_gap` says the spec's own flag was overridden rather than
+doing it quietly.
+
+**`--gap --target` accepted the flag and never compared the number.** The
+verdict came back `SATISFIABLE` either way. It compares against `nu` now and
+reports `reached` and `deficit` -- and the verdict distinguishes the two cases
+that matter: not reaching a target REFUTES only when the integer optimum is
+global. Below that, `nu` is a point somebody found, and "we did not get there"
+is not "it cannot be got to". `mixed` gained the same `reached`, so a script
+stops inferring a boolean from a verdict or parsing it out of prose.
+
+**The optimum was only reachable at
+`certificate.payload.fractional.payload.objective`.** Not a path anybody
+deduces without reading the source. The gap path reports `objective` under the
+same name `opt` uses for the same number.
+
+### `certo what <command>`
+
+It read like the obvious thing to type and was `unrecognized arguments: opt`.
+Naming one now asks the same question about one command.
+
+### An interrupted launcher is a leftover too
+
+pip leaves two markers, and `--repair` knew one. `~`-something is a rename it
+did not finish; `something.deleteme` is a launcher it could not replace, left
+beside an orphaned `.exe` whose package is gone -- which is the state a user
+was in when `certo doctor` was precisely the thing they could not run. The
+second marker is detected for the runs where certo does still start. The
+orphan `.exe` itself is not removed: it is not pip's marker, and guessing
+there would be worse than the problem.
+
+### A binding named a certificate and checked nothing about it
+
+`lean_binding` says *this is what THAT certificate assumed, and this Lean
+declaration provides it*. The entailment was re-asked from the formulas in the
+payload, correctly. What tied the binding to the certificate it is about was
+the string `"certificate": "out/counting_bound.json"` -- a PATH, and nothing
+recomputed it:
+
+```
+honest  : VALID | certificate = out/counting_bound.json
+forged  : VALID | certificate = out/a_file_that_does_not_exist.json
+```
+
+Same verdict, a file that is not there, and a `certificate_kind` it never was.
+
+The certificate travels now. `verify` re-checks the link without a disk: the
+embedded source has to verify on its own terms, its kind has to be the one
+claimed, and its provenance has to be the spec whose hash the binding
+recorded. Optional, so a binding written before this carries one check fewer
+rather than failing, and the schema stays at 4.
+
+The guarantee is exactly as strong as the inner verifier and no stronger --
+tampering with the core's `core_smt2` is caught, tampering with a field that
+`unsat_core` does not check is not. That is worth saying rather than implying
+a seal.
+
+`status` learned the edge too, so the certificate a binding is about stops
+reading as an unconsumed result sitting beside it.
+
+### The manifest derives the relation nobody declared
+
+A user with 72 cone certificates and 72 Smith certificates asked for
+dependencies between certificates: `status` reported the matrix ones as having
+no consumers, though they justify the cones' regularity.
+
+The obvious answer is a stored reference -- a digest in the parent. It is the
+wrong one, and worth writing down why: `verify` takes one certificate and no
+filesystem, so a stored digest is a field nothing can ever check. It would
+have been the same defect as the binding above, added deliberately.
+
+So the relation is COMPUTED FROM CONTENT. A cone declares a lattice; a Smith
+certificate is about a matrix; the edge is a fingerprint match, on the same
+Horner recipe used to cross a language boundary. Neither certificate mentions
+the other, there is nothing to forge, and two people who produced the set
+independently get the same edges.
+
+What an edge is NOT, and the manifest says so: a dependency. A cone's
+regularity is established by its own `multiplicity == 1`, computed and checked
+by its own verifier. A Smith certificate over the same lattice corroborates it
+and does not carry it. Reading the arrow as a premise would turn a
+corroboration into one, which is the substitution this project exists to
+refuse.
+
+### `certo doctor --repair`
+
+`doctor` has diagnosed the interrupted install correctly for releases -- pip
+renames what it is replacing to `~`-something, and a held-open `certo-mcp.exe`
+stops it between the rename and the cleanup, leaving the package present twice
+under two names. It said so and stopped there. It hit again during the 0.11.5
+release, which is about the eighth time.
+
+`--repair` lists what was left behind. `--repair --apply` removes it. Preview
+is the default and applying is a second decision, because the target is inside
+site-packages: a wrong guess there breaks an environment rather than a file.
+
+It touches only entries whose name begins with `~`, directly inside a
+site-packages root, that resolve back inside it -- pip's own marker for a
+rename it did not finish, and nothing else. It does NOT reinstall: running pip
+from inside the tool would hide which of the two failed, and the reason the
+install broke is usually still running, so `--repair` names what is holding
+certo's scripts before listing anything.
+
+Two bugs fell out of writing it. The old probe counted the same leftover twice,
+because `site.getsitepackages()` returns overlapping roots -- it reported ten
+where there were five. And the first version of the new one compared a
+resolved path against an unresolved root, so on Windows, where `JTRAVE~1` and
+`jtraverso` are the same directory under two spellings, every entry looked
+like it pointed out of the tree and the repair found nothing at all.
+
+### A structural check on the Lean certo emits
+
+*Could we certify that the Lean is syntactically valid, without building it?*
+Not as asked, and the reason is worth writing down: Lean 4's grammar is
+EXTENSIBLE, so what parses depends on what is imported. `!![1, 2; 3, 4]`
+without `Mathlib.LinearAlgebra.Matrix.Notation` fails with `unexpected token
+';'` -- a parse error caused by a missing import. There is no
+import-independent notion of "syntactically valid Lean", and `lean` has no
+parse-only mode.
+
+What is decidable without a toolchain is narrower and useful: the invariants
+certo's own emission must satisfy. `check_emission` checks them in
+milliseconds -- balanced namespaces, every declaration reaching its `:=`, a
+`/--` attached to a declaration, `sorry` present exactly when the header says
+so, imports matching what the exporter declares.
+
+Measured against the only exporter that ever had bugs: adding the Smith one
+took four rounds against a real Mathlib and produced five emission faults.
+These rules catch three -- the missing `:=`, the orphaned `/--`, the unclosed
+namespace. The other two were a module path that had moved and an absent
+import, and nothing without Mathlib on disk can know either.
+
+That is the point of it. `tests/run_lean.py` cannot be a release gate -- its
+own docstring says so, and it is run by hand by whoever touches an exporter --
+so nothing checked an emission between one of those runs and a release. This
+does, for every registered exporter, on every suite run.
+
+The first version searched text it had already blanked, so the docstring rule
+never fired: a rule that consumes its own input, which is how a linter comes
+to be trusted for something it is not doing.
+
+
 ## [0.11.5] — 2026-09-19
 
 **Four asks from someone formalising toric charts, and three defects the work

@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 from fractions import Fraction
@@ -518,3 +519,132 @@ EXPORTERS = {
     # whole argument for the gate.
     "integer_matrix": smith_to_lean,
 }
+
+
+# ---------------------------------------------------------------------------
+# is what we just wrote WELL FORMED? -- the gate that compiling cannot be
+# ---------------------------------------------------------------------------
+
+#: The keywords that open a declaration. Anything between one of these and the
+#: next must reach a `:=`, `where` or a `by` block, or Lean stops at a token it
+#: cannot place -- usually several lines below the mistake.
+_DECL = re.compile(r"^\s*(theorem|lemma|example|def|instance|abbrev)\b")
+
+
+def check_emission(text: str, kind: str = "") -> list:
+    """Structural faults in Lean certo just wrote. No Lean, no Mathlib.
+
+    NOT A SYNTAX CHECKER, and the distinction is the whole design. Lean 4's
+    grammar is EXTENSIBLE, so what parses depends on what is imported:
+    `!![1, 2; 3, 4]` without `Mathlib.LinearAlgebra.Matrix.Notation` fails with
+    `unexpected token ';'` -- a PARSE error caused by a missing import. There
+    is no import-independent notion of "syntactically valid Lean", and `lean`
+    has no parse-only mode: it parses and elaborates together.
+
+    So this checks something narrower and actually decidable here: the
+    invariants certo's own emission must satisfy. It is the step that was
+    missing between writing the text and `tests/run_lean.py`, which cannot be
+    a release gate -- minutes per file, a toolchain dependency, and failures
+    that say nothing about whether certo's mathematics is right.
+
+    MEASURED AGAINST THE ONE EXPORTER THAT HAD BUGS. Adding the Smith exporter
+    took four rounds against a real Mathlib and produced five emission faults.
+    These rules catch three of them -- the missing `:=`, the orphaned `/--`,
+    the unclosed namespace -- in milliseconds. The other two were a module
+    path that had moved and an absent import, and nothing without Mathlib on
+    disk can know either. That ratio is the honest claim.
+
+    Findings are `(line, code, detail)`. Line 0 means the file as a whole.
+    """
+    stripped, lines = _without_block_comments(text)
+    out = []
+
+    opens = sum(1 for ln in lines if ln.strip().startswith("namespace "))
+    closes = sum(1 for ln in lines if ln.strip().startswith("end"))
+    if opens != closes:
+        out.append((0, "namespace", "{} opened, {} closed".format(opens,
+                                                                 closes)))
+
+    # A declaration and everything up to the next one: the `:=` may be on a
+    # later line, and rejecting a multi-line statement would be a linter that
+    # cries wolf.
+    starts = [i for i, ln in enumerate(stripped) if _DECL.match(ln)]
+    for n, i in enumerate(starts):
+        end = starts[n + 1] if n + 1 < len(starts) else len(stripped)
+        block = "\n".join(stripped[i:end])
+        if ":=" not in block and " where" not in block:
+            out.append((i + 1, "unclosed_declaration",
+                        lines[i].strip()[:60]))
+
+    # `/-- ... -/` documents the NEXT declaration. Attached to nothing, Lean
+    # complains at whatever command comes after -- four lines away, in the
+    # case that prompted this.
+    # Found on the ORIGINAL lines: `/--` begins with `/-`, so the blanking
+    # above erases exactly what this rule looks for. The first version of this
+    # check searched the blanked text and therefore never fired -- a rule that
+    # consumes its own input, which is the failure mode of a linter nobody
+    # then trusts.
+    for i, ln in enumerate(lines):
+        if not ln.strip().startswith("/--"):
+            continue
+        j = i
+        while j < len(lines) and "-/" not in lines[j]:
+            j += 1
+        k = j + 1
+        while k < len(stripped) and not stripped[k].strip():
+            k += 1
+        if k >= len(stripped) or not _DECL.match(stripped[k]):
+            out.append((i + 1, "orphan_docstring", ln.strip()[:60]))
+
+    if text.count("/-") != text.count("-/"):
+        out.append((0, "unbalanced_comment",
+                    "{} opened, {} closed".format(text.count("/-"),
+                                                  text.count("-/"))))
+
+    # The header either promises to list placeholders or states there are
+    # none. Saying one and doing the other is how a file gets read as
+    # complete when it is not -- and as incomplete when it is.
+    body = text.split("-/", 1)[1] if "-/" in text else text
+    promises = "marks a place where something outside Lean" in text
+    if "sorry" in body and not promises:
+        out.append((0, "unannounced_sorry", "a placeholder the header denies"))
+    if promises and "sorry" not in body:
+        out.append((0, "promised_sorry", "a promise the file does not keep"))
+
+    # Not that the modules EXIST -- that needs Mathlib on disk -- but that the
+    # header is the one this exporter declares. A hand-edited import is
+    # otherwise invisible until somebody builds.
+    want = IMPORTS.get(kind)
+    if want is not None:
+        got = [ln.strip()[len("import "):] for ln in lines
+               if ln.strip().startswith("import ")]
+        if sorted(got) != sorted(want):
+            out.append((0, "imports",
+                        "declared {} | emitted {}".format(
+                            ", ".join(sorted(want)), ", ".join(sorted(got)))))
+    return sorted(out)
+
+
+def _without_block_comments(text: str):
+    """The text with `/- -/` blanked, and the original lines beside it.
+
+    Blanked rather than deleted so a finding's line number is the line the
+    author would look at. A checker that reports the right problem at the
+    wrong line is the thing it was written to replace.
+    """
+    lines = text.splitlines()
+    out, depth = [], 0
+    for ln in lines:
+        kept, i = [], 0
+        while i < len(ln):
+            if ln.startswith("/-", i):
+                depth += 1
+                i += 2
+            elif ln.startswith("-/", i):
+                depth = max(0, depth - 1)
+                i += 2
+            else:
+                kept.append(" " if depth else ln[i])
+                i += 1
+        out.append("".join(kept))
+    return out, lines

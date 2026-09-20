@@ -218,6 +218,9 @@ def mixed(spec, limits: Limits | None = None, spec_path: str = "",
               "discrete_gain": exact.serialize(discrete_gain),
               "bound": None if bound is None else exact.serialize(bound),
               "target": None if want is None else exact.serialize(want),
+              # The verdict already said this; a script should not have to
+              # infer a boolean from a verdict, nor parse it out of `detail`.
+              "reached": None if want is None else bool(meets),
               "deficit": None if deficit is None else exact.serialize(deficit),
               "globally_optimal": globally_optimal,
               "selected": sorted(k for k, v in assignment.items() if v),

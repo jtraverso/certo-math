@@ -55,6 +55,10 @@ CHILDREN = {
     "sweep_range": lambda p: [e.get("cert") for e in p.get("entries", [])],
     "bisect": lambda p: [p.get("good_cert"), p.get("bad_cert")],
     "core_matrix": lambda p: list((p.get("cores") or {}).values()),
+    # A binding is ABOUT a certificate, and used to name it by path. The
+    # source travels now, so the thing it is about stops reading as an
+    # unconsumed result sitting beside it.
+    "lean_binding": lambda p: [p.get("source")],
 }
 
 
@@ -363,7 +367,8 @@ def manifest(where=".", expect=None) -> dict:
         except (KeyError, TypeError):
             continue
         rows.append({"rel": _rel(f, root), "kind": data["kind"],
-                     "headline": _headline(data), "digest": cert.digest()})
+                     "headline": _headline(data), "digest": cert.digest(),
+                     "payload": data.get("payload") or {}})
 
     rows.sort(key=lambda r: (r["digest"], r["rel"]))
 
@@ -392,6 +397,7 @@ def manifest(where=".", expect=None) -> dict:
         "duplicate_subjects": same_subject,
         "fingerprint": interchange.fingerprint(print_rows) if print_rows else 0,
         "fingerprint_recipe": interchange.describe(),
+        "edges": edges(rows),
     }
     if expect is not None:
         have = {r["headline"] for r in rows}
@@ -401,3 +407,80 @@ def manifest(where=".", expect=None) -> dict:
         out["unexpected"] = sorted(have - want)
         out["complete"] = not out["missing"] and not out["unexpected"]
     return out
+
+
+#: Matrices a certificate is ABOUT, and matrices it USES. An edge between two
+#: certificates is a match between the two, and it is DERIVED FROM CONTENT
+#: rather than declared by either side.
+#:
+#: That distinction is the whole design. A stored pointer -- a path, a digest
+#: -- is a field nothing recomputes, and `verify` takes one certificate and no
+#: filesystem, so nothing could ever check it. `lean_binding` carried exactly
+#: such a pointer and a binding naming a file that does not exist verified
+#: like an honest one. Here there is nothing to forge: the relation is
+#: recomputed from the numbers both certificates already carry, and two people
+#: who produced the set independently get the same edges.
+#:
+#: The fingerprint is the one already used to cross a language boundary --
+#: Horner, base 1000003, modulus 2^61-1, non-negative residue -- so an edge is
+#: a comparison a referee can redo with a calculator.
+MATRIX_ROLE = {
+    "integer_matrix": ("about", lambda p: [p.get("matrix")]),
+    # A cone's multiplicity is a statement about its DECLARED lattice, and a
+    # Smith certificate over that same lattice is what says the lattice is
+    # unimodular. Neither mentions the other, and the relation is real.
+    "toric_cone": ("uses", lambda p: [p.get("lattice")]),
+}
+
+
+def _matrix_fingerprints(kind: str, payload: dict):
+    """(role, fingerprints) for a certificate, or (None, []) if it has none."""
+    from . import interchange
+
+    entry = MATRIX_ROLE.get(kind)
+    if entry is None:
+        return None, []
+    role, pick = entry
+    out = []
+    for m in pick(payload) or []:
+        if not m or not isinstance(m, list):
+            continue
+        try:
+            out.append(interchange.fingerprint(m))
+        except Exception:  # noqa: BLE001  -- not a matrix of integers
+            continue
+    return role, out
+
+
+def edges(rows) -> list:
+    """Which certificate in the set justifies which, computed from content.
+
+    `rows` are `{digest, kind, headline, payload}`. An edge runs from the
+    certificate that USES a matrix to the one that is ABOUT it.
+
+    WHAT AN EDGE IS NOT: a proof that the user NEEDS the subject. A cone's
+    regularity is established by its own `multiplicity == 1`, computed and
+    checked by its own verifier; a Smith certificate over the same lattice
+    CORROBORATES it and does not carry it. Reading the arrow as a dependency
+    would turn a corroboration into a premise, which is the substitution this
+    project exists to refuse. It says: these two are about the same matrix.
+    """
+    about, uses = {}, []
+    for r in rows:
+        role, prints = _matrix_fingerprints(r["kind"], r.get("payload") or {})
+        if role == "about":
+            for f in prints:
+                about.setdefault(f, []).append(r)
+        elif role == "uses":
+            for f in prints:
+                uses.append((f, r))
+
+    out = []
+    for f, user in sorted(uses, key=lambda x: x[1]["digest"]):
+        for subject in about.get(f, []):
+            out.append({
+                "from": user["digest"], "from_kind": user["kind"],
+                "to": subject["digest"], "to_kind": subject["kind"],
+                "via": "matrix fingerprint", "fingerprint": str(f),
+            })
+    return sorted(out, key=lambda e: (e["from"], e["to"]))

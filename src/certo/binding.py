@@ -101,6 +101,16 @@ def certify(spec, limits=None, root=".") -> dict:
     return {
         "certificate": str(getattr(spec, "certificate", "")),
         "certificate_kind": cert.get("kind"),
+        # THE CERTIFICATE ITSELF, not a path to it. A binding says "this is
+        # what THAT certificate assumed", and the path was the only thing
+        # tying the two -- so a binding naming a file that does not exist, of
+        # a kind it never was, verified exactly like an honest one. Embedded,
+        # the link is re-checkable without a disk: the source has to verify on
+        # its own terms and its provenance has to be the one recorded below.
+        #
+        # Optional, which the frozen schema allows: a binding written before
+        # this verifies as it always did, with one check fewer.
+        "source": cert,
         "declaration": str(getattr(spec, "declaration", "") or ""),
         "discharges": name,
         "needed_smt2": _smt2(needed),

@@ -471,6 +471,30 @@ def cmd_ask(args):
 
 def cmd_commands(args):
     """Which command answers which question, in the terminal."""
+    name = getattr(args, "name", None)
+    if name:
+        from .catalogue import rows
+
+        row = next((r for r in rows() if r["command"] == name
+                    or name in (r["aliases"] or [])), None)
+        if row is None:
+            print(t("cli.commands.no_such", name=name,
+                    known=", ".join(sorted(r["command"] for r in rows()))[:200]),
+                  file=sys.stderr)
+            return 3
+        if args.json:
+            print(json.dumps(row, indent=2, ensure_ascii=False))
+        else:
+            for key in ("command", "aliases", "spec", "engine", "kind",
+                        "tier"):
+                value = row.get(key)
+                print("  {:<12} {}".format(
+                    key, ", ".join(value) if isinstance(value, list)
+                    else ("-" if value is None else value)))
+            if row.get("help"):
+                print("  " + row["help"].strip().splitlines()[0])
+        return 0
+
     if getattr(args, "table", False):
         # The one table the documents are checked against. A flag rather than
         # a command: the surface is the thing this project has to keep small,
@@ -628,9 +652,47 @@ def cmd_bounds(args):
     return rc
 
 
+def _repair(args, doctor):
+    """What an interrupted install left behind, and only then its removal.
+
+    Preview is the default and `--apply` is a second decision, because what is
+    being removed lives in site-packages: a wrong guess there breaks an
+    environment rather than a file.
+    """
+    rep = doctor.repair(apply=args.apply)
+    if args.json:
+        print(json.dumps(rep, indent=2, ensure_ascii=False))
+        return 0 if not rep["failed"] else 1
+
+    if rep["held_open"]:
+        # The CAUSE, before the symptom: removing the leftovers while the
+        # holder is running produces new ones on the next install.
+        print("  !! " + t("cli.repair.held",
+                          names=", ".join(rep["held_open"])))
+    if not rep["leftovers"]:
+        print("  " + t("cli.repair.clean"))
+        return 0
+
+    print("  " + t("cli.repair.found", n=len(rep["leftovers"])))
+    for path in rep["leftovers"]:
+        print("    " + path)
+    if not rep["applied"]:
+        print("  " + t("cli.repair.preview"))
+        return 0
+    if rep["removed"]:
+        print("  " + t("cli.repair.removed", n=len(rep["removed"])))
+    for bad in rep["failed"]:
+        print("  [XX] " + t("cli.repair.failed", path=bad["path"],
+                            why=bad["why"]))
+    return 1 if rep["failed"] else 0
+
+
 def cmd_doctor(args):
     """What this install can do, and what each gap actually costs."""
     from . import doctor
+
+    if getattr(args, "repair", False):
+        return _repair(args, doctor)
 
     rep = doctor.report()
     if args.json:
@@ -1134,10 +1196,19 @@ def _opt_gap(args, packing):
     """nu against mu*, as one artefact rather than two runs to subtract."""
     from . import packing as pk
 
-    cert, meta = pk.gap(packing, limits_from(args))
+    cert, meta = pk.gap(packing, limits_from(args), target=args.target)
     if cert is None:
         return emit(meta, args)
-    res = Result("opt", Status.SAT, Verdict.SATISFIABLE, "certo/gap", 0.0,
+    # A target that was not reached REFUTES only when the integer optimum is
+    # global. Below that, `nu` is a point somebody found, and "we did not get
+    # there" is not "it cannot be got to" -- which is the distinction the
+    # whole tool is built around, and it does not stop at the engines.
+    verdict = Verdict.SATISFIABLE
+    if meta.get("reached") is False:
+        verdict = (Verdict.REFUTED
+                   if meta.get("integral_level") == "global_optimum"
+                   else Verdict.INCONCLUSIVE)
+    res = Result("opt", Status.SAT, verdict, "certo/gap", 0.0,
                  cert, detail=t("engine.opt.gap", mu=meta["mu"], nu=meta["nu"],
                                 gap=meta["gap"]), meta=meta)
     rc = emit(res, args)
@@ -1636,6 +1707,11 @@ def _manifest(args, status_report):
                        files=rep["files"], order=rep["order"]))
         print("  " + t("cli.manifest.fingerprint",
                        value=rep["fingerprint"]))
+        if rep.get("edges"):
+            print("  " + t("cli.manifest.edges", n=len(rep["edges"])))
+            for e in rep["edges"][:8]:
+                print("    {} {} -> {} {}".format(
+                    e["from_kind"], e["from"][:8], e["to_kind"], e["to"][:8]))
         for key, msg in (("duplicate_files", "cli.manifest.same_file"),
                          ("duplicate_subjects", "cli.manifest.same_subject")):
             if rep[key]:
@@ -2073,6 +2149,11 @@ def build_parser():
 
     sp = add("commands", "which command answers which question",
              aliases=("what",))
+    # `certo what opt` read like the obvious thing to type and was an
+    # `unrecognized arguments` error. Naming one asks the same question about
+    # one command, which is what somebody typing it wanted.
+    sp.add_argument("name", nargs="?",
+                    help="one command: its spec, engine and certificate")
     sp.add_argument("--table", action="store_true",
                     help="the derived command/spec/engine/certificate table")
     sp.add_argument("--markdown", action="store_true",
@@ -2112,6 +2193,11 @@ def build_parser():
 
     sp = add("doctor", "what this install can and cannot do, and what each "
                        "gap costs")
+    sp.add_argument("--repair", action="store_true",
+                    help="what an interrupted install left behind; shows it "
+                         "and removes nothing")
+    sp.add_argument("--apply", action="store_true",
+                    help="with --repair: actually remove what it listed")
     sp.add_argument("--register-mcp", action="store_true", dest="register_mcp",
                     help="add certo to .mcp.json in the current directory, "
                          "merging with whatever is already registered")

@@ -319,6 +319,31 @@ que es un valor alcanzado y no un máximo demostrado. También escanea archivos
 mal —verifica por su cuenta— pero ya no describe el archivo que tiene al lado,
 y seis meses después nadie recuerda cuál.
 
+`certo status <dir> --manifest` responde otra pregunta: *¿certifiqué todos,
+exactamente una vez?* Un conteo no es esa garantía —dos corridas sobre 71
+celdas con un duplicado también cuentan 72—.
+
+El manifiesto da el conjunto en orden canónico —**por digest, no por nombre de
+fichero**, así que dos personas que lo produjeron en distinto orden obtienen el
+mismo número— con una huella agregada sobre la misma receta Horner que
+`matrix`, y los dos tipos de duplicado reportados en vez de colapsados: el
+mismo artefacto en dos rutas, y dos certificados distintos sobre el mismo
+sujeto.
+
+La omisión necesita un conjunto declarado para ser detectable siquiera, y ese
+es el límite honesto. `--expect FICHERO` toma los titulares que se pretendía
+producir y nombra lo que falta; sin él, el manifiesto solo dice lo que hay, y
+no dice nada que no pueda saber.
+
+También reporta las relaciones que puede **derivar**, y las deriva en vez de
+leerlas: un cono declara un retículo, un certificado Smith trata de una matriz,
+y la arista es una coincidencia de huellas. Ninguno menciona al otro, así que
+no hay nada que falsificar. Una arista dice *estos dos tratan de la misma
+matriz*, no que uno dependa del otro. La regularidad de un cono la establece su
+propio `multiplicity == 1`; un Smith sobre ese retículo la corrobora y no la
+carga.
+
+
 ### `certo doctor`
 
 **Pregunta** — ¿Puede esta instalación hacer lo que necesito?
@@ -352,6 +377,24 @@ fusionando en vez de reemplazar, y comprueba que arranca.
 ---
 
 ## ¿Cuán grande, cuán pequeño, cuántos?
+
+`certo doctor --repair` lista lo que dejó atrás una instalación interrumpida, y
+`--repair --apply` lo borra. **La vista previa es lo que hace por defecto** y
+aplicar es una segunda decisión, porque lo que se borra está dentro de
+site-packages: equivocarse ahí rompe un entorno, no un fichero.
+
+pip deja dos marcadores y reconoce los dos. `~`-algo es un renombrado que no
+terminó —en Windows un `certo-mcp.exe` retenido lo corta entre el renombrado y
+la limpieza, y el paquete queda presente dos veces con dos nombres, uno de
+ellos no importable—. `algo.deleteme` es un lanzador que no pudo reemplazar,
+junto a un `.exe` huérfano. No toca nada que no lleve `~` o `.deleteme`, y al
+`.exe` huérfano lo deja en paz: no es marcador de pip.
+
+**No** reinstala. Correr pip desde dentro de la herramienta ocultaría cuál de
+los dos falló, y el motivo de que la instalación se rompiera suele seguir
+corriendo: `--repair` nombra qué está reteniendo los ejecutables de certo antes
+de listar nada.
+
 
 ### `certo opt`
 
@@ -387,6 +430,28 @@ insuficiente, y son afirmaciones distintas.
 
 `loads=[...]` declara regiones nombradas que el diseño debe respetar, y el dual
 las tarifica: ver [Cargas locales](CASES.md#cargas-locales).
+
+`--gap` sobre un `PackingSpec` reporta `mu*` (la relajación), `nu` (el valor
+entero alcanzado) y la distancia entre ambos, como **un** artefacto en vez de
+dos corridas que restar: dos ficheros en una carpeta no pueden afirmar que
+hablan del mismo empaquetamiento.
+
+Las dos mitades las construye `--gap` mismo, diga lo que diga la bandera
+`integer` del spec, porque eso es lo que un gap ES. A un spec que se declara
+entero se le construye igualmente su mitad fraccionaria, y `relaxed_for_gap` en
+el resultado lo dice en vez de hacerlo callando. (Hasta la 0.11.6 la mitad
+fraccionaria se heredaba del spec, así que `integer=True` comparaba el óptimo
+entero consigo mismo y reportaba **gap 0** —la conclusión más fuerte que existe
+en este dominio— por una combinación de banderas.)
+
+Con `--target`, el número se compara contra `nu` y el resultado lleva `reached`
+y `deficit`. Un objetivo no alcanzado **refuta** solo cuando el óptimo entero es
+global; por debajo de eso `nu` es un punto que alguien encontró, y «no llegamos»
+no es «no se puede llegar». El veredicto distingue los dos casos.
+
+`meta.objective` lleva el óptimo bajo el mismo nombre que usa `opt` para el
+mismo número, así que un script lee las dos rutas igual.
+
 
 ### `certo mixed`
 
@@ -1463,6 +1528,10 @@ símbolos —la forma de una pregunta de magnitud, que `prove` no puede responde
 Ese disparador es deliberadamente estrecho: **dos o más** símbolos distintos con
 exponente negativo, porque uno es demasiado común para significar algo. Sobre
 los ejemplos publicados dispara cero veces.
+
+`certo what <comando>` hace la misma pregunta sobre un solo comando: su spec,
+su motor, el tipo de certificado y el nivel.
+
 
 ### `certo repro`
 

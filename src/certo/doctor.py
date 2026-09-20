@@ -164,6 +164,150 @@ def _startup_hooks() -> list:
     return sorted(set(out))
 
 
+def _site_roots():
+    """Every site-packages directory, resolved and deduplicated.
+
+    `site.getsitepackages()` returns overlapping roots on Windows -- the
+    prefix and its `Lib/site-packages` -- so the same leftover is found twice
+    and reported as two. Resolving and deduplicating here is what makes a
+    count mean what it says.
+    """
+    import site
+
+    seen, out = set(), []
+    try:
+        roots = list(site.getsitepackages())
+    except Exception:  # noqa: BLE001  -- a venv without the helper
+        roots = []
+    for d in roots:
+        for base in (Path(d), Path(d) / "Lib" / "site-packages"):
+            try:
+                real = base.resolve()
+            except OSError:
+                continue
+            if real.is_dir() and real not in seen:
+                seen.add(real)
+                out.append(real)
+    return out
+
+
+def leftovers() -> list:
+    """The `~`-prefixed directories pip abandons when an install is stopped.
+
+    pip renames what it is replacing to `~`-something, copies the new files,
+    then deletes the rename. Interrupted between the second and third step --
+    which on Windows is what a held-open `.exe` does -- it leaves the rename
+    behind, and the package is then present twice under two names, one of them
+    unimportable.
+
+    Only entries DIRECTLY inside a site-packages root, whose name begins with
+    `~`, and which resolve back inside that root. Anything else is somebody
+    else's file.
+    """
+    out, seen = [], set()
+    # Two markers, because pip leaves two. `~`-something is the rename it did
+    # not finish; `something.deleteme` is a launcher it could not replace,
+    # left beside an orphaned `.exe` whose package is gone. A user found
+    # exactly that pair and could not run `certo doctor` to diagnose it,
+    # because the thing to diagnose was the missing package -- so the second
+    # marker is looked for here, for the runs where certo does still start.
+    for given in _site_roots():
+        try:
+            scripts = Path(given).resolve().parent / "Scripts"
+        except OSError:
+            scripts = None
+        if scripts is not None and scripts.is_dir():
+            for entry in sorted(scripts.glob("*.deleteme")):
+                try:
+                    real = entry.resolve()
+                except OSError:
+                    continue
+                if real.parent == scripts and real not in seen:
+                    seen.add(real)
+                    out.append(real)
+    for given in _site_roots():
+        # RESOLVED HERE rather than trusted from the caller. Windows hands out
+        # 8.3 short names -- `C:\Users\JTRAVE~1\...` for `C:\Users\jtraverso`
+        # -- and junctions, so `entry.resolve().parent` and the root as given
+        # are the same directory under two spellings. Comparing them
+        # unresolved made every entry look like it pointed out of the tree,
+        # and the repair found nothing at all.
+        try:
+            root = Path(given).resolve()
+        except OSError:
+            continue
+        for entry in sorted(root.glob("~*")):
+            try:
+                real = entry.resolve()
+            except OSError:
+                continue
+            if real.parent != root:
+                continue            # a link pointing out of the tree
+            if real not in seen:
+                seen.add(real)
+                out.append(real)
+    return out
+
+
+def held_open() -> list:
+    """certo's own scripts that something is holding, by name.
+
+    A running executable is opened by Windows with read sharing only, so
+    asking for write access is refused -- without touching the file. That
+    refusal IS the diagnosis: it is the thing that makes the next
+    `pip install -e .` stop halfway, and removing the leftovers without
+    stopping the holder just produces new ones.
+    """
+    out = []
+    for root in _site_roots():
+        for exe in sorted((root.parent / "Scripts").glob("certo*")):
+            if exe.is_dir():
+                continue
+            try:
+                with open(exe, "r+b"):
+                    pass
+            except PermissionError:
+                out.append(exe.name)
+            except OSError:
+                continue
+    return sorted(set(out))
+
+
+def repair(apply: bool = False) -> dict:
+    """What an interrupted install left behind, and -- with `apply` -- its end.
+
+    PREVIEW IS THE DEFAULT, and not out of caution for its own sake: the thing
+    being removed is in site-packages, where a wrong guess breaks an
+    environment rather than a file. So the list comes back first, and removing
+    it is a second decision.
+
+    certo does not reinstall. That is pip's job, running pip from inside the
+    tool would hide which of the two failed, and the reason the install broke
+    is usually still running -- `held_open` names it.
+    """
+    import shutil
+
+    found = leftovers()
+    report = {"leftovers": [str(p) for p in found],
+              "held_open": held_open(), "applied": bool(apply),
+              "removed": [], "failed": []}
+    if not apply:
+        return report
+
+    for path in found:
+        try:
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+            report["removed"].append(str(path))
+        except OSError as exc:
+            report["failed"].append({"path": str(path),
+                                     "why": "{}: {}".format(
+                                         type(exc).__name__, exc)})
+    return report
+
+
 def _partial_install():
     """Did a pip install stop halfway and leave the package in pieces?
 
@@ -178,25 +322,12 @@ def _partial_install():
     The leftover is pip's own marker and it is the only reliable trace, so
     that is what is looked for.
     """
-    import site
-
-    leftovers = []
-    roots = []
-    try:
-        roots = list(site.getsitepackages())
-    except Exception:  # noqa: BLE001  -- a venv without the helper
-        pass
-    for d in roots:
-        p = Path(d) / "Lib" / "site-packages"
-        for base in (Path(d), p):
-            if not base.is_dir():
-                continue
-            for entry in base.glob("~*"):
-                leftovers.append(entry.name)
-    if not leftovers:
+    found = leftovers()
+    if not found:
         return True, t("doctor.detail.install_clean")
     return False, t("doctor.detail.install_partial",
-                    n=len(leftovers), names=", ".join(sorted(leftovers)[:3]))
+                    n=len(found),
+                    names=", ".join(sorted(p.name for p in found)[:3]))
 
 
 #: The name on PyPI. The import package is `certo`; this is what a

@@ -120,6 +120,64 @@ existed verifies exactly as before, and the schema stays at 4. It is derived
 when the certificate is built and **recomputed** by `verify` — edit it and the
 certificate is rejected, like every other number here.
 
+## A pointer is not a check
+
+`verify` takes **one certificate and no filesystem**. That is deliberate -- an
+artefact somebody has to hold a directory to check is an artefact nobody
+checks -- and it has a consequence worth stating plainly: **a stored path or
+digest is a field nothing can ever recompute.**
+
+`lean_binding` had one. It says *this is what THAT certificate assumed, and
+this Lean declaration provides it*, and what tied the two was the string
+`"certificate": "out/counting_bound.json"`:
+
+```
+honest  : VALID | certificate = out/counting_bound.json
+forged  : VALID | certificate = out/a_file_that_does_not_exist.json
+```
+
+Same verdict, a file that is not there, a kind it never was. The entailment
+was re-asked correctly from the formulas in the payload; it was the *link*
+that nothing checked.
+
+The certificate travels inside the binding now. `verify` re-checks the link
+with no disk: the embedded source has to verify on its own terms, be the kind
+claimed, and carry the provenance of the spec whose hash the binding recorded.
+The guarantee is **exactly as strong as the inner verifier and no stronger** --
+tampering with an `unsat_core`'s `core_smt2` is caught, tampering with a field
+that `unsat_core` does not check is not.
+
+The same reasoning is why the manifest's relations are **computed from
+content** rather than declared. A digest stored in a parent would have been
+this defect added on purpose.
+
+## The Lean certo emits is checked before it leaves
+
+*Can we certify that generated Lean is syntactically valid, without building
+it?* Not as asked, and the reason is worth knowing: **Lean 4's grammar is
+extensible, so what parses depends on what is imported.** `!![1, 2; 3, 4]`
+without `Mathlib.LinearAlgebra.Matrix.Notation` fails with `unexpected token
+';'` -- a parse error caused by a missing import. There is no
+import-independent notion of "syntactically valid Lean", and `lean` has no
+parse-only mode: it parses and elaborates together.
+
+What is decidable without a toolchain is narrower and useful: the invariants
+certo's own emission must satisfy. `check_emission` checks them in
+milliseconds -- balanced namespaces, every declaration reaching its `:=`, a
+`/--` attached to a declaration, `sorry` present exactly when the header says
+so, imports matching what the exporter declares.
+
+Measured against the only exporter that ever had bugs: adding the Smith one
+took four rounds against a real Mathlib and produced five emission faults.
+These rules catch three. The other two were a module path that had moved and
+an absent import, and nothing without Mathlib on disk can know either.
+
+That ratio is the point. `tests/run_lean.py` cannot be a release gate --
+minutes per file, a toolchain dependency, failures that say nothing about
+whether certo's mathematics is right -- so nothing checked an emission between
+one of those runs and a release. This does, for every registered exporter, on
+every suite run.
+
 ## The warnings are part of the artefact
 
 A certificate carries what it does *not* establish, and `verify` repeats it

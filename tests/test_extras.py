@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 from fractions import Fraction
 
@@ -9376,6 +9377,548 @@ def test_the_manifest_fingerprint_is_the_matrix_recipe():
         assert m["fingerprint"] == by_hand
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- the emission gate -----------------------------------------------------
+
+
+def _emissions():
+    """One real emission per registered exporter, with its kind."""
+    from certo import MatrixSpec, api, leanexport
+    from certo.engines import farkas
+    from certo.spec import load_spec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    out = []
+
+    cert = farkas.farkas(
+        load_spec(str(root / "examples" / "farkas_linear.py")), LIM).certificate
+    data = cert.to_dict()
+    data["digest"] = cert.digest()
+    out.append(("farkas", leanexport.EXPORTERS["farkas"](data)))
+
+    spec = MatrixSpec(matrix=[[4, 0, 0, 0], [2, 2, 0, 0], [2, 0, 2, 0],
+                              [1, 1, 1, 1]], question="smith", title="a cell")
+    cert = api.run("matrix", spec).certificate
+    data = cert.to_dict()
+    data["digest"] = cert.digest()
+    out.append(("smith", leanexport.EXPORTERS["integer_matrix"](data)))
+    return out
+
+
+def test_every_exporter_emits_a_structurally_sound_file():
+    """The gate `tests/run_lean.py` cannot be.
+
+    Compiling against Mathlib costs minutes per file and needs a toolchain, so
+    it is run by hand by whoever touches an exporter -- which means nothing
+    checks an emission between one of those runs and a release. This does, in
+    milliseconds, for every exporter registered.
+    """
+    from certo import leanexport
+
+    for kind, text in _emissions():
+        found = leanexport.check_emission(text, kind)
+        assert not found, {kind: found}
+
+
+def test_the_checker_catches_what_the_smith_exporter_actually_got_wrong():
+    """Three of the five emission faults adding that exporter produced.
+
+    The other two were a module path that had moved and an absent import, and
+    nothing without Mathlib on disk can know either -- which is the honest
+    half of the claim and the reason this does not replace compiling.
+    """
+    from certo import leanexport
+
+    broken = "\n".join([
+        "/-",
+        "  header",
+        "-/",
+        "import Mathlib.LinearAlgebra.Matrix.Notation",
+        "import Mathlib.Data.Matrix.Mul",
+        "import Mathlib.LinearAlgebra.Matrix.Determinant.Basic",
+        "",
+        "namespace Certo",
+        "",
+        "theorem certo_det_U : certo_U.det = -1 by decide",
+        "",
+        "/-- documents nothing at all -/",
+        "-- certo fingerprint: 7",
+        "",
+    ])
+    codes = {c for _ln, c, _d in leanexport.check_emission(broken, "smith")}
+    assert "unclosed_declaration" in codes      # the missing `:=`
+    assert "orphan_docstring" in codes          # `/--` attached to a comment
+    assert "namespace" in codes                 # opened and never closed
+
+
+def test_the_checker_is_quiet_about_a_multi_line_declaration():
+    """A statement whose `:=` is on a later line is ordinary Lean, and a rule
+    that flagged it would be a rule people switch off."""
+    from certo import leanexport
+
+    fine = "\n".join([
+        "/-", "  header", "-/",
+        "import Mathlib.Data.Real.Basic",
+        "import Mathlib.Tactic.Linarith",
+        "",
+        "namespace Certo",
+        "",
+        "/-- a real one -/",
+        "theorem spread :",
+        "    certo_U * certo_A * certo_V = certo_S := by decide",
+        "",
+        "end Certo",
+        "",
+    ])
+    assert leanexport.check_emission(fine, "farkas") == []
+
+
+def test_an_import_the_exporter_did_not_declare_is_reported():
+    """It cannot know a module EXISTS -- that needs Mathlib on disk -- but it
+    can know the header is not the one this exporter writes, which is what a
+    hand edit looks like."""
+    from certo import leanexport
+
+    text = "\n".join([
+        "/-", "  header", "-/",
+        "import Mathlib.Data.Matrix.Notation",      # the path that had moved
+        "",
+        "namespace Certo",
+        "",
+        "end Certo",
+        "",
+    ])
+    codes = {c for _ln, c, _d in leanexport.check_emission(text, "smith")}
+    assert "imports" in codes
+    # and without a kind it says nothing about imports, because it has no
+    # table to compare against
+    assert "imports" not in {c for _l, c, _d in leanexport.check_emission(text)}
+
+
+def test_a_promise_about_placeholders_has_to_match_the_file():
+    """The header either lists `sorry`s or states there are none. Saying one
+    and doing the other is how a file reads as complete when it is not."""
+    from certo import leanexport
+
+    promises = ("/-\n  `sorry` below marks a place where something outside "
+                "Lean was relied on\n-/\nnamespace Certo\nend Certo\n")
+    codes = {c for _l, c, _d in leanexport.check_emission(promises)}
+    assert "promised_sorry" in codes
+
+    quiet = "/-\n  header\n-/\nnamespace Certo\nexample : True := by sorry\nend Certo\n"
+    codes = {c for _l, c, _d in leanexport.check_emission(quiet)}
+    assert "unannounced_sorry" in codes
+
+
+# --- doctor --repair -------------------------------------------------------
+
+
+def test_repair_previews_and_removes_nothing_by_default():
+    """The default has to be the safe one, because what is being removed lives
+    in site-packages: a wrong guess there breaks an environment, not a file."""
+    import shutil
+    import tempfile
+
+    from certo import doctor
+
+    root = pathlib.Path(tempfile.mkdtemp())
+    try:
+        (root / "~erto").mkdir()
+        (root / "~erto" / "__init__.py").write_text("", encoding="utf-8")
+        (root / "certo").mkdir()          # the real one, which must not move
+
+        real = doctor._site_roots
+        doctor._site_roots = lambda: [root]
+        try:
+            rep = doctor.repair()
+            assert rep["applied"] is False
+            assert rep["removed"] == []
+            assert [pathlib.Path(p).name for p in rep["leftovers"]] == ["~erto"]
+            assert (root / "~erto").is_dir()      # still there
+        finally:
+            doctor._site_roots = real
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_repair_touches_only_what_pip_abandoned():
+    """`~` is pip's own marker for a rename it did not finish. Nothing else in
+    site-packages is any of certo's business, and a repair that decided
+    otherwise would be worse than the problem."""
+    import shutil
+    import tempfile
+
+    from certo import doctor
+
+    root = pathlib.Path(tempfile.mkdtemp())
+    try:
+        for name in ("~erto", "~erto_math-0.1.dist-info"):
+            (root / name).mkdir()
+        for keep in ("certo", "numpy", "z3", "certo_math-0.1.dist-info"):
+            (root / keep).mkdir()
+
+        real = doctor._site_roots
+        doctor._site_roots = lambda: [root]
+        try:
+            rep = doctor.repair(apply=True)
+            assert sorted(pathlib.Path(p).name for p in rep["removed"]) == [
+                "~erto", "~erto_math-0.1.dist-info"]
+            assert not rep["failed"]
+        finally:
+            doctor._site_roots = real
+
+        survivors = sorted(p.name for p in root.iterdir())
+        assert survivors == ["certo", "certo_math-0.1.dist-info", "numpy", "z3"]
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def test_a_leftover_that_points_outside_the_tree_is_left_alone():
+    """A `~` entry whose real path is somewhere else is not pip's rename, and
+    following it would delete whatever it points at."""
+    import shutil
+    import tempfile
+
+    from certo import doctor
+
+    root = pathlib.Path(tempfile.mkdtemp())
+    elsewhere = pathlib.Path(tempfile.mkdtemp())
+    try:
+        (elsewhere / "precious").mkdir()
+        try:
+            (root / "~link").symlink_to(elsewhere / "precious",
+                                        target_is_directory=True)
+        except (OSError, NotImplementedError):
+            return                        # no symlink privilege: nothing to test
+
+        real = doctor._site_roots
+        doctor._site_roots = lambda: [root]
+        try:
+            assert doctor.repair()["leftovers"] == []
+        finally:
+            doctor._site_roots = real
+        assert (elsewhere / "precious").is_dir()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+        shutil.rmtree(elsewhere, ignore_errors=True)
+
+
+def test_the_same_leftover_is_counted_once():
+    """`site.getsitepackages()` returns overlapping roots on Windows, so the
+    same directory was found twice and reported as two. A count that is wrong
+    about five is not a count anybody acts on."""
+    import shutil
+    import tempfile
+
+    from certo import doctor
+
+    root = pathlib.Path(tempfile.mkdtemp())
+    try:
+        (root / "~erto").mkdir()
+        real = doctor._site_roots
+        # the same root handed over twice, which is what the real helper does
+        doctor._site_roots = lambda: [root, root]
+        try:
+            assert len(doctor.repair()["leftovers"]) == 1
+        finally:
+            doctor._site_roots = real
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+# --- what a certificate depends on, and what merely corroborates it --------
+
+
+def _binding():
+    """A real `bind` certificate, with the one it is about travelling in it."""
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    env = dict(os.environ, PYTHONPATH=str(root / "src"))
+    out = root / "out"
+    out.mkdir(exist_ok=True)
+    for args in ([
+            "prove", "examples/counting_bound.py",
+            "--cert", "out/counting_bound.json"],
+            ["bind", "examples/lean_binding.py", "--cert", "out/_dep.json"]):
+        subprocess.run([sys.executable, "-m", "certo.cli", *args], cwd=root,
+                       capture_output=True, env=env, timeout=600)
+    return json.loads((out / "_dep.json").read_text(encoding="utf-8"))
+
+
+def test_a_binding_named_a_certificate_and_checked_nothing_about_it():
+    """The pointer that was decorative.
+
+    `lean_binding` said "this is what THAT certificate assumed" and stored a
+    PATH. Nothing tied the two, so a binding naming a file that does not
+    exist, of a kind it never was, verified exactly like an honest one. The
+    certificate travels now and has to verify on its own terms with the
+    provenance that was recorded.
+    """
+    import copy
+
+    data = _binding()
+    assert verify(Certificate.from_dict(data)).ok
+    assert data["payload"]["source"]["kind"] == data["payload"]["certificate_kind"]
+
+    # the kind it claims, against the kind it carries
+    bad = copy.deepcopy(data)
+    bad["payload"]["certificate_kind"] = "drat"
+    assert not verify(Certificate.from_dict(bad)).ok
+
+    # a source whose own verifier rejects it
+    bad = copy.deepcopy(data)
+    bad["payload"]["source"]["payload"]["core_smt2"] = "(assert true)"
+    assert not verify(Certificate.from_dict(bad)).ok
+
+    # a source from a different spec than the one recorded
+    bad = copy.deepcopy(data)
+    bad["payload"]["spec"]["sha256_then"] = "0" * 64
+    assert not verify(Certificate.from_dict(bad)).ok
+
+
+def test_a_binding_written_before_the_source_travelled_still_verifies():
+    """Optional, the way every other added field is, so the schema stays 4."""
+    import copy
+
+    data = _binding()
+    n_new = len(verify(Certificate.from_dict(data)).checks)
+    old = copy.deepcopy(data)
+    old["payload"].pop("source")
+    rep = verify(Certificate.from_dict(old))
+    assert rep.ok
+    assert len(rep.checks) == n_new - 1
+
+
+def test_an_embedded_source_stops_reading_as_an_unconsumed_result():
+    """The complaint was that matrix certificates showed with no consumers.
+    A certificate that is embedded is accounted for, and `status` says so by
+    leaving it out of the top-level results."""
+    import shutil
+    import tempfile
+
+    from certo import status_report
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    data = _binding()
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        (tmp / "binding.json").write_text(json.dumps(data), encoding="utf-8")
+        shutil.copy(root / "out" / "counting_bound.json", tmp / "source.json")
+        rep = status_report.scan(str(tmp))
+        assert rep["certificates"] == 2
+        assert [r["kind"] for r in rep["results"]] == ["lean_binding"]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def _cone_and_smith(tmp, lattice, title):
+    from certo import ConeSpec, MatrixSpec, api
+
+    rays = {"a": [4, 0, 0, 0], "b": [2, 2, 0, 0], "c": [2, 0, 2, 0],
+            "d": [1, 1, 1, 1]}
+    cone = api.run("cone", ConeSpec(rays=rays, lattice=lattice,
+                                    title=title)).certificate
+    smith = api.run("matrix", MatrixSpec(matrix=lattice, question="smith",
+                                         title=title)).certificate
+    (tmp / (title + "-cone.json")).write_text(json.dumps(cone.to_dict()),
+                                              encoding="utf-8")
+    (tmp / (title + "-smith.json")).write_text(json.dumps(smith.to_dict()),
+                                               encoding="utf-8")
+    return cone, smith
+
+
+def test_the_manifest_derives_the_relation_nobody_declared():
+    """Neither certificate mentions the other, and the relation is real.
+
+    Derived from content rather than stored, so there is nothing to forge: the
+    fingerprint of the cone's declared lattice against the one the Smith
+    certificate already carries. Two people who produced the set
+    independently get the same edges.
+    """
+    import shutil
+    import tempfile
+
+    from certo import status_report
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        latt = [[4, 0, 0, 0], [2, 2, 0, 0], [2, 0, 2, 0], [1, 1, 1, 1]]
+        cone, smith = _cone_and_smith(tmp, latt, "cell0")
+        _cone_and_smith(tmp, [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0],
+                              [0, 0, 0, 1]], "cell1")
+
+        m = status_report.manifest(str(tmp))
+        pairs = {(e["from"], e["to"]) for e in m["edges"]}
+        assert (cone.digest(), smith.digest()) in pairs
+        # one per cell, and no cross-links between cells
+        assert len(m["edges"]) == 2
+        for e in m["edges"]:
+            assert e["from_kind"] == "toric_cone"
+            assert e["to_kind"] == "integer_matrix"
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_a_matrix_certificate_about_something_else_gets_no_edge():
+    """An edge says these two are about the same matrix. Nothing weaker would
+    be worth computing, and nothing stronger is true."""
+    import shutil
+    import tempfile
+
+    from certo import MatrixSpec, api, status_report
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        _cone_and_smith(tmp, [[4, 0, 0, 0], [2, 2, 0, 0], [2, 0, 2, 0],
+                              [1, 1, 1, 1]], "cell0")
+        other = api.run("matrix", MatrixSpec(matrix=[[1, 0], [0, 1]],
+                                             question="smith",
+                                             title="unrelated")).certificate
+        (tmp / "other.json").write_text(json.dumps(other.to_dict()),
+                                        encoding="utf-8")
+        m = status_report.manifest(str(tmp))
+        assert len(m["edges"]) == 1
+        assert other.digest() not in {e["to"] for e in m["edges"]}
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+# --- the header must not contradict the certificate ------------------------
+
+
+def _k4_packing(m, integer):
+    """K4-packing of K_m: the crux of a linear chordal gap."""
+    from itertools import combinations
+
+    from certo import PackingSpec
+
+    items = [("K" + "".join(map(str, c)),
+              [frozenset(e) for e in combinations(c, 2)], 1)
+             for c in combinations(range(m), 4)]
+    return PackingSpec(items=items, capacities=1, sense="max",
+                       integer=integer, title="K4-packing of K%d" % m)
+
+
+def test_the_gap_does_not_depend_on_a_flag_that_is_not_about_it():
+    """`--gap` reported ZERO -- the strongest conclusion in this domain --
+    from a flag combination.
+
+    The integral half was built explicitly and the fractional half was
+    inherited from the spec, so `integer=True` compared the integer optimum
+    against itself. A user's first full sweep came back "gap 0" on seven
+    orders. Both halves are constructed here now, which is what a gap IS.
+    """
+    from fractions import Fraction
+
+    from certo.packing import gap
+
+    for m in (5, 6):
+        closed_form = Fraction(m * (m - 1) // 2, 6)
+        seen = []
+        for integer in (True, False):
+            _cert, meta = gap(_k4_packing(m, integer))
+            seen.append((meta["mu"], meta["gap"]))
+            assert Fraction(meta["mu"]) == closed_form, (m, integer, meta)
+            assert Fraction(meta["gap"]) > 0, (m, integer, meta)
+        assert seen[0] == seen[1], (m, seen)
+
+    # and it says it overrode the flag rather than doing it quietly
+    _c, meta = gap(_k4_packing(5, True))
+    assert meta["relaxed_for_gap"] is True
+    _c, meta = gap(_k4_packing(5, False))
+    assert meta["relaxed_for_gap"] is False
+
+
+def test_the_gap_reports_the_optimum_under_the_name_opt_uses():
+    """It was only reachable at
+    `certificate.payload.fractional.payload.objective`, which is not a path
+    anybody deduces without reading the source."""
+    from fractions import Fraction
+
+    from certo.packing import gap
+
+    cert, meta = gap(_k4_packing(5, False))
+    assert Fraction(meta["objective"]) == Fraction(meta["mu"])
+    deep = cert.payload["fractional"]["payload"]["objective"]
+    assert Fraction(deep) == Fraction(meta["objective"])
+
+
+def test_a_target_on_the_gap_path_is_compared_rather_than_dropped():
+    """The flag was accepted, the number never compared, and the verdict came
+    back SATISFIABLE either way. A flag silently ignored is worse than one
+    refused."""
+    from certo.packing import gap
+
+    _c, meta = gap(_k4_packing(6, False), target=1)
+    assert meta["reached"] is True and meta["deficit"] == "0"
+
+    _c, meta = gap(_k4_packing(6, False), target=4)
+    assert meta["reached"] is False and meta["deficit"] == "3"
+
+    _c, meta = gap(_k4_packing(6, False))
+    assert meta["reached"] is None and meta["target"] is None
+
+
+def test_a_mixed_target_says_reached_rather_than_making_a_script_parse_prose():
+    from certo import LPSpec
+    from certo.engines import mixed
+
+    def _spec():
+        lp = LPSpec(sense="max", title="two slots")
+        for i in range(2):
+            lp.variable("y%d" % i, kind="binary")
+        lp.objective({"y0": 2, "y1": 3})
+        lp.constraint({"y0": 1, "y1": 1}, "<=", 1, name="one")
+        return lp
+
+    assert mixed.mixed(_spec(), LIM, target=3).meta["reached"] is True
+    assert mixed.mixed(_spec(), LIM, target=9).meta["reached"] is False
+    assert mixed.mixed(_spec(), LIM).meta["reached"] is None
+
+
+def test_naming_a_command_asks_about_that_command():
+    """`certo what opt` was `unrecognized arguments: opt`, while the help
+    read as though it took one."""
+    from certo import catalogue
+
+    row = next(r for r in catalogue.rows() if r["command"] == "opt")
+    assert row["spec"] == "LPSpec" and row["engine"] == "lp"
+
+
+def test_an_interrupted_launcher_is_a_leftover_too():
+    """pip leaves two markers. `~`-something is a rename it did not finish;
+    `something.deleteme` is a launcher it could not replace, beside an orphan
+    `.exe` whose package is gone -- which is the state a user was in when
+    `certo doctor` was the thing they could not run."""
+    import shutil
+    import tempfile
+
+    from certo import doctor
+
+    root = pathlib.Path(tempfile.mkdtemp())
+    try:
+        site = root / "Lib" / "site-packages"
+        site.mkdir(parents=True)
+        (root / "Lib" / "Scripts").mkdir()
+        (site / "~erto").mkdir()
+        (root / "Lib" / "Scripts" / "certo.exe.deleteme").write_text("x")
+        (root / "Lib" / "Scripts" / "certo.exe").write_text("x")
+
+        real = doctor._site_roots
+        doctor._site_roots = lambda: [site]
+        try:
+            names = sorted(pathlib.Path(p).name
+                           for p in doctor.repair()["leftovers"])
+        finally:
+            doctor._site_roots = real
+        assert names == ["certo.exe.deleteme", "~erto"]
+        # the orphan launcher itself is NOT ours to remove
+        assert (root / "Lib" / "Scripts" / "certo.exe").exists()
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 if __name__ == "__main__":

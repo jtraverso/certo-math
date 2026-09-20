@@ -313,6 +313,30 @@ files for statements of the shape `theorem foo : True := by`, skipping
 wrong — it verifies on its own — but it no longer describes the file next to
 it, and six months later nobody remembers which.
 
+`certo status <dir> --manifest` answers a different question: *did I certify
+every one, exactly once?* A count is not that guarantee -- two runs over 71
+cells with one duplicate also count 72.
+
+The manifest gives the set in a canonical order -- **by digest, not by
+filename**, so two people who produced it in a different order get the same
+number -- with one aggregate fingerprint on the same Horner recipe as
+`matrix`, and both kinds of duplicate reported rather than collapsed: the same
+artefact at two paths, and two different certificates about the same subject.
+
+Omission needs a declared set to be detectable at all, which is the honest
+limit. `--expect FILE` takes the headlines that were meant to be produced and
+names what is missing; without it the manifest says only what is present, and
+says nothing it cannot know.
+
+It also reports the relations it can **derive**, and derives rather than reads
+them: a cone declares a lattice, a Smith certificate is about a matrix, and
+the edge is a fingerprint match. Neither certificate mentions the other, so
+there is nothing to forge. An edge says *these two are about the same matrix*
+-- not that one depends on the other. A cone's regularity is established by
+its own `multiplicity == 1`; a Smith certificate over the same lattice
+corroborates it and does not carry it.
+
+
 ### `certo doctor`
 
 **Question** — Can this install do what I need?
@@ -346,6 +370,22 @@ rather than replacing, and checks that it starts.
 ---
 
 ## How big, how small, how many?
+
+`certo doctor --repair` lists what an interrupted install left behind, and
+`--repair --apply` removes it. **Preview is the default** and applying is a
+second decision, because the target is inside site-packages: a wrong guess
+there breaks an environment rather than a file.
+
+pip leaves two markers, and both are recognised. `~`-something is a rename it
+did not finish -- on Windows a held-open `certo-mcp.exe` stops it between the
+rename and the cleanup, and the package is then present twice under two names,
+one of them unimportable. `something.deleteme` is a launcher it could not
+replace, beside an orphaned `.exe`. Nothing without a `~` or a `.deleteme` is
+touched, and the orphan `.exe` is left alone: it is not pip's marker.
+
+It does **not** reinstall. Running pip from inside the tool would hide which of
+the two failed, and the reason the install broke is usually still running --
+`--repair` names what is holding certo's scripts before listing anything.
 
 ### `certo opt`
 
@@ -381,6 +421,29 @@ those are different statements.
 
 `loads=[...]` declares named regions the design must respect, and the dual
 prices them: see [Local loads](CASES.md#local-loads).
+
+`--gap` on a `PackingSpec` reports `mu*` (the relaxation), `nu` (the integer
+value achieved), and the distance between them, as **one** artefact rather
+than two runs to subtract -- two files in a folder cannot claim to be about
+the same packing.
+
+Both halves are constructed by `--gap` itself, whatever the spec's `integer`
+flag says, because that is what a gap IS. A spec that declares itself integer
+gets its fractional half built anyway, and `relaxed_for_gap` in the result
+says so rather than doing it quietly. (Until 0.11.6 the fractional half was
+inherited from the spec, so `integer=True` compared the integer optimum
+against itself and reported **gap 0** -- the strongest conclusion available in
+this domain, from a flag combination.)
+
+With `--target`, the number is compared against `nu` and the result carries
+`reached` and `deficit`. A target that is not reached **refutes** only when the
+integer optimum is global; below that, `nu` is a point somebody found, and "we
+did not get there" is not "it cannot be got to". The verdict distinguishes the
+two.
+
+`meta.objective` carries the optimum under the same name `opt` uses for the
+same number, so one script reads both paths.
+
 
 ### `certo mixed`
 
@@ -1448,6 +1511,10 @@ magnitude question, which `prove` cannot answer. That trigger is deliberately
 narrow: **two or more** distinct symbols at negative exponent, because one is
 far too common to mean anything. Across the shipped examples it fires zero
 times.
+
+`certo what <command>` asks the same question about one command: its spec,
+engine, certificate kind and tier.
+
 
 ### `certo repro`
 
