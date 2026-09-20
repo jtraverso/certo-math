@@ -644,7 +644,12 @@ def cmd_doctor(args):
     for r in rep["rows"]:
         mark = "[ok]" if r["ok"] else ("[XX]" if r["required"] else "[--]")
         print("  {:<12} {:<9} {}".format(r["key"], mark, r["what"]))
-        if r["ok"] and r["detail"]:
+        # The detail on a FAILING row is the reason, and it was being dropped:
+        # a probe that ran and came back with "no default toolchain" reported
+        # exactly as one whose binary is not installed. A user told certo it
+        # was wrong about their machine and they were right -- Lean was there,
+        # with Mathlib built, and the one line that said why never printed.
+        if r["detail"]:
             print("  {:<12} {:<9} {}".format("", "", r["detail"]))
 
     gaps = [r for r in rep["rows"] if not r["ok"] and not r["required"]]
@@ -1603,9 +1608,59 @@ def _print_hollow_lean(rep):
         print(t("cli.status.lean_more", n=len(rows) - 8))
 
 
+def _manifest(args, status_report):
+    """The set, its order, and the number that pins it.
+
+    A count is not a guarantee: two runs over 71 cells with one duplicate also
+    count 72. So what goes out is the canonical order, the duplicates of both
+    kinds, and -- when `--expect` says what was meant -- what is missing.
+    """
+    try:
+        expect = None
+        if getattr(args, "expect", None):
+            expect = [line.strip() for line
+                      in Path(args.expect).read_text(encoding="utf-8").splitlines()
+                      if line.strip()]
+        rep = status_report.manifest(args.where, expect=expect)
+    except FileNotFoundError:
+        print(t("cli.status.nowhere", path=args.where), file=sys.stderr)
+        return 3
+
+    if args.manifest != "-":
+        Path(args.manifest).write_text(
+            json.dumps(rep, indent=2, ensure_ascii=False), encoding="utf-8")
+    if args.json or args.manifest == "-":
+        print(json.dumps(rep, indent=2, ensure_ascii=False))
+    else:
+        print("  " + t("cli.manifest.head", count=rep["count"],
+                       files=rep["files"], order=rep["order"]))
+        print("  " + t("cli.manifest.fingerprint",
+                       value=rep["fingerprint"]))
+        for key, msg in (("duplicate_files", "cli.manifest.same_file"),
+                         ("duplicate_subjects", "cli.manifest.same_subject")):
+            if rep[key]:
+                print("  !! " + t(msg, n=len(rep[key])))
+        if "missing" in rep:
+            if rep["complete"]:
+                print("  " + t("cli.manifest.complete", n=rep["expected"]))
+            else:
+                for name in rep["missing"][:8]:
+                    print("  [XX] " + t("cli.manifest.missing", name=name))
+                for name in rep["unexpected"][:8]:
+                    print("  [??] " + t("cli.manifest.unexpected", name=name))
+        if args.manifest != "-":
+            print("  " + t("cli.cert.written", path=args.manifest))
+    # A manifest asked to check a declared set and finding it incomplete is a
+    # failure; one that only describes what is there is not.
+    return 1 if rep.get("missing") or rep.get("unexpected") else 0
+
+
 def cmd_status(args):
     """Where the proof stands, read off the certificates themselves."""
     from . import status_report
+
+    if getattr(args, "manifest", None):
+        return _manifest(args, status_report)
 
     try:
         rep = status_report.scan(args.where, verify_all=args.verify,
@@ -2047,6 +2102,12 @@ def build_parser():
                     help="directory (searched recursively) or one .json file")
     sp.add_argument("--verify", action="store_true",
                     help="re-verify every certificate, not just read it")
+    sp.add_argument("--manifest", nargs="?", const="-", metavar="RUTA",
+                    help="the set in canonical order, with one number that "
+                         "says it is that set; `-` prints it")
+    sp.add_argument("--expect", metavar="RUTA",
+                    help="a file of headlines, one per line: --manifest then "
+                         "names what is missing rather than only what is here")
     sp.set_defaults(func=cmd_status)
 
     sp = add("doctor", "what this install can and cannot do, and what each "

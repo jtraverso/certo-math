@@ -129,7 +129,7 @@ def in_lattice(v, basis):
     return out["solution"]
 
 
-def multiplicity(rays, names=None, basis=None) -> dict:
+def multiplicity(rays, names=None, basis=None, rows=None) -> dict:
     """The index of the sublattice the generators span, IN THE DECLARED
     LATTICE.
 
@@ -143,16 +143,26 @@ def multiplicity(rays, names=None, basis=None) -> dict:
     Defined for a simplicial cone of full dimension. Anything else is refused
     rather than answered with a determinant of the wrong shape -- a number
     that looks like a multiplicity and is not one is worse than no number.
+
+    `rows` are those coordinates when the caller already has them. They were
+    being computed three times for one cone -- here, again per generator for
+    primitivity, and a third time by the verifier -- and thrown away each
+    time, which is why `toric_cone` did not carry the matrix a user then had
+    to reconstruct by hand. The rows come in, and `certify` keeps them.
     """
     from . import lattice as latt
 
     order = list(names or sorted(rays))
-    rows = []
-    for n in order:
-        coords = in_lattice(rays[n], basis)
-        if coords is None:
-            raise NotToric(_t("toric.outside_lattice", name=n))
-        rows.append([Fraction(c) for c in coords])
+    if rows is None:
+        rows = []
+        for n in order:
+            coords = in_lattice(rays[n], basis)
+            if coords is None:
+                raise NotToric(_t("toric.outside_lattice", name=n))
+            rows.append([Fraction(c) for c in coords])
+    elif any(r is None for r in rows):
+        outside = [n for n, r in zip(order, rows) if r is None]
+        raise NotToric(_t("toric.outside_lattice", name=outside[0]))
 
     n, m = len(rows), len(rows[0])
     if n != m:
@@ -198,9 +208,11 @@ def certify(spec) -> dict:
     if unknown:
         raise NotToric(_t("toric.unknown_ray", names=", ".join(unknown[:3])))
 
-    primitive, outside = {}, []
+    primitive, outside, relative = {}, [], []
     for name in order:
         coords = in_lattice(rays[name], basis)
+        relative.append(None if coords is None
+                        else [Fraction(c) for c in coords])
         if coords is None:
             outside.append(name)
             primitive[name] = None
@@ -213,7 +225,7 @@ def certify(spec) -> dict:
     # undefined loses the other three.
     height = height_functional(rays, order)
     try:
-        mult = multiplicity(rays, order, basis)
+        mult = multiplicity(rays, order, basis, rows=relative)
         mult_why = None
     except NotToric as exc:
         mult, mult_why = None, str(exc)
@@ -253,6 +265,18 @@ def certify(spec) -> dict:
         "multiplicity_why_not": mult_why,
         "multiplicity_in": "declared lattice" if basis is not None
                            else "the ambient Z^{}".format(len(rays[order[0]])),
+        # THE GENERATORS IN THE LATTICE'S OWN COORDINATES -- the matrix whose
+        # determinant the multiplicity IS. It was computed here, again inside
+        # `multiplicity`, and a third time by the verifier, and discarded
+        # every time; a user needing it for a change of basis had to rebuild
+        # it from the rays and the basis by hand. Optional, which the frozen
+        # schema allows, and `verify` recomputes it rather than reading it.
+        "relative": None if any(r is None for r in relative) else {
+            "matrix": [[str(c) for c in row] for row in relative],
+            "orientation": "one row per generator, in the order of `order`; "
+                           "one column per vector of `lattice`, itself rows. "
+                           "M = R * L, where R is this matrix and L the basis.",
+        },
         "regular": None if mult is None else mult["value"] == 1,
         "height_one": height is not None,
         "height_functional": (None if height is None

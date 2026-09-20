@@ -29,7 +29,7 @@ from .spec import (BisectSpec, BoundSpec, DomainSpec, IdealSpec,
                    SynthSpec, load_spec)
 from .status import Result, Status, Verdict
 
-__version__ = "0.11.4"
+__version__ = "0.11.5"
 
 __all__ = [
     "Spec", "SynthSpec", "LPSpec", "SweepSpec", "CNF", "CNFSpec",

@@ -1,8 +1,9 @@
-"""Lean 4 export: one exporter, and the shortness is the policy.
+"""Lean 4 export: two exporters, and the shortness is the policy.
 
-certo emits Lean for a LINEAR Farkas certificate and for nothing else. That is
-not a gap waiting to be filled -- it is where the line landed after compiling
-generated files against a real Mathlib, and it follows from one rule:
+certo emits Lean for a LINEAR Farkas certificate and for a SMITH normal form,
+and for nothing else. That is not a gap waiting to be filled -- it is where
+the line landed after compiling generated files against a real Mathlib, and it
+follows from one rule:
 
     emit Lean only when the output is a SMALL SELF-CONTAINED ARTEFACT whose
     content IS the certificate's data, closed by a tactic that DECIDES the
@@ -13,6 +14,15 @@ multipliers exactly, `linarith` is complete for linear arithmetic over an
 ordered field, and the file is thirty-eight lines: an `example`, its
 hypotheses, and one tactic call. If Lean disagrees you find out here rather
 than three weeks in.
+
+A Smith certificate is the same shape with a different tactic. The matrices go
+out as `!![...]` literals and `decide` re-does the arithmetic: `U * A * V = S`,
+both inverses, the determinants, the invariant diagonal. Nothing is asserted
+about `A` that Lean does not recompute, and uniqueness of the normal form --
+which would make it THE Smith form rather than A factorisation -- is not
+claimed, because that is a theorem and this is data. It was added when a user
+formalising toric charts wrote that a declaration accompanied by `True` is not
+enough. It was not: `integer_matrix` had no exporter, so it went out hollow.
 
 WHAT WAS REMOVED AND WHY. Exporters for classifications, compose proofs, unsat
 cores, symbolic quotients and equitable quotients. Each failed the rule in one
@@ -98,6 +108,18 @@ IMPORTS = {
     # so the hypotheses would not even elaborate. Found by --check, which is
     # the whole reason it exists.
     "farkas": ["Mathlib.Data.Real.Basic", "Mathlib.Tactic.Linarith"],
+    # `!![...]` is `Matrix.of ![...]`. The module it lives in MOVED: it is
+    # `Mathlib.LinearAlgebra.Matrix.Notation` in 4.28-era Mathlib, not
+    # `Mathlib.Data.Matrix.Notation`, and multiplication is in `.Mul` rather
+    # than `.Basic`. Found by compiling, which is the whole reason this is a
+    # table rather than a guess.
+    "smith": ["Mathlib.LinearAlgebra.Matrix.Notation",
+              "Mathlib.Data.Matrix.Mul",
+              # Without this, `certo_U.det` does not resolve and Lean reports
+              # it as an unknown CONSTANT rather than a missing import -- an
+              # error that sends the reader hunting for a typo in a name that
+              # is spelled correctly.
+              "Mathlib.LinearAlgebra.Matrix.Determinant.Basic"],
 }
 
 
@@ -241,15 +263,20 @@ def _trim_header(text: str) -> str:
     body = text.split("-/", 1)[1] if "-/" in text else text
     if "sorry" in body:
         return text
+    # The replacement used to name MULTIPLIERS and `linarith`, which is the
+    # farkas file talking. A second exporter inherited that sentence and
+    # shipped a Smith file explaining itself in terms of a tactic it does not
+    # call -- caught by a test asserting the word `sorry` is absent, which it
+    # was not, because the sentence saying so contains it.
     return text.replace(
         "is right. Each\n"
         "  `sorry` below marks a place where something outside Lean was"
         " relied on, and\n"
         "  they are listed at the end.",
         "is right.\n"
-        "  There is no `sorry` here: certo verified the multipliers exactly,"
-        " and\n"
-        "  `linarith` is complete for the fragment this goal lives in.")
+        "  Nothing here is left open: every statement is closed by a tactic"
+        " that\n"
+        "  DECIDES the fragment its goal lives in.")
 
 
 def _op(rel) -> str:
@@ -354,6 +381,140 @@ def check(path, project=None, timeout=900) -> dict:
 
 #: kind -> the function that writes it. ONE entry, and the shortness is the
 #: policy rather than an accident -- see the module docstring.
+# ---------------------------------------------------------------------------
+# integer_matrix -> literal matrices and the identities that pin them
+# ---------------------------------------------------------------------------
+
+
+def _matrix_to_lean(M) -> str:
+    """`!![a, b; c, d]`, Mathlib's literal. Integers, so no coercion games."""
+    return "!![" + "; ".join(", ".join(str(int(v)) for v in row)
+                             for row in M) + "]"
+
+
+def smith_to_lean(data: dict, source="") -> str:
+    """A Smith certificate as literal matrices and the identities over them.
+
+    WHY THIS EXISTS AS A SEPARATE EXPORTER. A user formalising toric charts
+    wrote: "it is not enough to emit a declaration accompanied by `True`".
+    They were right -- `integer_matrix` had no exporter at all, so it went out
+    as a hollow placeholder, honestly marked and useless. Everything the
+    identities need was already in the payload.
+
+    WHAT LEAN RE-ESTABLISHES, and it is the point of sending matrices rather
+    than a claim about them: `decide` and `norm_num` re-do the arithmetic. If
+    certo's Smith normal form were wrong, `U * A * V = S` would not close, and
+    the file would fail to build rather than assert something false.
+
+    WHAT IS NOT CLAIMED. That `S` is THE Smith normal form of `A` -- that is a
+    uniqueness statement about a canonical form, and what is checked here is
+    that this particular factorisation holds with unimodular factors. The
+    invariants are stated as the diagonal they are; uniqueness is a theorem
+    and belongs where the theorems are.
+    """
+    # ONE tactic, named once. Every goal here is a finite computation over
+    # concrete integers, so it is DECIDED rather than searched.
+    #
+    # `decide` reduces matrix multiplication through `Finset.sum` in the
+    # kernel, which is where it could hit a recursion limit rather than a
+    # wrong answer -- so this was first emitted as `first | decide | norm_num`
+    # against that. COMPILED against Mathlib it closed on `decide` every time
+    # and the linter flagged the alternative as dead in every theorem. Two
+    # warnings per statement to guard a case that did not happen at 4x4 is
+    # noise, so the fallback is gone. If a bigger matrix exhausts the kernel,
+    # the file FAILS TO BUILD -- which is the honest failure, and the opposite
+    # of this module's standing worry, the file that compiles and says
+    # nothing.
+    tactic = "by decide"
+
+    p = data["payload"]
+    if p.get("question") != "smith":
+        raise NotExportable(t("lean.matrix.not_smith",
+                              question=str(p.get("question"))))
+
+    need = ("matrix", "u", "v", "s", "u_inv", "v_inv")
+    missing = [k for k in need if not p.get(k)]
+    if missing:
+        raise NotExportable(t("lean.matrix.incomplete",
+                              names=", ".join(missing)))
+
+    n = len(p["matrix"])
+    lines = [_header("smith", data.get("digest", "?"), source), ""]
+    lines.append("/-- The matrix the certificate is about, and the unimodular")
+    lines.append("factors that bring it to `S`. Every number here is")
+    lines.append("literal: Lean re-does the arithmetic rather than trusting")
+    lines.append("that certo did it. -/")
+    for name, key in (("A", "matrix"), ("U", "u"), ("V", "v"), ("S", "s"),
+                      ("Uinv", "u_inv"), ("Vinv", "v_inv")):
+        lines.append("def certo_{} : Matrix (Fin {}) (Fin {}) ℤ := {}".format(
+            name, n, len(p[key][0]), _matrix_to_lean(p[key])))
+    lines.append("")
+
+    lines.append("/-- The factorisation. This is the whole certificate: if it")
+    lines.append("does not close, certo was wrong. -/")
+    lines.append("theorem certo_smith_factorisation :")
+    lines.append("    certo_U * certo_A * certo_V = certo_S := " + tactic)
+    lines.append("")
+
+    lines.append("/-- Unimodular means invertible over ℤ, and the inverses")
+    lines.append("travel so that nothing has to be re-derived. -/")
+    lines.append("theorem certo_U_inv : certo_U * certo_Uinv = 1 := " + tactic)
+    lines.append("theorem certo_V_inv : certo_V * certo_Vinv = 1 := " + tactic)
+    lines.append("")
+
+    if p.get("det_u") is not None and p.get("det_v") is not None:
+        lines.append("/-- ... which the determinants say again, in one number"
+                     " each. -/")
+        lines.append("theorem certo_det_U : certo_U.det = {} := {}"
+                     .format(int(p["det_u"]), tactic))
+        lines.append("theorem certo_det_V : certo_V.det = {} := {}"
+                     .format(int(p["det_v"]), tactic))
+        lines.append("")
+
+    if p.get("det") is not None:
+        lines.append("theorem certo_det_A : certo_A.det = {} := {}"
+                     .format(int(p["det"]), tactic))
+        lines.append("")
+
+    inv = p.get("invariants")
+    if inv:
+        lines.append("/-- The invariant factors, as the diagonal they are.")
+        lines.append("That this is THE Smith normal form is a uniqueness")
+        lines.append("statement and is not claimed here. -/")
+        for i, d in enumerate(inv):
+            lines.append("theorem certo_invariant_{} : certo_S {} {} = {} := {}"
+                         .format(i, i, i, int(d), tactic))
+        lines.append("")
+
+    if p.get("fingerprint") is not None:
+        recipe = p.get("fingerprint_recipe") or {}
+        # A PLAIN block comment, not a doc comment: `/-- -/` must attach to a
+        # declaration, and this attaches to nothing. Lean's complaint lands on
+        # the `end` four lines later, which is not where the mistake is.
+        lines.append("/- The number both sides compute separately over their")
+        lines.append("own copy of `A`. Horner, base {}, modulus {},".format(
+            recipe.get("base", "?"), recipe.get("prime", "?")))
+        lines.append("rows then columns after the two dimensions, and `mod`")
+        lines.append("is the NON-NEGATIVE residue. Agreement means the two")
+        lines.append("sides hold the same matrix. -/")
+        lines.append("-- certo fingerprint: {}".format(p["fingerprint"]))
+        lines.append("")
+
+    # Close the namespace the header opened, and drop the promise to list
+    # `sorry`s. The farkas exporter does both at its return; an exporter that
+    # skipped them emitted a file with an unbalanced `namespace` and a header
+    # advertising placeholders it does not contain.
+    lines.append(FOOTER)
+    return _trim_header("\n".join(lines))
+
+
 EXPORTERS = {
     "farkas": farkas_to_lean,
+    # Registered only after it elaborated against a real Mathlib, which took
+    # three rounds and found four things no reading would have: two module
+    # paths that had moved, six `:=` lost to a format string, a missing
+    # determinant import that surfaced as an unknown CONSTANT, and a `/--`
+    # documenting nothing whose error landed four lines away. That is the
+    # whole argument for the gate.
+    "integer_matrix": smith_to_lean,
 }

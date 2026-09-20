@@ -18,7 +18,17 @@ compute SEPARATELY from their own copy of the data, and compare:
         for each entry, in order:
             h = (h * B + (entry mod p)) mod p
 
-    with p = 2^61 - 1 and B = 1000003
+    with p = 2^61 - 1 and B = 1000003, and `mod` meaning the NON-NEGATIVE
+    residue: 0 <= x mod p < p, so -1 reduces to p - 1.
+
+That last clause is not pedantry, and it was missing. "entry mod p" is
+unambiguous as a residue class and ambiguous as a NUMBER, which is what both
+sides have to agree on: Python's `%` returns the non-negative residue, and a
+language whose `%` truncates toward zero returns -1 where this wants p - 1.
+The two sides then compute different numbers over identical data and the
+disagreement looks like a data error. Lean's `Int.emod` matches this; `Int.mod`
+does not. A user crossing into Lean with negative entries hit exactly this and
+had to pin the convention themselves.
 
 Horner, nothing else. It is order-sensitive, so a transposed or permuted
 matrix is a different number; it is arithmetic, so Lean closes the comparison
@@ -83,7 +93,10 @@ def describe() -> dict:
     things on faith across the boundary is the whole problem.
     """
     return {"algorithm": "horner", "prime": str(PRIME), "base": str(BASE),
-            "order": "rows, then columns, after the two dimensions"}
+            "order": "rows, then columns, after the two dimensions",
+            # The constant that was NOT travelling. Without it the recipe is
+            # complete for non-negative data and ambiguous for the rest.
+            "residue": "non-negative: 0 <= x mod p < p, so -1 reduces to p - 1"}
 
 
 # --- the file format -------------------------------------------------------

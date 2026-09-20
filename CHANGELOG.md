@@ -7,6 +7,82 @@ payload — each such change says so and what still reads the old shape.
 ## [Unreleased]
 
 
+## [0.11.5] — 2026-09-19
+
+**Four asks from someone formalising toric charts, and three defects the work
+uncovered.** They certified 72 cells with the in-process API, took the
+certificates into Lean, and reported what stopped them.
+
+### `toric_cone` kept the multiplicity and threw away the matrix
+
+The generators in the lattice's own coordinates -- the matrix whose determinant
+the multiplicity IS -- were computed three times for one cone: in
+`multiplicity`, again per generator for primitivity, and a third time by the
+verifier. All three discarded it, so a user needing it for a change of basis
+rebuilt it from the rays and the basis by hand, in a separate script, and tied
+the two certificates together with a manifest of their own.
+
+It travels now, with its orientation stated (`M = R * L`, one row per
+generator in the order of `order`, one column per basis vector). Optional, so
+an older certificate verifies exactly as before with one check fewer, and the
+schema stays at 4. `verify` RECOMPUTES it rather than reading it -- it already
+had the coordinates in hand for the primitivity check.
+
+### The fingerprint's recipe was missing the one constant that bites
+
+`describe()` carried the algorithm, the prime, the base and the order, and not
+how to reduce. "entry mod p" is unambiguous as a residue class and ambiguous as
+a NUMBER, which is what two sides have to agree on: Python's `%` gives the
+non-negative residue, and a language whose `%` truncates toward zero gives -1
+where this wants p - 1. Lean's `Int.emod` matches; `Int.mod` does not. A user
+crossing with negative entries pinned the convention themselves.
+
+### Lean export for `integer_matrix`
+
+*"It is not enough to emit a declaration accompanied by `True`."* It was not:
+`integer_matrix` had no exporter, so it went out hollow. Now the matrices go
+out as `!![...]` literals and Lean re-does the arithmetic -- `U * A * V = S`,
+both inverses, the determinants, the invariant diagonal, ten theorems, all
+closed by `decide`, nothing hollow. Uniqueness of the normal form is not
+claimed: that is a theorem, and this is data.
+
+It was registered only after it ELABORATED against a real Mathlib, which took
+four rounds and found six things no reading would have: two module paths that
+had moved, six `:=` lost to a format string, a missing determinant import that
+surfaced as an unknown *constant*, a `/--` documenting nothing whose error
+landed four lines away, a namespace left unclosed, and a header sentence
+explaining the file in terms of `linarith` -- inherited from the farkas
+exporter, which is the only one that had ever existed.
+
+### `certo status --manifest`
+
+A count is not a guarantee: two runs over 71 cells with one duplicate also
+count 72. The manifest gives the set in a canonical order -- **by digest, not
+by filename**, so two people who produced it in a different order get the same
+number -- with both kinds of duplicate reported rather than collapsed, and one
+aggregate fingerprint on the same Horner recipe as `matrix`, so the other side
+recomputes it with no library.
+
+Omission needs a declared set to be detectable at all, which is the honest
+limit: `--expect` takes the headlines that were meant to be produced and names
+what is missing. Without it the manifest says only what is present, and says
+nothing it cannot know.
+
+### `doctor` was wrong about a machine, and could not say why
+
+A user said Lean was installed. certo said otherwise. They were right: `lake
+--version` fails OUTSIDE a Lean project, because the toolchain is chosen by the
+project's `lean-toolchain`, so a working installation with Mathlib built
+reported an error from certo's own directory.
+
+Worse, the reason never printed. The table showed the probe's detail only on
+PASSING rows, so a probe that ran and came back "no default toolchain" looked
+exactly like a binary that is not installed. Details now print on gaps, which
+also surfaced the two that were already being written and never shown --
+including the leftover `~erto-math` directories from an interrupted install,
+which certo had diagnosed correctly and kept to itself.
+
+
 ## [0.11.4] — 2026-09-19
 
 **Everything here came from running the tool on someone's real

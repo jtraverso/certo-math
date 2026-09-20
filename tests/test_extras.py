@@ -7106,15 +7106,20 @@ def test_certify_falls_through_to_the_simplex_when_rounding_cannot_work():
 # --- Lean is emitted for one thing, and refused for the rest ---------------
 
 
-def test_a_linear_farkas_certificate_is_the_one_thing_lean_is_emitted_for():
-    """certo has already verified the multipliers exactly and `linarith` is
-    complete for linear arithmetic over an ordered field, so this is the one
-    export where "it should compile" can be said honestly."""
+def test_lean_is_emitted_for_two_things_and_refused_for_the_rest():
+    """The list is pinned so nothing joins it casually.
+
+    An exporter earns its place by ELABORATING against a real Mathlib, not by
+    looking right -- `tests/run_lean.py` is the gate, and an exporter that did
+    compile, in 12.8 seconds, was still removed on the rule above it. Adding a
+    name here without running that is the thing this assertion exists to make
+    somebody notice.
+    """
     from certo import leanexport
     from certo.engines import farkas
     from certo.spec import load_spec
 
-    assert sorted(leanexport.EXPORTERS) == ["farkas"]
+    assert sorted(leanexport.EXPORTERS) == ["farkas", "integer_matrix"]
 
     root = pathlib.Path(__file__).resolve().parent.parent
     cert = farkas.farkas(
@@ -9208,6 +9213,169 @@ def test_the_counter_marker_is_the_encoders_own_naming():
     assert aux, "at_most_k produced no auxiliaries at all"
     assert all(n.startswith("__count") for n in aux), aux
     assert lint._cardinality_bound(cnf)
+
+
+def test_the_smith_export_states_the_identities_and_nothing_hollow():
+    """A declaration accompanied by `True` is not an export.
+
+    `integer_matrix` had no exporter, so it went out as a placeholder -- named
+    as one, which is honest, and useless to somebody formalising toric charts.
+    Every statement here is over literal matrices that Lean recomputes.
+
+    COMPILED, not inspected: this file elaborates against Mathlib 4.28 with no
+    errors and no warnings. Three rounds to get there.
+    """
+    from certo import MatrixSpec, api, leanexport
+
+    spec = MatrixSpec(matrix=[[4, 0, 0, 0], [2, 2, 0, 0], [2, 0, 2, 0],
+                              [1, 1, 1, 1]],
+                      question="smith", title="a cell")
+    cert = api.run("matrix", spec).certificate
+    data = cert.to_dict()
+    data["digest"] = cert.digest()
+    text = leanexport.EXPORTERS["integer_matrix"](data)
+
+    assert leanexport.hollow_count(text) == 0
+    assert "sorry" not in text
+    for want in ("certo_U * certo_A * certo_V = certo_S",
+                 "certo_U * certo_Uinv = 1",
+                 "certo_V * certo_Vinv = 1",
+                 "certo_A.det = 16",
+                 "certo_S 0 0 = 1",
+                 "certo_S 3 3 = 4"):
+        assert want in text, want
+    # Every theorem is closed, and closed by the same decidable tactic.
+    assert text.count(":= by decide") == text.count("theorem ")
+    # The fingerprint travels with its recipe, residue convention included.
+    assert "NON-NEGATIVE residue" in text
+
+
+def test_the_smith_export_refuses_a_certificate_it_cannot_state():
+    """`refuse rather than guess` is the rule, not an aspiration."""
+    from certo import MatrixSpec, api, leanexport
+
+    spec = MatrixSpec(matrix=[[2, 0], [0, 3]], question="rank", title="rank")
+    cert = api.run("matrix", spec).certificate
+    data = cert.to_dict()
+    try:
+        leanexport.EXPORTERS["integer_matrix"](data)
+        raise AssertionError("did not refuse")
+    except leanexport.NotExportable as exc:
+        assert "smith" in str(exc)
+
+
+# --- the manifest ----------------------------------------------------------
+
+
+def _cone_certs(tmp, n):
+    """`n` distinct cone certificates on disk, and their headlines."""
+    import json as _json
+
+    from certo import ConeSpec, api
+
+    heads = []
+    for i in range(n):
+        rays = {"a": [1, 0, 0], "b": [0, 1, 0], "c": [0, 0, i + 1]}
+        cert = api.run("cone", ConeSpec(rays=rays, title="cell %d" % i)).certificate
+        (tmp / ("c%d.json" % i)).write_text(
+            _json.dumps(cert.to_dict()), encoding="utf-8")
+        heads.append(cert.payload["title"])
+    return heads
+
+
+def test_a_manifest_counts_the_set_and_not_the_files(tmp_path=None):
+    """A count is not a guarantee: two runs over 71 cells with one duplicate
+    also count 72. So the same artefact at two paths is reported, not
+    collapsed -- which is what `scan` does, keying its nodes by digest."""
+    import shutil
+    import tempfile
+
+    from certo import status_report
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        _cone_certs(tmp, 3)
+        shutil.copy(tmp / "c0.json", tmp / "again.json")   # the same one twice
+
+        m = status_report.manifest(str(tmp))
+        assert m["count"] == 3 and m["files"] == 4
+        assert len(m["duplicate_files"]) == 1
+        assert sorted(m["duplicate_files"][0]["paths"]) == ["again.json",
+                                                            "c0.json"]
+        assert not m["duplicate_subjects"]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_the_manifest_order_is_content_and_not_filenames():
+    """Two people who produced the same set in a different order get the same
+    number, which is the only property that makes it worth comparing."""
+    import shutil
+    import tempfile
+
+    from certo import status_report
+
+    a, b = pathlib.Path(tempfile.mkdtemp()), pathlib.Path(tempfile.mkdtemp())
+    try:
+        _cone_certs(a, 4)
+        # same certificates, names that sort the other way
+        for i in range(4):
+            shutil.copy(a / ("c%d.json" % i), b / ("z%d.json" % (3 - i)))
+        ma, mb = status_report.manifest(str(a)), status_report.manifest(str(b))
+        assert ma["fingerprint"] == mb["fingerprint"]
+        assert [e["digest"] for e in ma["entries"]] ==                [e["digest"] for e in mb["entries"]]
+        # and it is not the trivial number
+        assert ma["fingerprint"] != 0
+    finally:
+        shutil.rmtree(a, ignore_errors=True)
+        shutil.rmtree(b, ignore_errors=True)
+
+
+def test_omission_needs_a_declared_set_to_be_detectable():
+    """Without `expect` a manifest can only describe what is present. That is
+    the honest limit, and it is why the flag exists."""
+    import shutil
+    import tempfile
+
+    from certo import status_report
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        heads = _cone_certs(tmp, 3)
+
+        plain = status_report.manifest(str(tmp))
+        assert "missing" not in plain          # says nothing it cannot know
+
+        want = heads[1:] + ["a cell nobody certified"]
+        checked = status_report.manifest(str(tmp), expect=want)
+        assert checked["missing"] == ["a cell nobody certified"]
+        assert checked["unexpected"] == [heads[0]]
+        assert checked["complete"] is False
+
+        assert status_report.manifest(str(tmp), expect=heads)["complete"]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_the_manifest_fingerprint_is_the_matrix_recipe():
+    """One algorithm, so the other side of a language boundary recomputes it
+    with no library -- and the recipe travels, residue convention included."""
+    import shutil
+    import tempfile
+
+    from certo import interchange, status_report
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        _cone_certs(tmp, 3)
+        m = status_report.manifest(str(tmp))
+        assert m["fingerprint_recipe"] == interchange.describe()
+        assert "residue" in m["fingerprint_recipe"]
+        by_hand = interchange.fingerprint(
+            [[int(e["digest"], 16)] for e in m["entries"]])
+        assert m["fingerprint"] == by_hand
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

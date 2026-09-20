@@ -74,7 +74,22 @@ def _geng():
 
 
 def _lean():
-    return _binary("lake", ("--version",), must_run=True)
+    """`lake`, and whether it can answer from HERE.
+
+    Outside a Lean project `lake --version` fails with "no default toolchain":
+    the toolchain is chosen by the project's `lean-toolchain` file, so a
+    perfectly good installation reports an error when asked from certo's own
+    directory. Reporting that as "absent" sent a user to say certo was wrong
+    about their machine, and they were right -- Lean was installed, with
+    Mathlib built, and certo could not see it.
+
+    So the two cases are separated. Missing is missing; present-but-unpinned
+    is present, and says what to do.
+    """
+    ok, detail = _binary("lake", ("--version",), must_run=True)
+    if not ok and "default toolchain" in detail:
+        return False, t("doctor.lean.no_default")
+    return ok, detail
 
 
 def _startup():

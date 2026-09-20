@@ -313,3 +313,91 @@ def _count(it) -> dict:
     for x in it:
         out[x] = out.get(x, 0) + 1
     return dict(sorted(out.items(), key=lambda kv: (-kv[1], kv[0])))
+
+
+def manifest(where=".", expect=None) -> dict:
+    """The set of certificates under `where`, in a canonical order, with a
+    number that says it is that set.
+
+    WHAT THIS ANSWERS that a directory listing does not: *did I certify every
+    cell, exactly once?* A user producing 72 cone certificates and 72 Smith
+    certificates had the in-process API, which made the run cheap, and no way
+    to show afterwards that no cell was skipped and none was done twice. A
+    count is not that guarantee -- two runs over 71 cells and one duplicate
+    also count 72.
+
+    THE ORDER IS BY DIGEST, not by filename. A filename is a choice somebody
+    made; a digest is the content. Two people who produced the same set in a
+    different order get the same manifest, which is the only property that
+    makes the aggregate number worth comparing.
+
+    DUPLICATES ARE REPORTED, NOT COLLAPSED, and there are two kinds. The same
+    digest at two paths is the same certificate written twice -- harmless, and
+    worth knowing. The same (kind, headline) at two DIFFERENT digests is two
+    certificates claiming to be about the same object, which is the one that
+    means somebody's loop ran over a cell twice with different inputs.
+
+    `expect` is what closes the omission side: without a declared set, a
+    manifest can only describe what is present. Give it the headlines you
+    meant to produce and it names what is missing.
+
+    The aggregate fingerprint uses the SAME Horner recipe as `matrix`, so the
+    other side of a language boundary recomputes it with no library -- and the
+    recipe travels, residue convention included.
+    """
+    from . import interchange
+
+    rows = []
+    root = Path(where)
+    files = sorted(root.rglob("*.json")) if root.is_dir() else [root]
+    for f in files:
+        try:
+            raw = json.loads(f.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            continue
+        data = Certificate.unwrap(raw) if isinstance(raw, dict) else None
+        if not isinstance(data, dict) or "kind" not in data:
+            continue
+        try:
+            cert = Certificate.from_dict(data)
+        except (KeyError, TypeError):
+            continue
+        rows.append({"rel": _rel(f, root), "kind": data["kind"],
+                     "headline": _headline(data), "digest": cert.digest()})
+
+    rows.sort(key=lambda r: (r["digest"], r["rel"]))
+
+    by_digest, by_subject = {}, {}
+    for r in rows:
+        by_digest.setdefault(r["digest"], []).append(r["rel"])
+        by_subject.setdefault((r["kind"], r["headline"]), set()).add(r["digest"])
+
+    same_file = [{"digest": d, "paths": sorted(p)}
+                 for d, p in sorted(by_digest.items()) if len(p) > 1]
+    same_subject = [{"kind": k, "headline": h, "digests": sorted(ds)}
+                    for (k, h), ds in sorted(by_subject.items()) if len(ds) > 1]
+
+    # One row per distinct certificate, hex read as the integer it is.
+    unique = sorted(by_digest)
+    print_rows = [[int(d, 16)] for d in unique]
+
+    out = {
+        "root": str(root),
+        "count": len(unique),
+        "files": len(rows),
+        "order": "by digest, ascending",
+        "entries": [{"digest": d, "paths": sorted(by_digest[d])}
+                    for d in unique],
+        "duplicate_files": same_file,
+        "duplicate_subjects": same_subject,
+        "fingerprint": interchange.fingerprint(print_rows) if print_rows else 0,
+        "fingerprint_recipe": interchange.describe(),
+    }
+    if expect is not None:
+        have = {r["headline"] for r in rows}
+        want = set(expect)
+        out["expected"] = len(want)
+        out["missing"] = sorted(want - have)
+        out["unexpected"] = sorted(have - want)
+        out["complete"] = not out["missing"] and not out["unexpected"]
+    return out

@@ -2347,10 +2347,15 @@ def _verify_toric_cone(cert, limits) -> VerifyReport:
                    t("verify.toric.index", value=str(p["multiplicity"]),
                      where=p.get("multiplicity_in", "?"))))
 
-    # 2. primitivity, per generator, in that same lattice
-    bad = []
+    # 2. primitivity, per generator, in that same lattice -- and the relative
+    # matrix comes out of the same coordinates, so it is recomputed here
+    # rather than read back. A stored matrix nobody recomputes is a matrix
+    # anybody can edit, and this one is what a change of basis is built from.
+    bad, recomputed = [], []
     for name in order:
         coords = toric.in_lattice(rays[name], basis)
+        recomputed.append(None if coords is None
+                          else [Fraction(c) for c in coords])
         got = None if coords is None else int(toric.content(
             [Fraction(c).numerator for c in coords]))
         if got != p["primitive"].get(name):
@@ -2359,6 +2364,15 @@ def _verify_toric_cone(cert, limits) -> VerifyReport:
                    t("verify.toric.contents",
                      n=sum(1 for v in p["primitive"].values() if v == 1),
                      total=len(order))))
+
+    rel = p.get("relative")
+    if rel is not None:
+        want = (None if any(r is None for r in recomputed)
+                else [[str(c) for c in row] for row in recomputed])
+        checks.append((t("verify.toric.relative"), rel.get("matrix") == want,
+                       t("verify.toric.relative_detail",
+                         rows=len(rel.get("matrix") or []),
+                         cols=len((rel.get("matrix") or [[]])[0]))))
 
     # 3. the height functional, and the pairing it has to satisfy
     u = p.get("height_functional")
