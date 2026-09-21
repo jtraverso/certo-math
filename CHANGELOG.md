@@ -7,6 +7,46 @@ payload — each such change says so and what still reads the old shape.
 ## [Unreleased]
 
 
+## [0.12.0] — 2026-09-20
+
+**A minor bump, because the spelling of two certificate kinds moves.**
+Nothing about the schema changes and certificates written before this
+still verify -- `_key` was always order-insensitive -- but an
+`exact_cover` or a clique packing produced after it differs from one
+produced before, and that is what a minor is for here.
+
+### Integer labels were sorted as text
+
+`10` before `2`. `cover.edges_of` sorted a vertex set with `key=str`
+unconditionally, so a clique on `{2, 10}` came out as the edge `(10, 2)` --
+the larger vertex first -- and a caller who canonicalised numerically, as
+anybody would, was comparing against `(2, 10)` and finding a foreign edge.
+
+`_key` is order-insensitive, so certo's own comparisons survived it. What did
+not survive is the ORDER THAT TRAVELS: the certificate carried `(10, 2)` while
+the same certificate carried the vertices in the caller's order, so one
+artefact held two orderings of one object. The user's workaround was relabelling
+everything `v0002`, `v0010`.
+
+`key=str` was there for a reason -- labels of mixed types have no order between
+them and `sorted` raises -- so the natural order is tried first and the text
+order is the fallback. That is the case that needs a rule rather than the case
+that has one.
+
+### And the clique item name was not injective
+
+Found while fixing the above, in the same family: `cliques_in_graph` built its
+item name by CONCATENATING the labels, and concatenation is not injective on
+integers. `(1, 112)` and `(11, 12)` are both ascending and both spell `1112`.
+It survives to n = 111 and then fails as "duplicate item names in the
+packing", which sends the reader hunting through their own code for a repeat
+they did not write. The labels are separated now.
+
+Both change the names and the ordering inside `exact_cover` and clique
+packings, so certificates produced before this differ from ones produced after
+-- in their spelling, not in what they establish.
+
+
 ## [0.11.7] — 2026-09-20
 
 **Three defects in the diagnostics, all found by installing 0.11.6 on

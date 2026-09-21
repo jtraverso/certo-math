@@ -225,7 +225,13 @@ class PackingSpec:
             for s in combinations(range(g.n), size):
                 if all(g.has_edge(a, b) for a, b in combinations(s, 2)):
                     res = ["e{}_{}".format(a, b) for a, b in combinations(s, 2)]
-                    items.append(("K{}_{}".format(size, "".join(map(str, s))),
+                    # SEPARATED, because concatenation is not injective on
+                    # integer labels: `(1, 112)` and `(11, 12)` are both
+                    # ascending and both spell `1112`. It survives to n = 111
+                    # and then fails as "duplicate item names in the packing",
+                    # which sends the reader hunting through their own code
+                    # for a repeat they did not write.
+                    items.append(("K{}_{}".format(size, "_".join(map(str, s))),
                                   res, gains[size], "K{}".format(size)))
         return cls(items=items, capacities=capacities,
                    title=title or "clique packing on n={}".format(g.n))

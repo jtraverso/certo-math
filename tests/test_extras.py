@@ -10047,6 +10047,79 @@ def test_one_implementation_answers_where_the_metadata_came_from():
         doctor._metadata_source = real
 
 
+# --- integer labels have their own order -----------------------------------
+
+
+def test_integer_vertices_are_not_sorted_as_text():
+    """`sorted(vertices, key=str)` puts `10` before `2`.
+
+    A clique on `{2, 10}` came out as the edge `(10, 2)` -- the larger vertex
+    first -- and a caller who canonicalised numerically, as anybody would, was
+    comparing against `(2, 10)` and finding a foreign edge. `_key` is
+    order-insensitive so certo's own comparisons survived it; what did not
+    survive is the order that TRAVELS, into the certificate.
+    """
+    from certo.cover import edges_of
+
+    assert edges_of([1, 2, 10]) == [(1, 2), (1, 10), (2, 10)]
+    assert edges_of([10, 2]) == [(2, 10)]
+    # and a hundred-vertex set is in numeric order throughout
+    vs = list(range(100))
+    pairs = edges_of(vs)
+    assert pairs == sorted(pairs)
+    assert all(a < b for a, b in pairs)
+
+
+def test_labels_with_no_order_between_them_still_get_one():
+    """`key=str` was there for a reason: labels of mixed types have no order
+    and `sorted` raises. That is the case that needs a rule, so it is the
+    fallback rather than the default."""
+    from certo.cover import edges_of
+
+    assert edges_of(["b", "a", "c"]) == [("a", "b"), ("a", "c"), ("b", "c")]
+    mixed = edges_of([2, "a", 10])
+    assert len(mixed) == 3
+    assert mixed == edges_of(["a", 10, 2])        # deterministic, whatever it is
+
+
+def test_a_clique_on_two_digit_labels_is_not_a_foreign_edge():
+    """The reported failure, end to end."""
+    from certo.cover import clique_parts
+
+    universe = [(1, 2), (1, 10), (2, 10)]
+    parts, report = clique_parts(universe, [[1, 2, 10]])
+    assert parts == [[(1, 2), (1, 10), (2, 10)]]
+    assert report[0]["edges"] == 3
+    # the part the certificate carries is the universe's own ordering
+    assert set(parts[0]) <= set(universe)
+
+
+def test_clique_item_names_separate_their_labels():
+    """Concatenation is not injective on integer labels: `(1, 112)` and
+    `(11, 12)` are both ascending and both spell `1112`. It survives to
+    n = 111 and then fails as "duplicate item names", which sends the reader
+    hunting through their own code for a repeat they did not write."""
+    from certo import Graph, PackingSpec
+
+    g = Graph.from_edges(120, [(1, 112), (11, 12)])
+    spec = PackingSpec.cliques_in_graph(g, {2: 1})
+    names = [i[0] for i in spec.items]
+    assert len(set(names)) == len(names) == 2
+    assert sorted(names) == ["K2_11_12", "K2_1_112"]
+
+
+def test_the_separator_makes_the_name_injective_where_it_was_not():
+    """Checked over the range that used to break rather than argued about."""
+    from itertools import combinations
+
+    for size in (2, 3):
+        seen = {}
+        for s in combinations(range(120), size):
+            key = "K{}_{}".format(size, "_".join(map(str, s)))
+            assert key not in seen, (s, seen.get(key))
+            seen[key] = s
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

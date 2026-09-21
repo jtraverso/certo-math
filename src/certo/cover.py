@@ -93,9 +93,35 @@ def check(universe, parts, exact: bool = True) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _ordered(vertices) -> list:
+    """The vertex set in ITS OWN order, with a fallback for mixed types.
+
+    This used to be `sorted(set(vertices), key=str)` unconditionally, which
+    sorts integer labels as text: `10` before `2`. So a clique on `{2, 10}`
+    came out as the edge `(10, 2)` -- the larger vertex first -- and a caller
+    who canonicalised numerically, as anybody would, was comparing against
+    `(2, 10)` and finding a foreign edge.
+
+    `_key` is order-insensitive, so certo's own comparisons survived it. What
+    did not survive is the ORDER THAT TRAVELS: the certificate carried
+    `(10, 2)`, and the same certificate carried the vertices in the caller's
+    order, so one artefact held two orderings of one object.
+
+    `key=str` was there for a reason -- labels of mixed types have no order
+    between them and `sorted` raises. So the natural order is tried first and
+    the text order is the fallback, which is the case that needs a rule rather
+    than the case that has one.
+    """
+    vs = set(vertices)
+    try:
+        return sorted(vs)
+    except TypeError:
+        return sorted(vs, key=str)
+
+
 def edges_of(vertices) -> list:
     """Every pair from a vertex set, as sorted tuples."""
-    vs = sorted(set(vertices), key=str)
+    vs = _ordered(vertices)
     return [(vs[i], vs[j]) for i in range(len(vs)) for j in range(i + 1, len(vs))]
 
 
