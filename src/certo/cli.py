@@ -91,13 +91,41 @@ def print_calibration(cal, worst_k=3):
                                         for v in worst)))
 
 
+def _as_json(res, args) -> dict:
+    """The result as JSON, whole or summarised.
+
+    `--cert-all --json` on a nested sweep puts megabytes on stdout: a range
+    over three sizes and thirty-four graphs is already 94 KB, and every
+    per-item certificate is in there. A reader piping that into `jq` to see a
+    verdict has paid for a proof they did not ask to read.
+
+    `--brief` replaces the certificate with what identifies it -- kind,
+    digest, whether it is solver-free, and how big the thing it stands for is
+    -- and changes nothing else. The certificate itself still goes to `--cert`
+    if it was asked for, because a summary is for reading and the artefact is
+    for keeping.
+    """
+    out = res.to_dict()
+    if not getattr(args, "brief", False) or not out.get("certificate"):
+        return out
+    cert = res.certificate
+    out["certificate"] = {
+        "kind": cert.kind,
+        "digest": cert.digest(),
+        "solver_free": bool(cert.solver_free),
+        "bytes": len(json.dumps(cert.to_dict(), ensure_ascii=False)),
+        "summarised": True,
+    }
+    return out
+
+
 def emit(res: Result, args) -> int:
     # Provenance: tie the certificate to the spec and version that made it.
     if res.certificate is not None:
         res.certificate.stamp(getattr(args, "spec", None))
 
     if getattr(args, "json", False):
-        print(json.dumps(res.to_dict(), indent=2, ensure_ascii=False))
+        print(json.dumps(_as_json(res, args), indent=2, ensure_ascii=False))
     else:
         print("{}  [{}]".format(banner(res), res.status.value))
         if res.detail:
@@ -1486,7 +1514,8 @@ def _sweep_range(args, spec, mode):
     res = graphsearch.sweep_range(spec, lo, hi, limits_from(args),
                                   stop_on_first=args.stop_on_first,
                                   cert_mode=mode,
-                                  use_geng=not args.no_geng, on_size=on_size)
+                                  use_geng=not args.no_geng, on_size=on_size,
+                                  spec_path=getattr(args, "spec", "") or "")
     return emit(res, args)
 
 
@@ -1960,6 +1989,9 @@ def build_parser():
     # subcomando, que es el orden natural (`certo synth spec.py --cert c.json`).
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="JSON output")
+    common.add_argument("--brief", action="store_true",
+                        help="with --json: the certificate as kind, digest "
+                             "and size instead of its whole payload")
     common.add_argument("--lang", choices=available(),
                         help="output language (default: en, or $CERTO_LANG)")
     common.add_argument("--cert", metavar="FILE", help="write the certificate there")

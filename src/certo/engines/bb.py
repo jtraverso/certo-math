@@ -106,6 +106,58 @@ def _partial(nodes, seen, incumbent, best_bound, minimising):
     return out
 
 
+def _frontier(entries, order, incumbent):
+    """The unopened stack, as nodes that carry what bounds them.
+
+    Each entry took its parent's certificate down with it when it was pushed,
+    so an open node can state a limit its OWN subtree cannot exceed without
+    another linear program being solved: a child's feasible set is a subset of
+    its parent's, so the parent's dual bounds it too.
+
+    Nodes whose parent is the root have nothing above them and are declared
+    with no bound; the interval then rests on the others, and a frontier where
+    that is every node is a frontier that bounds nothing -- which `verify`
+    says rather than papering over.
+    """
+    out, seen = [], set()
+    for fixed, _depth, parent_cert, parent_bound in entries:
+        key = _key(order, fixed)
+        ident = ",".join("{}={}".format(v, x) for v, x in key)
+        if ident in seen or parent_cert is None or parent_bound is None:
+            continue
+        seen.add(ident)
+        p = parent_cert.payload
+        # THE PARENT'S fixings travel with the parent's dual, because that is
+        # the program the dual belongs to. Storing the dual against the
+        # CHILD's fixings -- the first version of this -- checks a vector
+        # against a matrix it never came from, and every open node failed.
+        parent = [pair for pair in key][:-1]
+        out.append({"fixed": key, "why": "open", "from": parent,
+                    "bound": exact.serialize(parent_bound),
+                    "dual": list(p["dual"]),
+                    "primal": list(p["primal"] or [])})
+    return out
+
+
+def _frontier_cert(spec, nodes, frontier, incumbent, incumbent_cert, order,
+                   minimising, reason, spec_path):
+    """The stopped search as an artefact. See `branch_frontier_certificate`."""
+    from ..certificate import branch_frontier_certificate
+
+    top = incumbent
+    for o in frontier:
+        top = max(top, exact.to_fraction(o["bound"]))
+    sign = -1 if minimising else 1
+    return branch_frontier_certificate(
+        incumbent=exact.serialize(incumbent), incumbent_cert=incumbent_cert,
+        nodes=nodes, open_nodes=frontier, bound=exact.serialize(top),
+        order=order, sense=spec.sense, system=system_of(spec), reason=reason,
+        original_sense="min" if minimising else spec.sense,
+        original_optimum=exact.serialize(sign * incumbent),
+        title=spec.title,
+    ).stamp(spec_path or None)
+
+
 def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
                   max_nodes: int = 5_000, wall_ms=None) -> Result:
     from . import lp, mixed
@@ -144,19 +196,28 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
     incumbent_cert = start.certificate.to_dict()
 
     order = list(spec.discrete)
-    nodes, stack = [], [({}, 0)]
+    nodes, stack = [], [({}, 0, None, None)]
     seen = 0
     best_bound = None
 
     while stack:
-        fixed, depth = stack.pop()
+        fixed, depth, parent_cert, parent_bound = stack.pop()
         seen += 1
         over_nodes = seen > max_nodes
         over_clock = wall_ms is not None and ms() > wall_ms
         if over_nodes or over_clock:
             part = _partial(nodes, seen - 1, incumbent, best_bound, minimising)
+            # THE STACK IS THE FRONTIER, and it used to be dropped on the
+            # floor along with the certificate. The node about to be opened
+            # goes back on it: it was popped and not examined.
+            frontier = _frontier([(fixed, depth, parent_cert, parent_bound)]
+                                 + list(stack), order, incumbent)
+            cert = _frontier_cert(spec, nodes, frontier, incumbent,
+                                  incumbent_cert, order, minimising,
+                                  "clock" if over_clock else "nodes",
+                                  spec_path)
             return Result("bb", Status.RESOURCE_EXHAUSTED,
-                          Verdict.INCONCLUSIVE, ENGINE, ms(), None,
+                          Verdict.INCONCLUSIVE, ENGINE, ms(), cert,
                           detail=t("engine.bb.stopped_clock" if over_clock
                                    else "engine.bb.stopped_nodes",
                                    limit=wall_ms if over_clock else max_nodes,
@@ -164,7 +225,8 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
                                    bound=part.get("best_bound", "?"),
                                    gap=part.get("gap", "?"),
                                    nodes=part["nodes_opened"]),
-                          meta=dict(part, stopped=True))
+                          meta=dict(part, stopped=True,
+                                    frontier=len(frontier)))
 
         node_spec, const = _node_lp(spec, fixed)
         res = lp.opt(node_spec, lim)
@@ -218,7 +280,13 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
         for val in vals:
             child = dict(fixed)
             child[var] = val
-            stack.append((child, depth + 1))
+            # The parent's CERTIFICATE travels with the child, so a search
+            # that stops can say what the unopened subtree cannot exceed.
+            # Carrying only the parent's `bound` would have been free and
+            # would have carried a number nothing checks: a branching node's
+            # bound is verified nowhere, because in a completed tree no claim
+            # rests on it. Here one does.
+            stack.append((child, depth + 1, res.certificate, bound))
 
     cert = branch_bound_certificate(
         incumbent=exact.serialize(incumbent), incumbent_cert=incumbent_cert,

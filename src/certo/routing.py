@@ -238,7 +238,9 @@ KIND_OF = {
     # pairing is its own kind -- the same flag that makes the tier
     # `depends` rather than `yes`.
     "opt": ("lp_dual", "gap"),
-    "mixed": "mixed_design", "order": "asymptotic", "bounds": "ball",
+    # `mixed --prove-optimal` runs branch and bound, which now leaves an
+    # artefact when its budget runs out instead of only a status report.
+    "mixed": ("mixed_design", "branch_bound", "branch_frontier"), "order": "asymptotic", "bounds": "ball",
     "ideal": "ideal", "eliminate": "resultant",
     "parametric": "parametric_bound", "peak": "integer_peak",
         # `--parametric` asks the same question about a family.
@@ -248,7 +250,7 @@ KIND_OF = {
     "cone": "toric_cone", "range": "variable_range",
     "cycle": "dependency_cycle", "bind": "lean_binding",
     "family": "family_extremum", "ratio": "ratio_bound",
-    "moment": "first_moment", "entry": "first_entry", "exists": "drat",
+    "moment": "first_moment", "entry": "first_entry", "exists": ("drat", "cnf_model", "exact_cover"),
     "cover": "exact_cover", "sos": "sos", "number": "number",
     # A satisfiable CNF gives a model; an unsatisfiable one gives the proof.
     "cases": ("drat", "cnf_model"), "enum": "graph_set",

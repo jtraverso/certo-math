@@ -3347,6 +3347,25 @@ def _node_closes(root, node, incumbent):
     return exact.to_fraction(node["bound"]) <= incumbent, "bad"
 
 
+def _node_bound_holds(root, node) -> bool:
+    """Is the node's declared bound an upper bound for ITS OWN subproblem?
+
+    The same arithmetic `_node_closes` performs, without the last question.
+    Closing asks two things -- the bound is real, AND it does not beat the
+    incumbent -- and a frontier needs only the first: an OPEN node has not
+    been closed, and the point of carrying its dual is that its subtree still
+    cannot exceed the number it declares.
+    """
+    from . import exact
+
+    if node.get("dual") is None or node.get("bound") is None:
+        return False
+    fake = dict(node, why="bound")
+    ok, _why = _node_closes(root, fake,
+                            exact.to_fraction(node["bound"]))
+    return ok
+
+
 def _leq_parts(node_spec):
     """`max c.x, A x <= b, x >= 0` for a node, the same way the producer saw it."""
     from . import exact
@@ -3355,6 +3374,159 @@ def _leq_parts(node_spec):
     return ([[exact.to_fraction(v) for v in row] for row in A],
             [exact.to_fraction(v) for v in b],
             [exact.to_fraction(v) for v in c])
+
+
+def branch_frontier_certificate(incumbent, incumbent_cert, nodes, open_nodes,
+                                bound, order, sense, system, reason,
+                                original_sense=None, original_optimum=None,
+                                title="") -> Certificate:
+    """A search that ran out of budget, as an artefact instead of a log.
+
+    `bb` used to return `RESOURCE_EXHAUSTED` with no certificate at all, and
+    its own status report said so in as many words: "Not a certificate -- a
+    status report". It also discarded the stack of nodes it had not opened.
+    So hours of search left nothing that could be verified, archived, resumed
+    or combined, which is the whole of what a user meant by asking for a
+    frontier.
+
+    WHAT IT CLAIMS, and it is an interval rather than a number:
+
+        the optimum lies in [incumbent, bound]
+        this design attains `incumbent`
+        these OPEN subproblems are everything that remains
+
+    The third clause is the one that makes it a certificate rather than a
+    log. It is checked the way `branch_bound` checks completeness -- every
+    branching node has all its children, and every child is closed, branching
+    or declared open -- so a frontier that quietly dropped a subtree fails
+    exactly as a tree that dropped one does.
+
+    WHAT IT DOES NOT CLAIM: that `incumbent` is optimal. That is the point.
+
+    An open node carries its own dual. Inheriting the parent's bound would
+    have been free, and would have inherited a number nothing checks: a
+    branching node's `bound` is not verified anywhere, because in a completed
+    tree no claim rests on it. Here one does.
+    """
+    return Certificate(
+        kind="branch_frontier",
+        solver_free=True,
+        payload={
+            "incumbent": incumbent, "incumbent_cert": incumbent_cert,
+            "nodes": nodes, "open": open_nodes, "bound": bound,
+            "order": list(order), "sense": sense, "system": system,
+            "reason": reason,
+            "original_sense": original_sense or sense,
+            "original_optimum": original_optimum,
+            "title": title,
+        },
+        note_key="cert.note.branch_frontier",
+    )
+
+
+def _verify_branch_frontier(cert, limits) -> VerifyReport:
+    """An interval, a design that reaches its lower end, and a frontier that
+    accounts for everything still open."""
+    from . import exact, tree
+
+    p = cert.payload
+    incumbent = exact.to_fraction(p["incumbent"])
+    claimed = exact.to_fraction(p["bound"])
+    nodes, opens = p["nodes"], p["open"]
+    checks, warnings = [], []
+
+    by_key = {_node_id(n["fixed"]): n for n in nodes}
+    open_by_key = {_node_id(o["fixed"]): o for o in opens}
+    both = set(by_key) & set(open_by_key)
+    checks.append((t("verify.bb.unique"),
+                   len(by_key) == len(nodes)
+                   and len(open_by_key) == len(opens) and not both,
+                   t("verify.bb.duplicates",
+                     n=len(nodes) - len(by_key) + len(opens)
+                     - len(open_by_key) + len(both))))
+
+    sub = p.get("incumbent_cert")
+    if sub is None:
+        checks.append((t("verify.bb.incumbent"), False,
+                       t("verify.bisect.no_cert")))
+    else:
+        rep = verify(Certificate.from_dict(sub), limits)
+        reached = exact.to_fraction(
+            (sub.get("payload") or {}).get("achieved") or p["incumbent"])
+        checks.append((t("verify.bb.incumbent"),
+                       rep.ok and reached == incumbent,
+                       t("verify.lp.declared", value=p["incumbent"])))
+
+    system = p.get("system")
+    root = tree.spec_of(system) if system else None
+    if root is None:
+        # Without it a node's dual is a dual for SOME linear program and
+        # nothing says which, so nothing below can be tied down.
+        checks.append((t("verify.bb.tied"), False, t("verify.bb.untied")))
+        return VerifyReport(False, "branch_frontier", True, checks=checks,
+                            detail=t("verify.frontier.detail",
+                                     lo=p["incumbent"], hi=p["bound"],
+                                     n=len(opens)))
+
+    # Every branching node has all its children, and each child is accounted
+    # for: closed, branching, or open. A frontier that dropped a subtree
+    # reads exactly like one that explored it.
+    missing = []
+    for n in nodes:
+        if n["why"] != "branch":
+            continue
+        for val in n["values"]:
+            child = _node_id(list(n["fixed"]) + [[n["on"], val]])
+            if child not in by_key and child not in open_by_key:
+                missing.append("{}={}".format(n["on"], val))
+    checks.append((t("verify.bb.covered"), not missing,
+                   t("verify.bb.missing", names=", ".join(missing[:3]) or "-",
+                     n=len(missing))))
+
+    bad_close = []
+    for n in nodes:
+        if n["why"] == "branch":
+            continue
+        ok, _why = _node_closes(root, n, incumbent)
+        if not ok:
+            bad_close.append(_node_id(n["fixed"]) or "root")
+    checks.append((t("verify.bb.closed"), not bad_close,
+                   t("verify.bb.open", names=", ".join(bad_close[:3]) or "-",
+                     n=len(bad_close))))
+
+    # An OPEN node carries its own dual, and the interval's upper end is the
+    # largest of them. A node whose dual does not hold is worse than an
+    # unexplored one: it claims a limit it cannot support.
+    bad_open, worst = [], incumbent
+    for o in opens:
+        # The dual belongs to the PARENT's program, and the open node is a
+        # restriction of it: fixing one more variable can only shrink the
+        # feasible set, so the parent's bound bounds the child too. Both
+        # halves are checked -- the dual against the parent's derived matrix,
+        # and that the child really does extend the parent.
+        parent = dict(o, fixed=o.get("from") or [], why="bound")
+        extends = (list(o.get("from") or [])
+                   == list(o["fixed"])[:len(o.get("from") or [])])
+        if not extends or not _node_bound_holds(root, parent):
+            bad_open.append(_node_id(o["fixed"]) or "root")
+            continue
+        worst = max(worst, exact.to_fraction(o["bound"]))
+    checks.append((t("verify.frontier.bounded"), not bad_open,
+                   t("verify.frontier.unbounded",
+                     names=", ".join(bad_open[:3]) or "-", n=len(bad_open))))
+
+    checks.append((t("verify.frontier.interval"),
+                   not bad_open and worst == claimed and incumbent <= claimed,
+                   t("verify.frontier.range", lo=exact.serialize(incumbent),
+                     hi=exact.serialize(worst))))
+
+    warnings.append(t("verify.frontier.scope"))
+    return VerifyReport(
+        all(c[1] for c in checks), "branch_frontier", True, checks=checks,
+        warnings=warnings,
+        detail=t("verify.frontier.detail", lo=p["incumbent"], hi=p["bound"],
+                 n=len(opens)),
+    )
 
 
 def _verify_branch_bound(cert, limits) -> VerifyReport:
@@ -4560,5 +4732,6 @@ VERIFIERS = {
     "gap": _verify_gap,
     "farkas_ray": _verify_farkas_ray,
     "branch_bound": _verify_branch_bound,
+    "branch_frontier": _verify_branch_frontier,
     "asymptotic": _verify_asymptotic,
 }

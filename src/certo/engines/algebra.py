@@ -653,6 +653,29 @@ def exists(spec, limits: Limits | None = None, spec_path: str = "",
                       ENGINE_COVER, 0.0, None,
                       detail=t("engine.exists.no_candidates"))
     universe = [u for u in spec.universe]
+    # An EMPTY UNIVERSE has a cover, and it is the empty family. `cover`
+    # certifies exactly that -- "0 parts, every one of the 0 elements in
+    # exactly one" -- while `exists` refused the same spec as having "no
+    # content": two commands, one object, one certifying and one declining.
+    #
+    # The refusal was the vacuity reflex misapplied. Vacuity matters when a
+    # hypothesis set is contradictory, because the proof is then about
+    # nothing; here the question has an answer and a witness. So it is
+    # answered, and the warning says what it does not establish.
+    if not universe:
+        from ..certificate import cover_certificate
+
+        cert = cover_certificate(
+            universe=[], parts=[], exact=spec.exact, cliques=spec.cliques,
+            multiplicities={}, part_report=None, max_size=spec.max_size,
+            title=spec.title,
+        ).stamp(spec_path or None)
+        return Result(
+            "exists", Status.SAT, Verdict.PROVED, ENGINE_COVER,
+            (time.perf_counter() - t0) * 1000, cert,
+            detail=t("engine.exists.empty_universe"),
+            meta={"universe": 0, "candidates": 0, "vacuous": True})
+
     if spec.cliques:
         # Vertex sets, so the parts are the edges they span -- the same
         # reading `cover --cliques` uses, and the reason a triangle is three

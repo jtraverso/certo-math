@@ -95,6 +95,11 @@ CASES = [
     # The recipe in docs/CASES.md. A recipe nobody runs is a recipe that rots,
     # and this one exists because a team could not find the encoding.
     ("smallest_deletion.py", "bisect", []),
+
+    # A nested range: sweep_range over sweep over lp_dual. It exists because
+    # what a nested artefact carries -- and what it loses -- is invisible on a
+    # flat one, and that is where two defects lived.
+    ("sweep_range_nested.py", "sweep", ["--n-range", "3..4"]),
 ]
 
 #: Commands that report rather than certify. `status` is not here because it

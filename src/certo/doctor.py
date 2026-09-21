@@ -367,56 +367,73 @@ def _partial_install():
 DISTRIBUTION = "certo-math"
 
 
-def _metadata_source():
-    """The distribution's metadata, and WHERE it was read from.
+def _metadata_copies() -> list:
+    """Every copy of the distribution's metadata, and what each one IS.
 
-    `importlib.metadata` searches `sys.path`, and a source tree carries
-    `src/<name>.egg-info` the moment anybody runs `python -m build`. With
-    `PYTHONPATH=src` that egg-info is found first and answers as though it
-    were an install -- so this check, which exists to catch an install that
-    has gone stale, reported `[ok] matching the code` on a machine where the
-    package was ABSENT and `pip show` returned nothing. The state it was
-    written to detect is the state it hid.
+    There are three kinds and they were being collapsed into one answer:
 
-    So the question is not only "what version does the metadata say" but
-    "is that metadata an INSTALL". Anything outside a site-packages root is
-    not one.
+      INSTALLED   a `.dist-info` under a site-packages root
+      SOURCE      an `egg-info` in a checkout, which `python -m build` leaves
+                  behind and `PYTHONPATH=src` puts first on `sys.path`
+      LEFTOVER    a `~`-prefixed directory pip abandoned mid-install -- and
+                  `importlib.metadata` reads it as a real distribution, so a
+                  half-finished upgrade answers with the OLD version forever
 
-    Returns `(version, installed, path)`; `version` is None when nothing was
-    found at all.
+    A machine with all three is not exotic: it is a checkout, an install, and
+    one interrupted `pip install`. Reporting the first one found made `doctor`
+    warn about a source tree while `pip show` correctly said 0.12.0 -- true,
+    useless, and indistinguishable from the case that matters.
+
+    Returns `[(version, kind, path)]`, newest metadata first is not attempted:
+    the caller decides which kind it cares about.
     """
     try:
-        from importlib.metadata import PackageNotFoundError, distribution
+        from importlib.metadata import distributions
     except ImportError:
-        # No metadata machinery at all: nothing to disagree with, which is
-        # the quiet branch and not a failure. The import was outside the
-        # guard for one commit and an interpreter without it crashed here.
-        return None, False, None
-
-    dist = None
-    for name in (DISTRIBUTION, "certo"):
-        # Installs made before the distribution was renamed still carry the
-        # old name. Without this the check would find nothing, take the quiet
-        # branch, and stop working -- a guard that goes silent is worse than
-        # one that was never written.
-        try:
-            dist = distribution(name)
-            break
-        except PackageNotFoundError:
-            continue
-        except Exception:  # noqa: BLE001  -- a broken .dist-info
-            continue
-    if dist is None:
-        return None, False, None
-
-    try:
-        where = Path(str(dist.locate_file(""))).resolve()
-    except (OSError, AttributeError):
-        return dist.version, True, None
+        return []
 
     roots = _site_roots()
-    installed = any(where == r or r in where.parents for r in roots)
-    return dist.version, installed, where
+    wanted = {DISTRIBUTION.lower(), "certo"}
+    out = []
+    for dist in distributions():
+        try:
+            name = (dist.metadata["Name"] or "").lower().replace("_", "-")
+        except Exception:  # noqa: BLE001  -- a broken METADATA file
+            continue
+        if name not in wanted:
+            continue
+        try:
+            where = Path(str(dist.locate_file(""))).resolve()
+            version = dist.version
+        except (OSError, AttributeError):
+            continue
+        holder = getattr(dist, "_path", None)
+        if holder is not None and Path(str(holder)).name.startswith("~"):
+            kind = "leftover"
+        elif any(where == r or r in where.parents for r in roots):
+            kind = "installed"
+        else:
+            kind = "source"
+        out.append((version, kind, where))
+    return out
+
+
+def _metadata_source():
+    """The version `pip show` would report, and whether it is an install.
+
+    Kept for the one question its callers ask -- `cli.installed_version` needs
+    a version only when there genuinely is an install. An INSTALLED copy wins
+    over a source tree, because that is what `pip show` reports and what a bug
+    report will name.
+    """
+    copies = _metadata_copies()
+    for version, kind, where in copies:
+        if kind == "installed":
+            return version, True, where
+    for version, kind, where in copies:
+        if kind == "source":
+            return version, False, where
+    return None, False, None
 
 
 def _installed_metadata():
@@ -428,22 +445,42 @@ def _installed_metadata():
     disagreement here is not a broken install; it is a stale one, and saying
     which is the whole value of the check.
 
-    And a version that came from a source tree is not an install at all,
-    which is a third answer this used to give as the first.
+    Four answers, and the first version of this gave the first three as one.
     """
     from . import __version__
 
-    version, installed, where = _metadata_source()
-    if version is None:
+    copies = _metadata_copies()
+    installed = [v for v, kind, _w in copies if kind == "installed"]
+    source = [(v, w) for v, kind, w in copies if kind == "source"]
+    leftover = sorted({v for v, kind, _w in copies if kind == "leftover"})
+
+    if not copies:
         return True, t("doctor.detail.metadata_absent",
                        why="PackageNotFoundError")
-    if not installed:
+
+    # A leftover answers `importlib.metadata` like an install, so it is named
+    # here rather than silently counted as one. `--repair` removes it.
+    suffix = ("" if not leftover else
+              " " + t("doctor.detail.metadata_leftover",
+                      versions=", ".join(leftover)))
+
+    if installed:
+        if __version__ in installed:
+            return not leftover, t("doctor.detail.metadata_ok",
+                                   version=__version__) + suffix
+        return False, t("doctor.detail.metadata_stale",
+                        installed=", ".join(sorted(set(installed))),
+                        running=__version__) + suffix
+
+    if source:
+        version, where = source[0]
         return False, t("doctor.detail.metadata_source_tree",
-                        version=version, path=str(where or "?"))
-    if version == __version__:
-        return True, t("doctor.detail.metadata_ok", version=version)
-    return False, t("doctor.detail.metadata_stale", installed=version,
-                    running=__version__)
+                        version=version, path=str(where)) + suffix
+
+    # Only leftovers answered: there is no install, and the version anything
+    # reads out of the metadata is the one pip failed to replace.
+    return False, t("doctor.detail.metadata_only_leftover",
+                    versions=", ".join(leftover))
 
 
 CHECKS = [

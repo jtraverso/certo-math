@@ -267,7 +267,8 @@ def _describe(spec, graphs):
 
 def sweep_range(spec, lo: int, hi: int, limits: Limits | None = None,
                 stop_on_first: bool = False, cert_mode: str = "failures",
-                use_geng: bool = True, on_size=None) -> Result:
+                use_geng: bool = True, on_size=None,
+                spec_path: str = "") -> Result:
     """From which n does it start failing? bisect applied to the order.
 
     Lives here rather than in the CLI so the MCP server gets it too: a mode
@@ -282,6 +283,16 @@ def sweep_range(spec, lo: int, hi: int, limits: Limits | None = None,
         for n in range(lo, hi + 1):
             spec.n = n
             res = sweep(spec, limits, use_geng=use_geng, cert_mode=cert_mode)
+            # STAMPED BEFORE IT IS EMBEDDED. Only the top-level result used to
+            # be stamped -- `emit` does that, once, on its way out -- so every
+            # child went in carrying a version and a timestamp and no
+            # `spec_path`. That is not a cosmetic loss: `_replay` needs the
+            # path to re-run the predicate, finds none, and `sweep_strength`
+            # falls to RECORDED. So a size whose predicate DID certify was
+            # summarised as "recorded only, predicate NOT certified", and the
+            # range faithfully repeated it. One missing field, two symptoms.
+            if res.certificate is not None and spec_path:
+                res.certificate.stamp(spec_path)
             row = {"n": n, "verdict": res.verdict.value, "detail": res.detail,
                    "cert": res.certificate.to_dict() if res.certificate else None}
             entries.append(row)

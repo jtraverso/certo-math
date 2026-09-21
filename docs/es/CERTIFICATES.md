@@ -181,6 +181,42 @@ nada sobre si la matemática de certo es correcta— así que nada comprobaba un
 emisión entre una de esas corridas y una publicación. Esto sí, para cada
 exportador registrado, en cada corrida de la suite.
 
+## Una búsqueda que agotó su presupuesto
+
+`branch_bound` afirma un óptimo y lo paga: cada hoja cerrada, cada rama
+cubierta. Branch and bound es exponencial, así que una corrida real a menudo no
+termina — y hasta la 0.12.1 una detenida devolvía `resource_exhausted` **sin
+certificado alguno**. Su propio informe lo decía: *«Not a certificate — a
+status report»*. Y además tiraba la pila de nodos sin abrir. Horas de búsqueda
+que no dejaban nada verificable, archivable ni combinable.
+
+`branch_frontier` es esa corrida como artefacto. Afirma un INTERVALO:
+
+```
+el óptimo está en [incumbente, cota]
+este diseño alcanza el extremo inferior
+estos subproblemas ABIERTOS son todo lo que queda
+```
+
+La tercera cláusula es la que lo hace certificado y no bitácora, y se comprueba
+igual que la completitud de un árbol cerrado: cada nodo de ramificación tiene
+todos sus hijos, y cada hijo está cerrado, ramifica, o está declarado abierto.
+Una frontera que perdió un subárbol falla exactamente igual que un árbol que lo
+perdió.
+
+**Un nodo abierto lleva el dual de su padre, y las fijaciones del padre con
+él.** El conjunto factible de un hijo es subconjunto del de su padre, así que
+el dual del padre también lo acota — y se comprueban las dos mitades: el dual
+contra el programa derivado del padre, y que el hijo de verdad extiende al
+padre. Heredar solo el número habría sido gratis y habría heredado algo que
+nadie comprueba: la cota de un nodo de ramificación no se verifica en ningún
+sitio en un árbol cerrado, porque allí no descansa ninguna afirmación sobre
+ella. Aquí sí.
+
+**Lo que no afirma: que el incumbente sea óptimo.** Ese es el punto. `verify`
+lo dice como aviso en todos ellos.
+
+
 ## Los avisos son parte del artefacto
 
 Un certificado lleva lo que *no* establece, y `verify` lo repite cada vez —meses

@@ -7,6 +7,126 @@ payload — each such change says so and what still reads the old shape.
 ## [Unreleased]
 
 
+## [0.12.1] — 2026-09-21
+
+**Six things a user reported, and three of them were not what they
+looked like.** A patch rather than a minor: nothing here changes an
+existing payload. `branch_frontier` is a NEW kind -- the forty-eighth --
+so certificates written before this are untouched by it.
+
+### A search that ran out of budget now leaves something
+
+Asked for by a user as "a certified weighted packing primitive with frontier
+state". The weighted packing was already there -- `PackingSpec` carries gains,
+`bb` runs on the LPSpec, and `branch_bound` certificates already hold a
+weighted tree. What was missing was the frontier, and the code said so:
+
+```python
+def _partial(nodes, seen, incumbent, best_bound, minimising):
+    """What a stopped search knows. Not a certificate -- a status report."""
+```
+
+A stopped run returned `resource_exhausted`, `None` for the certificate, and
+threw away the stack of nodes it had not opened. Hours of search leaving
+nothing to verify, archive or combine.
+
+`branch_frontier` claims an interval -- `[incumbent, bound]` -- a design that
+attains its lower end, and **a frontier that accounts for everything still
+open**. That last clause is checked the way a closed tree's completeness is:
+every branching node has all its children, and every child is closed,
+branching or declared open. It does NOT claim the incumbent is optimal, and
+`verify` warns so on every one.
+
+An open node carries its PARENT's dual and the parent's fixings with it: a
+child's feasible set is a subset of its parent's, so the parent's dual bounds
+it too, and both halves are checked. The first version stored that dual
+against the child's own fixings -- a vector against a matrix it never came
+from -- and every open node failed.
+
+Five forgeries were tried and each fails on its own check: a dropped open
+node, an open bound lowered to the incumbent, the interval narrowed by hand,
+a parent reassigned to the root, and one node's dual moved to another.
+
+**What this does not do, deliberately:** resume. Emitting a frontier is not
+the same as retaking one, and what is guaranteed when two partial runs are
+recombined is a decision nobody has been able to state yet. Nothing here
+forecloses it.
+
+### One missing field, two symptoms, reported as two items
+
+A user auditing a nested sweep wrote their own checker, because the top-level
+report did not say what the inner certificates established -- and separately
+saw a warning that the predicate had not been re-run on artefacts carrying
+their own proofs. Building `examples/sweep_range_nested.py` to reproduce it
+showed the two were one thing.
+
+**Only the top-level result was stamped.** `emit` does that once, on its way
+out, so every child of a `sweep_range` went in with a version, a timestamp and
+no `spec_path`. Not a cosmetic loss: `_replay` needs the path to re-run the
+predicate, finds none, and `sweep_strength` falls to `RECORDED`. So a size
+whose predicate DID certify was summarised as *"recorded only, predicate NOT
+certified"*, and the range faithfully repeated it.
+
+Children are stamped before they are embedded now, and the same sizes report
+`reproducible`. Where the report still says a predicate is not fully
+certified, that is the tool being right: a predicate that returns no
+certificate for some inputs has not certified them, and saying so is the
+distinction the whole command is built around.
+
+`examples/sweep_range_nested.py` runs the three-level shape in the suite --
+`sweep_range` over `sweep` over `lp_dual` -- because what a nested artefact
+carries, and what it loses, is invisible on a flat one.
+
+### `--brief`
+
+`--cert-all --json` puts the whole proof on stdout: a range over three sizes
+and thirty-four graphs is already 94 KB, and a reader piping that into `jq` to
+see a verdict has paid for a proof they did not ask to read.
+
+`--brief` replaces the certificate with what identifies it -- kind, digest,
+solver-freedom, and the size of the thing it stands for -- and changes nothing
+else. 94 KB becomes 0.5 KB. The certificate still goes to `--cert` if it was
+asked for: a summary is for reading and the artefact is for keeping.
+
+### `doctor` warned about a source tree while `pip show` was right
+
+Reported against 0.12.0, and it was the check added in 0.11.7 crying wolf in
+the common case. Digging found a third thing neither of us expected: **a
+`~`-prefixed directory pip abandoned mid-install is read by
+`importlib.metadata` as a real distribution.** So this machine had three
+copies of the metadata answering at once -- the checkout's `egg-info`, the
+real install, and a leftover from the 0.12.0 upgrade still claiming 0.11.7 --
+and the check reported the first one it found.
+
+There are four answers and the first three were being given as one:
+
+* an install that agrees with the code -- quiet, **even beside a source tree**
+* an install that disagrees -- stale, and it names both
+* only a source tree -- no install at all, which is the 0.11.7 case
+* only a leftover -- the worst one: anything reading the packaging metadata
+  gets the version pip failed to replace
+
+A leftover is now named wherever it appears, with `--repair` beside it.
+
+### `exists` called a question contentless that `cover` certified
+
+Same spec, two commands: `cover` on an empty universe returns PROVED with an
+`exact_cover` certificate -- "0 parts, every one of the 0 elements in exactly
+one" -- while `exists` returned `out_of_theory` and "the question has no
+content".
+
+The refusal was the vacuity reflex misapplied. Vacuity matters when a
+hypothesis set is contradictory, because the proof is then about nothing. Here
+the question has an answer and a witness: the empty family IS a cover of the
+empty universe. So it is answered, with the warning saying what it does not
+establish, and the two commands agree.
+
+Widening the declaration for it surfaced that `KIND_OF["exists"]` had said
+`drat` and nothing else, while the SAT path has always emitted the cover it
+found. Only the refuting example exercised it, so the
+declaration-against-emission check never saw the other branch.
+
+
 ## [0.12.0] — 2026-09-20
 
 **A minor bump, because the spelling of two certificate kinds moves.**

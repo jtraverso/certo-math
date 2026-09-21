@@ -50,6 +50,7 @@ CHILDREN = {
                                  + [w.get("cert") for w in p.get("witnesses", [])],
     "branch_bound": lambda p: [p.get("incumbent_cert")]
                               + [n.get("cert") for n in p.get("nodes", [])],
+    "branch_frontier": lambda p: [p.get("incumbent_cert")],
     "mixed_design": lambda p: [p.get("residual"), p.get("relaxation")],
     "synth_proved": lambda p: [p.get("synth"), p.get("universal")],
     "sweep_range": lambda p: [e.get("cert") for e in p.get("entries", [])],

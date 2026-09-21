@@ -178,6 +178,41 @@ whether certo's mathematics is right -- so nothing checked an emission between
 one of those runs and a release. This does, for every registered exporter, on
 every suite run.
 
+## A search that ran out of budget
+
+`branch_bound` claims an optimum, and pays for it: every leaf closed, every
+branch covered. Branch and bound is exponential, so a real run often does not
+finish -- and until 0.12.1 a stopped one returned `resource_exhausted` with
+**no certificate at all**. Its own status report said so: *"Not a certificate
+-- a status report"*. It also dropped the stack of nodes it had not opened.
+Hours of search left nothing that could be verified, archived or combined.
+
+`branch_frontier` is that run as an artefact. It claims an INTERVAL:
+
+```
+the optimum lies in [incumbent, bound]
+this design attains the lower end
+these OPEN subproblems are everything that remains
+```
+
+The third clause is what makes it a certificate rather than a log, and it is
+checked the way a closed tree's completeness is checked: every branching node
+has all its children, and every child is closed, branching, or declared open.
+A frontier that quietly dropped a subtree fails exactly as a tree that dropped
+one does.
+
+**An open node carries its parent's dual, and its parent's fixings with it.**
+A child's feasible set is a subset of its parent's, so the parent's dual
+bounds the child too -- and both halves are checked: the dual against the
+parent's derived program, and that the child really does extend the parent.
+Inheriting only the number would have been free and would have inherited
+something nothing checks, because a branching node's bound is verified nowhere
+in a closed tree: no claim rests on it there. Here one does.
+
+**What it does not claim: that the incumbent is optimal.** That is the point.
+`verify` says so as a warning on every one of them.
+
+
 ## The warnings are part of the artefact
 
 A certificate carries what it does *not* establish, and `verify` repeats it

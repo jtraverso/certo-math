@@ -6906,7 +6906,12 @@ def test_a_stopped_search_says_what_it_knows_instead_of_nothing():
     r = bb.prove_optimal(spec, LIM, max_nodes=1)
     assert r.verdict is Verdict.INCONCLUSIVE
     assert r.status is Status.RESOURCE_EXHAUSTED
-    assert r.certificate is None              # optimality is NOT established
+    # Optimality is still NOT established -- the verdict says so -- but the
+    # run is no longer a hole: it leaves a `branch_frontier` claiming the
+    # interval and the subproblems that remain. This used to assert
+    # `certificate is None`, which was true and was the defect.
+    assert r.certificate is not None
+    assert r.certificate.kind == "branch_frontier"
     assert r.meta["stopped"] is True
     # All four things a stopped search knows, and the gap is real.
     assert r.meta["incumbent"] == "2"
@@ -7216,12 +7221,19 @@ def test_a_stale_editable_install_is_reported_rather_than_silent():
     # third answer now, and not this one. Asserting a stale install while
     # standing in a source tree was asserting the wrong thing and passing by
     # coincidence.
+    # BOTH seams: `cli.installed_version` reads `_metadata_source`, and
+    # `_installed_metadata` classifies from `_metadata_copies`. Patching only
+    # the first left the second reading the real machine, where it passed
+    # for as long as the install and the code happened to agree -- and
+    # stopped the moment a release bumped one of them.
     real_source = doctor._metadata_source
+    real_copies = doctor._metadata_copies
+    site = pathlib.Path("/site-packages")
     try:
         certo.__version__ = "99.0.0"
         cli.__version__ = "99.0.0"
-        doctor._metadata_source = lambda: (
-            real, True, pathlib.Path("/site-packages"))
+        doctor._metadata_source = lambda: (real, True, site)
+        doctor._metadata_copies = lambda: [(real, "installed", site)]
 
         buf = io.StringIO()
         with redirect_stdout(buf):
@@ -7238,15 +7250,15 @@ def test_a_stale_editable_install_is_reported_rather_than_silent():
         certo.__version__ = real
         cli.__version__ = real
         doctor._metadata_source = real_source
+        doctor._metadata_copies = real_copies
 
     # and it is quiet when they agree
     try:
-        doctor._metadata_source = lambda: (
-            real, True, pathlib.Path("/site-packages"))
+        doctor._metadata_copies = lambda: [(real, "installed", site)]
         ok, detail = doctor._installed_metadata()
         assert ok is True and real in detail
     finally:
-        doctor._metadata_source = real_source
+        doctor._metadata_copies = real_copies
 
 
 def test_the_metadata_check_does_not_fail_an_uninstalled_checkout():
@@ -9974,39 +9986,43 @@ def test_metadata_from_a_source_tree_is_not_reported_as_an_install():
     """
     from certo import doctor
 
-    real = doctor._metadata_source
+    # Patched at `_metadata_copies`, which is where the classification now
+    # happens: `_metadata_source` answers one narrower question -- what would
+    # `pip show` report -- and no longer decides what the row says.
+    real = doctor._metadata_copies
     try:
-        doctor._metadata_source = lambda: (
-            "9.9.9", False, pathlib.Path("/somewhere/checkout/src"))
+        doctor._metadata_copies = lambda: [
+            ("9.9.9", "source", pathlib.Path("/somewhere/checkout/src"))]
         ok, detail = doctor._installed_metadata()
         assert ok is False
         assert "SOURCE TREE" in detail or "ÁRBOL FUENTE" in detail
         assert "9.9.9" in detail
     finally:
-        doctor._metadata_source = real
+        doctor._metadata_copies = real
 
 
 def test_an_installed_version_is_still_compared_against_the_code():
     """The original question survives: a stale install is a stale install."""
     from certo import __version__, doctor
 
-    real = doctor._metadata_source
+    # Patched at `_metadata_copies`: `_installed_metadata` classifies from
+    # there now, and `_metadata_source` answers one narrower question.
+    real = doctor._metadata_copies
+    site = pathlib.Path("/site-packages")
     try:
-        doctor._metadata_source = lambda: (__version__, True,
-                                           pathlib.Path("/site-packages"))
+        doctor._metadata_copies = lambda: [(__version__, "installed", site)]
         ok, detail = doctor._installed_metadata()
         assert ok is True and __version__ in detail
 
-        doctor._metadata_source = lambda: ("0.0.1", True,
-                                           pathlib.Path("/site-packages"))
+        doctor._metadata_copies = lambda: [("0.0.1", "installed", site)]
         ok, detail = doctor._installed_metadata()
         assert ok is False and "0.0.1" in detail and __version__ in detail
 
-        doctor._metadata_source = lambda: (None, False, None)
+        doctor._metadata_copies = lambda: []
         ok, _detail = doctor._installed_metadata()
         assert ok is True          # no install at all is normal, not broken
     finally:
-        doctor._metadata_source = real
+        doctor._metadata_copies = real
 
 
 def test_the_source_of_the_metadata_is_located_not_assumed():
@@ -10118,6 +10134,357 @@ def test_the_separator_makes_the_name_injective_where_it_was_not():
             key = "K{}_{}".format(size, "_".join(map(str, s)))
             assert key not in seen, (s, seen.get(key))
             seen[key] = s
+
+
+# --- four answers, not three collapsed into one ----------------------------
+
+
+def _with_copies(copies):
+    """Run `_installed_metadata` over a made-up set of metadata copies."""
+    from certo import doctor
+
+    real = doctor._metadata_copies
+    try:
+        doctor._metadata_copies = lambda: copies
+        return doctor._installed_metadata()
+    finally:
+        doctor._metadata_copies = real
+
+
+def test_an_install_that_agrees_is_quiet_even_beside_a_source_tree():
+    """The ambiguity a user reported: `doctor` warned about a source tree
+    while `pip show` correctly said 0.12.0. True, useless, and
+    indistinguishable from the case that matters."""
+    from certo import __version__
+
+    ok, detail = _with_copies([
+        (__version__, "source", pathlib.Path("/checkout/src")),
+        (__version__, "installed", pathlib.Path("/site-packages")),
+    ])
+    assert ok is True
+    assert __version__ in detail
+    assert "SOURCE TREE" not in detail
+
+
+def test_a_pip_leftover_answers_like_a_distribution_and_is_named():
+    """A `~`-prefixed directory pip abandoned mid-install is read by
+    `importlib.metadata` as a real distribution, so a half-finished upgrade
+    answers with the OLD version forever. Counted as an install, it made the
+    machine look like it had two."""
+    from certo import __version__
+
+    ok, detail = _with_copies([
+        (__version__, "installed", pathlib.Path("/site-packages")),
+        ("0.9.9", "leftover", pathlib.Path("/site-packages")),
+    ])
+    assert ok is False                     # there is something to clean
+    assert "0.9.9" in detail and "--repair" in detail
+
+
+def test_only_a_source_tree_is_still_not_an_install():
+    """The 0.11.7 case: the package absent, and an `egg-info` answering."""
+    ok, detail = _with_copies([("9.9.9", "source",
+                                pathlib.Path("/checkout/src"))])
+    assert ok is False
+    assert "SOURCE TREE" in detail or "ÁRBOL FUENTE" in detail
+
+
+def test_only_a_leftover_is_the_worst_case_and_says_so():
+    """No install at all, and the version everything reads is the one pip
+    failed to replace."""
+    ok, detail = _with_copies([("0.9.9", "leftover",
+                                pathlib.Path("/site-packages"))])
+    assert ok is False
+    assert "0.9.9" in detail and "--repair" in detail
+
+
+def test_a_stale_install_is_still_a_stale_install():
+    """The original question survives all of the above."""
+    from certo import __version__
+
+    ok, detail = _with_copies([("0.0.1", "installed",
+                                pathlib.Path("/site-packages"))])
+    assert ok is False
+    assert "0.0.1" in detail and __version__ in detail
+
+
+def test_the_classification_is_read_off_the_metadata_directory():
+    """`installed`, `source` and `leftover` are three different facts, and the
+    `~` prefix is pip's own marker for the third."""
+    from certo import doctor
+
+    kinds = {kind for _v, kind, _w in doctor._metadata_copies()}
+    assert kinds <= {"installed", "source", "leftover"}
+    # whatever this machine looks like, the helper agrees with itself
+    version, installed, _where = doctor._metadata_source()
+    if installed:
+        assert version in [v for v, k, _w in doctor._metadata_copies()
+                           if k == "installed"]
+
+
+def test_the_empty_universe_is_answered_by_both_commands():
+    """`cover` certified it and `exists` declined it: two commands, one
+    object, one certifying and one calling the question contentless.
+
+    The refusal was the vacuity reflex misapplied. Vacuity matters when a
+    hypothesis set is contradictory, because the proof is then about nothing.
+    Here the question has an answer and a witness -- the empty family IS a
+    cover of the empty universe -- so it is answered, and the warning says
+    what it does not establish.
+    """
+    from certo import CoverSpec, api
+
+    spec = CoverSpec(universe=[], parts=[], title="nothing to cover")
+    got = {}
+    for cmd in ("cover", "exists"):
+        res = api.run(cmd, spec, self_check=False)
+        got[cmd] = res
+        assert res.verdict is Verdict.PROVED, cmd
+        assert res.certificate is not None and verify(res.certificate).ok, cmd
+        assert res.certificate.kind == "exact_cover", cmd
+
+    # and `exists` says out loud that it establishes nothing about a
+    # non-empty instance
+    assert got["exists"].meta.get("vacuous") is True
+    assert "empty family" in got["exists"].detail
+
+
+def test_exists_declares_the_three_kinds_it_actually_emits():
+    """`KIND_OF["exists"]` said `drat` and nothing else, while the SAT path
+    has always emitted the COVER it found -- only the refuting example
+    exercised it, so the declaration-against-emission check never saw the
+    other branch. Widened, and the degenerate case adds no fourth kind."""
+    from certo import CoverSpec, api, routing
+
+    declared = set(routing.KIND_OF["exists"])
+
+    found = api.run("exists", CoverSpec(
+        universe=[1, 2, 3], parts=[], candidates=[[1, 2], [3]],
+        title="a real one"), self_check=False)
+    assert found.verdict is Verdict.SATISFIABLE
+    assert found.certificate.kind == "exact_cover"
+
+    none = api.run("exists", CoverSpec(
+        universe=[1, 2, 3], parts=[], candidates=[[1, 2]],
+        title="no cover"), self_check=False)
+    assert none.certificate.kind in declared
+
+    empty = api.run("exists", CoverSpec(universe=[], parts=[], title="empty"),
+                    self_check=False)
+    assert {found.certificate.kind, none.certificate.kind,
+            empty.certificate.kind} <= declared
+
+
+# --- what survives one level of nesting ------------------------------------
+
+
+def _nested_range(tmp, extra=()):
+    """`sweep --n-range` over the nested example, as the CLI runs it."""
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    out = tmp / "nested.json"
+    env = dict(os.environ, PYTHONPATH=str(root / "src"))
+    subprocess.run(
+        [sys.executable, "-m", "certo.cli", "sweep",
+         "examples/sweep_range_nested.py", "--n-range", "3..4",
+         "--cert", str(out), *extra],
+        cwd=root, capture_output=True, env=env, timeout=900)
+    return json.loads(out.read_text(encoding="utf-8"))
+
+
+def test_a_nested_sweep_inherits_the_spec_it_came_from():
+    """Only the top-level result was stamped -- `emit` does that once, on its
+    way out -- so every child went in with a version, a timestamp and no
+    `spec_path`.
+
+    Not a cosmetic loss. `_replay` needs the path to re-run the predicate,
+    finds none, and `sweep_strength` falls to RECORDED: a size whose predicate
+    DID certify was summarised as "recorded only, predicate NOT certified",
+    and the range faithfully repeated it. One missing field, two symptoms.
+    """
+    import shutil
+    import tempfile
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        data = _nested_range(tmp)
+        top = data.get("provenance") or {}
+        assert top.get("spec_path") and top.get("spec_sha256")
+
+        for entry in data["payload"]["entries"]:
+            child = (entry.get("cert") or {}).get("provenance") or {}
+            assert child.get("spec_path"), entry["n"]
+            assert child.get("spec_sha256") == top["spec_sha256"], entry["n"]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_the_range_stops_calling_a_replayable_child_merely_recorded():
+    """`recorded` and `reproducible` are different claims, and the first was
+    being made about certificates that could carry the second."""
+    import shutil
+    import tempfile
+
+    from certo.certificate import Certificate
+
+    tmp = pathlib.Path(tempfile.mkdtemp())
+    try:
+        data = _nested_range(tmp)
+        rep = verify(Certificate.from_dict(data), LIM)
+        assert rep.ok
+        # every size reports what it can establish, and none says `recorded`
+        lines = [detail for _n, _ok, detail in rep.checks if "family of" in detail]
+        assert lines, rep.checks
+        assert all("recorded only" not in ln for ln in lines), lines
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_brief_summarises_the_certificate_and_keeps_everything_else():
+    """`--cert-all --json` on a nested sweep puts megabytes on stdout. A
+    reader piping that into `jq` to see a verdict has paid for a proof they
+    did not ask to read."""
+    from certo import LPSpec, api
+    from certo.cli import _as_json
+
+    spec = LPSpec(sense="max", title="small")
+    spec.variable("x", hi=3)
+    spec.objective({"x": 1})
+    spec.constraint({"x": 2}, "<=", 5, name="cap")
+    res = api.run("opt", spec)
+
+    class _Args:
+        json = True
+        brief = False
+
+    whole = _as_json(res, _Args())
+    _Args.brief = True
+    short = _as_json(res, _Args())
+
+    assert len(json.dumps(short)) < len(json.dumps(whole))
+    assert short["certificate"]["summarised"] is True
+    assert short["certificate"]["kind"] == res.certificate.kind
+    assert short["certificate"]["digest"] == res.certificate.digest()
+    assert short["certificate"]["bytes"] == len(
+        json.dumps(res.certificate.to_dict(), ensure_ascii=False))
+    # and nothing else moved
+    for key in ("command", "status", "verdict", "detail", "meta"):
+        assert short[key] == whole[key], key
+
+
+# --- a stopped search leaves an artefact -----------------------------------
+
+
+def _stopped():
+    """A branch-and-bound run cut off by its node budget."""
+    from certo.engines import bb
+
+    return bb.prove_optimal(_branching_ilp(), LIM, max_nodes=6)
+
+
+def test_a_search_that_runs_out_of_budget_leaves_something_to_verify():
+    """`bb` returned `RESOURCE_EXHAUSTED` with no certificate at all, and its
+    own status report said so in as many words -- "Not a certificate, a
+    status report". It also dropped the stack of nodes it had not opened, so
+    hours of search left nothing to verify, archive, resume or combine.
+    """
+    res = _stopped()
+    assert res.status is Status.RESOURCE_EXHAUSTED
+    assert res.verdict is Verdict.INCONCLUSIVE      # still not an optimum
+    assert res.certificate is not None
+    assert res.certificate.kind == "branch_frontier"
+    assert res.meta["frontier"] > 0
+
+    rep = verify(res.certificate, LIM)
+    assert rep.ok, [c for c in rep.checks if not c[1]]
+    assert res.certificate.solver_free
+
+
+def test_the_frontier_claims_an_interval_and_says_it_is_not_an_optimum():
+    """The claim is [incumbent, bound] and a complete frontier. Reading it as
+    an optimum is the substitution this project exists to refuse, so the
+    warning is part of the artefact."""
+    from fractions import Fraction
+
+    res = _stopped()
+    p = res.certificate.payload
+    lo, hi = Fraction(p["incumbent"]), Fraction(p["bound"])
+    assert lo <= hi
+    # the true optimum of this ILP is 43, and it is inside
+    assert lo <= 43 <= hi
+
+    rep = verify(res.certificate, LIM)
+    assert any("not an optimum" in w or "no un óptimo" in w
+               for w in rep.warnings), rep.warnings
+
+
+def test_a_dropped_subtree_fails_exactly_as_it_does_in_a_closed_tree():
+    """A frontier that quietly lost a branch reads like one that explored it,
+    which is the failure `branch_bound`'s coverage check was written for."""
+    import copy
+
+    from certo.certificate import Certificate
+
+    base = json.loads(json.dumps(_stopped().certificate.to_dict()))
+    forged = copy.deepcopy(base)
+    forged["payload"]["open"].pop()
+    rep = verify(Certificate.from_dict(forged), LIM)
+    assert not rep.ok
+    assert any("children" in name or "hijos" in name
+               for name, ok, _d in rep.checks if not ok), rep.checks
+
+
+def test_an_open_bound_is_checked_against_the_program_it_came_from():
+    """The dual belongs to the PARENT's program -- a child's feasible set is
+    a subset of its parent's, so the parent's dual bounds it too.
+
+    The first version stored that dual against the CHILD's fixings, which
+    checks a vector against a matrix it never came from: every open node
+    failed. Both halves are checked now, and either one alone is forgeable.
+    """
+    import copy
+
+    from certo.certificate import Certificate
+
+    base = json.loads(json.dumps(_stopped().certificate.to_dict()))
+    for tweak in ("bound", "from", "dual"):
+        forged = copy.deepcopy(base)
+        if tweak == "bound":
+            forged["payload"]["open"][0]["bound"] = \
+                forged["payload"]["incumbent"]
+        elif tweak == "from":
+            forged["payload"]["open"][0]["from"] = []
+        else:
+            forged["payload"]["open"][0]["dual"] = \
+                forged["payload"]["open"][1]["dual"]
+        assert not verify(Certificate.from_dict(forged), LIM).ok, tweak
+
+
+def test_the_interval_cannot_be_narrowed_by_editing_it():
+    """The upper end is RECOMPUTED as the largest open bound, so writing a
+    smaller one in is caught rather than believed."""
+    import copy
+
+    from certo.certificate import Certificate
+
+    base = json.loads(json.dumps(_stopped().certificate.to_dict()))
+    forged = copy.deepcopy(base)
+    forged["payload"]["bound"] = forged["payload"]["incumbent"]
+    rep = verify(Certificate.from_dict(forged), LIM)
+    assert not rep.ok
+
+
+def test_a_search_that_finishes_still_certifies_the_optimum():
+    """The frontier is for the stopped case and changes nothing else."""
+    from certo.engines import bb
+
+    res = bb.prove_optimal(_branching_ilp(), LIM, max_nodes=20_000)
+    assert res.verdict is Verdict.PROVED
+    assert res.certificate.kind == "branch_bound"
+    assert res.meta["optimum"] == "43"
+    assert verify(res.certificate, LIM).ok
 
 
 if __name__ == "__main__":
