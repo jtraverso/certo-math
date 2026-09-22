@@ -1,4 +1,4 @@
-# Los cuarenta y seis comandos
+# Los cuarenta y siete comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -732,6 +732,60 @@ nombrada la respuesta es `None` y no un `True` vacuo.
 Un cono no simplicial igual recibe respuesta: la multiplicidad ausente se
 registra con su razón, en vez de rechazar el certificado y perder las otras
 tres cantidades.
+
+### `certo semigroup`
+
+**Pregunta** — ¿Es este punto reticular una combinación entera no negativa de
+estos generadores, y es normal el semigrupo?
+**Spec** — `SemigroupSpec`
+**Responde** — si el semigrupo es puntiagudo, con la graduación que lo prueba;
+si el sistema de generadores es minimal, nombrando los redundantes; y por cada
+punto, la pertenencia al cono, al grupo y al semigrupo
+**Certificado** — `affine_semigroup`, **sin solver**: aritmética entera y
+racional exacta
+**No establece** — que el semigrupo **sea** normal. Un testigo refuta la
+normalidad; establecerla es decidir la pertenencia de cada punto reticular del
+cono, que es para lo que existe Normaliz. `normal` es nulo por construcción.
+
+**El hueco que cubre.** `cone` responde sobre el cono *racional*. Un semigrupo
+es lo que de verdad se alcanza *sumando*, y la diferencia entre ambos es
+exactamente donde vive la normalidad. Para `S = ℕ(1,0) + ℕ(1,1) + ℕ(1,3)`, el
+punto `(1,2)` está en el cono, está en el grupo — que es todo `ℤ²` — y **no**
+está en el semigrupo. Esos tres hechos juntos refutan la normalidad, y cada
+uno es aritmética.
+
+**Por qué toda búsqueda termina.** Un semigrupo puntiagudo lleva una
+graduación: un funcional `u` con `⟨u,aᵢ⟩ ≥ 1` en cada generador. Entonces toda
+representación `v = Σ cᵢaᵢ` con `cᵢ ≥ 0` cumple `Σ cᵢ ≤ ⟨u,v⟩`, así que la
+búsqueda es sobre un conjunto finito cuyo tamaño se **calcula, no se supone**,
+y la cota viaja en el certificado. `verify` rehace la búsqueda en vez de
+creérsela — que es lo que cuesta una respuesta negativa, y por lo que
+significa algo.
+
+**Un punto fuera del cono lleva un funcional separador**, no una promesa. `y`
+con `⟨y,aᵢ⟩ ≤ 0` en cada generador y `⟨y,v⟩ > 0` es un vector, comprobado con
+`k+1` productos escalares, en lugar de afirmar que una búsqueda fue exhaustiva.
+
+**No ser puntiagudo es una respuesta, no un fallo.** Sin graduación ninguna
+búsqueda aquí es finita, así que el comando lo dice y devuelve `out_of_theory`
+— con el certificado que *sí* puede establecer, porque los generadores, el
+rango y las respuestas sobre el cono siguen siendo exactos.
+
+**Un sistema minimal propuesto se *decide*, no solo se refuta.** Dale un
+conjunto en `hilbert` y certo resuelve si es el sistema minimal de generadores
+de `S` — la única afirmación positiva de este comando. Para un semigrupo
+puntiagudo ese conjunto es único y es exactamente el de los elementos
+irreducibles no nulos, así que lo zanjan tres preguntas acotadas: cada
+elemento está en `S`, cada elemento es irreducible, y cada generador es
+alcanzable desde el conjunto propuesto. Las dos inclusiones son la igualdad.
+`h` es reducible exactamente cuando algún generador `a` cumple `h − a ∈ S` y
+`h − a ≠ 0`, que son `k` preguntas de pertenencia un peldaño más abajo en la
+graduación — y un elemento reducible vuelve con la descomposición, porque «no
+irreducible» es una afirmación.
+
+**Inalcanzable e indecidible son respuestas distintas.** Un cero en el
+conjunto propuesto rompe la graduación y nada por debajo termina; eso se
+reporta como `None`, nunca como «no genera».
 
 ### `certo range`
 

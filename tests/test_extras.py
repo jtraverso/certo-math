@@ -10487,6 +10487,509 @@ def test_a_search_that_finishes_still_certifies_the_optimum():
     assert verify(res.certificate, LIM).ok
 
 
+# --- the enumeration that had no bound at all ------------------------------
+#
+# `geng` used to run under `subprocess.run(capture_output=True)`: no clock, no
+# memory cap, all of stdout in a buffer, on an `n` the caller chose. `geng` is
+# not on every machine and is on no CI runner here, so these drive the runner
+# with a stub instead -- which is the better test anyway, because it can be
+# made to misbehave on purpose and deterministically.
+
+
+def _stub(code):
+    """An executable that behaves like `geng` for as long as we need it to."""
+    import sys
+    return [sys.executable, "-c", code]
+
+
+def test_a_bounded_enumeration_still_returns_everything_when_it_fits():
+    from certo.graphs import _run_geng
+
+    out = _run_geng(_stub("print('D?{'); print('DBk')"), 30, 1 << 20)
+    assert out.split() == ["D?{", "DBk"]
+
+
+def test_an_enumeration_that_floods_is_stopped_and_says_which_bound():
+    import time
+
+    from certo.graphs import WorkBudget, _run_geng
+
+    t0 = time.monotonic()
+    try:
+        _run_geng(_stub("while True: print('D?{')"), 120, 4096)
+        raise AssertionError("an endless geng was allowed to finish")
+    except WorkBudget as e:
+        assert e.reason == "output"
+        assert "MB" in str(e)
+    # It must have KILLED the child rather than waited it out: an endless
+    # stream would otherwise hold this for the whole 120s budget.
+    assert time.monotonic() - t0 < 30
+
+
+def test_an_enumeration_that_stalls_is_stopped_by_the_clock():
+    from certo.graphs import WorkBudget, _run_geng
+
+    code = "\n".join([
+        "import time",
+        "for i in range(100):",
+        "    print('D?{', flush=True)",
+        "    time.sleep(0.2)",
+    ])
+    try:
+        _run_geng(_stub(code), 1, 1 << 20)
+        raise AssertionError("a slow geng was allowed to finish")
+    except WorkBudget as e:
+        assert e.reason == "timeout"
+
+
+def test_a_failing_geng_is_not_reported_as_an_empty_enumeration():
+    import subprocess
+
+    from certo.graphs import _run_geng
+
+    try:
+        _run_geng(_stub("import sys; sys.exit(3)"), 30, 1 << 20)
+        raise AssertionError("a failing geng passed for a graph-free universe")
+    except subprocess.CalledProcessError as e:
+        assert e.returncode == 3
+
+
+def test_a_truncated_enumeration_is_never_returned_as_a_shorter_list():
+    """The property the whole bound exists for.
+
+    A partial enumeration is indistinguishable from a complete one -- both are
+    a list of graphs -- and `sweep` would go on to report that every graph on
+    n vertices satisfies the predicate having seen a prefix. Exceeding a bound
+    has to propagate.
+    """
+    from certo import graphs as G
+
+    real_path, real_run = G._geng_path, G._run_geng
+    G._geng_path = lambda: "geng"
+    G._run_geng = lambda *a, **k: (_ for _ in ()).throw(
+        G.WorkBudget("output", "too much"))
+    try:
+        G.enumerate_graphs(5)
+        raise AssertionError("a stopped enumeration came back as a result")
+    except G.WorkBudget:
+        pass
+    finally:
+        G._geng_path, G._run_geng = real_path, real_run
+
+
+def test_an_absent_limits_still_means_a_bound():
+    """`limits=None` is the case that motivated this, not an exemption."""
+    from certo import graphs as G
+    from certo.limits import Limits
+
+    seen = {}
+    real_path, real_run = G._geng_path, G._run_geng
+    G._geng_path = lambda: "geng"
+
+    def spy(args, timeout_s, max_bytes):
+        seen["timeout_s"], seen["max_bytes"] = timeout_s, max_bytes
+        return ""
+
+    G._run_geng = spy
+    try:
+        G.enumerate_graphs(5)
+    finally:
+        G._geng_path, G._run_geng = real_path, real_run
+
+    assert seen["timeout_s"] == Limits().enumerate_timeout_s
+    assert seen["max_bytes"] == Limits().max_output_mb * 1024 * 1024
+    assert seen["timeout_s"] > 0 and seen["max_bytes"] > 0
+
+
+def test_the_enumeration_budget_is_not_the_solver_budget():
+    """Two different jobs; giving them one number would be the quiet kind of
+    substitution this project refuses everywhere else."""
+    from certo.limits import Limits
+
+    lim = Limits(timeout_ms=50)
+    assert lim.enumerate_timeout_s == Limits().enumerate_timeout_s
+
+
+def test_a_stopped_enumeration_reaches_the_caller_as_a_verdict():
+    """Not a traceback. A model has to tell "no such graph" from "never
+    looked", and which bound fired is part of that answer."""
+    from certo import Limits, graphs as G
+    from certo.engines import graphsearch
+    from certo.status import Status, Verdict
+
+    real_path, real_run = G._geng_path, G._run_geng
+    G._geng_path = lambda: "geng"
+    try:
+        for reason, want in (("timeout", Status.TIMEOUT),
+                             ("output", Status.RESOURCE_EXHAUSTED)):
+            G._run_geng = (lambda r: lambda *a, **k: (_ for _ in ()).throw(
+                G.WorkBudget(r, "stopped")))(reason)
+            r = graphsearch.enum(5, None, Limits())
+            assert r.status is want, (reason, r.status)
+            assert r.verdict is Verdict.INCONCLUSIVE
+            assert not r.status.conclusive
+            assert r.certificate is None
+    finally:
+        G._geng_path, G._run_geng = real_path, real_run
+
+
+# --- what certo was asked and could not settle -----------------------------
+
+
+def _res(status, command="prove", meta=None, detail=""):
+    from certo.status import Result, Status, Verdict
+    return Result(command, status, Verdict.INCONCLUSIVE, "z3", 1.0, None,
+                  detail=detail, meta=meta or {})
+
+
+def _cov_path(tmp, name="coverage.jsonl"):
+    import tempfile
+    return pathlib.Path(tempfile.mkdtemp(prefix="certo_cov_")) / name
+
+
+def test_only_the_unanswered_questions_are_recorded():
+    from certo import coverage
+    from certo.status import Status
+
+    p = _cov_path(None)
+    assert coverage.record(_res(Status.OUT_OF_THEORY), "cli", p) is True
+    assert coverage.record(_res(Status.TIMEOUT), "api", p) is True
+    assert coverage.record(_res(Status.UNSAT), "cli", p) is False
+    assert coverage.record(_res(Status.SAT), "cli", p) is False
+    assert len(p.read_text(encoding="utf-8").strip().splitlines()) == 2
+
+
+def test_the_log_carries_sizes_and_never_the_callers_mathematics():
+    """The rule that makes recording-by-default defensible."""
+    import json
+
+    from certo import coverage
+    from certo.status import Status
+
+    p = _cov_path(None)
+    coverage.record(
+        _res(Status.OUT_OF_THEORY, command="sweep",
+             meta={"n": 11, "count": 3, "optimum": 42,
+                   "title": "Kneser(7,3) colourability", "witness": "v0,v1"},
+             detail="no ray named sigma_secret in the declared lattice"),
+        "cli", p)
+    e = json.loads(p.read_text(encoding="utf-8").strip())
+
+    assert e["shape"] == {"n": 11, "count": 3}       # sizes, allowlisted
+    assert "optimum" not in e["shape"]               # an answer, not a size
+    blob = json.dumps(e)
+    for leak in ("sigma_secret", "Kneser", "witness", "v0,v1", "detail"):
+        assert leak not in blob, leak
+    assert set(e) == {"ts", "command", "status", "engine", "source", "shape",
+                      "certo"}
+
+
+def test_recording_can_be_turned_off_completely():
+    import os
+
+    from certo import coverage
+    from certo.status import Status
+
+    p = _cov_path(None)
+    os.environ[coverage.ENV_OFF] = "1"
+    try:
+        assert coverage.enabled() is False
+        assert coverage.record(_res(Status.TIMEOUT), "cli", p) is False
+        assert not p.exists()
+    finally:
+        os.environ.pop(coverage.ENV_OFF, None)
+    assert coverage.enabled() is True
+
+
+def test_a_full_log_stops_rather_than_discarding_the_oldest():
+    """Rotation would silently drop the earliest evidence, which is the
+    failure this module exists to fix."""
+    from certo import coverage
+    from certo.status import Status
+
+    p = _cov_path(None)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    real = coverage.MAX_LINES
+    coverage.MAX_LINES = 3
+    try:
+        wrote = [coverage.record(_res(Status.TIMEOUT), "cli", p) for _ in range(6)]
+        assert wrote[:3] == [True, True, True]
+        assert wrote[3:] == [False, False, False]
+        assert len(p.read_text(encoding="utf-8").strip().splitlines()) == 3
+        assert coverage.summary(p)["full"] is True
+    finally:
+        coverage.MAX_LINES = real
+
+
+def test_a_log_that_cannot_be_written_never_fails_the_command():
+    from certo import coverage
+    from certo.status import Status
+
+    import tempfile
+
+    # A regular file standing where a directory would have to be:
+    # `mkdir` cannot succeed and neither can the write.
+    fd, blocker = tempfile.mkstemp(prefix="certo_cov_blocker_")
+    os.close(fd)
+    bad = pathlib.Path(blocker) / "nested" / "coverage.jsonl"
+    assert coverage.record(_res(Status.TIMEOUT), "cli", bad) is False
+
+
+def test_the_summary_counts_by_command_and_by_status():
+    from certo import coverage
+    from certo.status import Status
+
+    p = _cov_path(None)
+    coverage.record(_res(Status.OUT_OF_THEORY, command="cone"), "cli", p)
+    coverage.record(_res(Status.OUT_OF_THEORY, command="cone"), "mcp", p)
+    coverage.record(_res(Status.TIMEOUT, command="sweep"), "api", p)
+
+    s = coverage.summary(p)
+    assert s["lines"] == 3
+    assert s["by_command"] == {"cone": 2, "sweep": 1}
+    assert s["by_status"] == {"out_of_theory": 2, "timeout": 1}
+    assert s["first"] is not None and s["last"] is not None
+
+
+def test_the_log_goes_to_the_users_data_directory_not_the_working_one():
+    """certo is run from wherever the mathematics lives; it does not get to
+    leave files there."""
+    from certo import coverage
+
+    # The env override exists and this is not a test of it: neutralise it, or
+    # this checks wherever the caller happened to point the log.
+    saved = os.environ.pop(coverage.ENV_FILE, None)
+    try:
+        p = coverage.default_path()
+        assert p.name == "coverage.jsonl"
+        assert p.parent != pathlib.Path.cwd()
+        assert pathlib.Path.cwd() not in p.parents
+        assert pathlib.Path.home() in p.parents or "certo" in str(p.parent)
+    finally:
+        if saved is not None:
+            os.environ[coverage.ENV_FILE] = saved
+
+
+# --- affine semigroups, as a checker ---------------------------------------
+
+
+def _sg(**kw):
+    from certo import SemigroupSpec
+    from certo.engines import algebra
+    return algebra.affine_semigroup(SemigroupSpec(**kw), LIM)
+
+
+def test_the_textbook_non_normal_semigroup_is_refuted_by_one_point():
+    """(1,2) is in the cone, in the group, and not in N(1,0)+N(1,1)+N(1,3).
+    Three checkable facts; together they refute normality."""
+    from certo import verify
+
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            points={"w": (1, 2)})
+    p = r.certificate.payload
+    e = p["points"]["w"]
+    assert e["in_cone"] is True and e["in_group"] is True
+    assert e["in_semigroup"] is False
+    assert e["refutes_normality"] is True
+    assert p["not_normal"] is True and p["normality_witnesses"] == ["w"]
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def test_normality_is_never_asserted_only_refuted():
+    """The orthant IS normal and certo does not say so. Establishing it is a
+    decision over every lattice point of the cone."""
+    r = _sg(generators={"e1": (1, 0), "e2": (0, 1)}, points={"v": (3, 4)})
+    p = r.certificate.payload
+    assert p["not_normal"] is False
+    assert p["normal"] is None           # not False, not True: not decided
+    assert p["normal_why"]
+
+
+def test_zero_is_in_every_semigroup():
+    """The empty combination. The first version searched only AFTER a step, so
+    the origin came back absent -- and then refuted normality everywhere."""
+    for gens in ({"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+                 {"e1": (1, 0), "e2": (0, 1)},
+                 {"x": (2, 3, 5)}):
+        d = len(next(iter(gens.values())))
+        r = _sg(generators=gens, points={"zero": tuple([0] * d)})
+        e = r.certificate.payload["points"]["zero"]
+        assert e["in_semigroup"] is True, gens
+        assert e["semigroup_coefficients"] == [0] * len(gens)
+        assert e["refutes_normality"] is False
+
+
+def test_membership_comes_back_with_the_coefficients():
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            points={"reachable": (2, 1)})
+    e = r.certificate.payload["points"]["reachable"]
+    assert e["in_semigroup"] is True
+    coeffs = e["semigroup_coefficients"]
+    gens = [r.certificate.payload["generators"][n]
+            for n in r.certificate.payload["order"]]
+    got = [sum(c * g[i] for c, g in zip(coeffs, gens)) for i in range(2)]
+    assert got == [2, 1]
+    assert all(c >= 0 for c in coeffs)
+
+
+def test_a_point_outside_the_cone_carries_a_separating_functional():
+    """One vector and k+1 dot products, instead of "I looked everywhere"."""
+    from certo.semigroup import dot
+
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            points={"outside": (1, -1)})
+    p = r.certificate.payload
+    e = p["points"]["outside"]
+    assert e["in_cone"] is False
+    y = e["separating"]
+    assert y is not None
+    gens = [p["generators"][n] for n in p["order"]]
+    assert all(dot(y, g) <= 0 for g in gens)
+    assert dot(y, e["point"]) > 0
+
+
+def test_an_absence_carries_the_bound_that_makes_it_a_proof():
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            points={"w": (1, 2)})
+    e = r.certificate.payload["points"]["w"]
+    assert e["in_semigroup"] is False
+    assert e["search_bound"] is not None and e["search_bound"] >= 0
+    assert e["degree"] is not None
+
+
+def test_a_redundant_generator_is_named_and_the_set_is_not_minimal():
+    r = _sg(generators={"a": (1, 0), "dup": (2, 0)})
+    p = r.certificate.payload
+    assert p["minimal"] is False
+    assert "dup" in p["redundant"]
+    assert p["redundant"]["dup"]["as"] == {"a": 2}
+
+
+def test_a_semigroup_with_no_grading_says_so_instead_of_searching():
+    """Not pointed is an answer about the object, not a failure to report as
+    one -- and no search here would terminate."""
+    from certo.status import Status, Verdict
+
+    r = _sg(generators={"right": (1, 0), "left": (-1, 0)}, points={"x": (5, 0)})
+    assert r.status is Status.OUT_OF_THEORY
+    assert r.verdict is Verdict.INCONCLUSIVE
+    assert not r.status.conclusive
+    p = r.certificate.payload
+    assert p["pointed"] is False and p["grading"] is None
+    # The point's membership is UNKNOWN, and unknown is not no.
+    assert p["points"]["x"]["in_semigroup"] is None
+    assert p["points"]["x"]["refutes_normality"] is False
+
+
+def test_the_grading_is_chosen_for_the_cheapest_search():
+    """Every valid functional proves pointedness; `<u,v>` is the search bound,
+    so a small one costs less. On this instance it is 1 against 11."""
+    from certo.semigroup import dot, positive_functional
+
+    gens = [(1, 0), (1, 1), (1, 3)]
+    u = positive_functional(gens)
+    assert max(dot(u, g) for g in gens) == 1
+
+
+def test_a_generator_of_a_different_length_is_refused_not_padded():
+    from certo.status import Status
+
+    r = _sg(generators={"a": (1, 0, 0), "b": (0, 1)})
+    assert r.status is Status.OUT_OF_THEORY
+    assert r.certificate is None
+
+
+def test_the_semigroup_command_is_reachable_through_the_in_process_api():
+    from certo import SemigroupSpec, api
+
+    res = api.run("semigroup", SemigroupSpec(
+        generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+        points={"w": (1, 2)}))
+    assert res.certificate.kind == "affine_semigroup"
+    assert res.meta["not_normal"] is True
+
+
+# --- a PROPOSED minimal generating set, checked -----------------------------
+
+
+def test_a_correct_minimal_generating_set_is_accepted():
+    """The one claim here that is DECIDED rather than only refuted."""
+    from certo import verify
+
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            hilbert={"a": (1, 0), "b": (1, 1), "c": (1, 3)})
+    h = r.certificate.payload["hilbert"]
+    assert h["is_minimal_generating_set"] is True
+    assert h["decided"] is True and h["generates"] is True
+    assert all(e["in_semigroup"] and e["irreducible"]
+               for e in h["elements"].values())
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def test_a_reducible_element_is_rejected_with_the_decomposition():
+    """`extra` is `a + b`. Saying so is a claim, so it comes with the split."""
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            hilbert={"a": (1, 0), "b": (1, 1), "c": (1, 3), "extra": (2, 1)})
+    h = r.certificate.payload["hilbert"]
+    assert h["is_minimal_generating_set"] is False
+    assert h["why_not"] == ["extra"]
+    e = h["elements"]["extra"]
+    assert e["in_semigroup"] is True and e["irreducible"] is False
+    rest = e["reduces_as"]["rest"]
+    gen = r.certificate.payload["order"][e["reduces_as"]["generator"]]
+    whole = r.certificate.payload["generators"][gen]
+    assert [x + y for x, y in zip(rest, whole)] == [2, 1]
+
+
+def test_a_set_that_does_not_generate_names_what_it_cannot_reach():
+    r = _sg(generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+            hilbert={"a": (1, 0), "b": (1, 1)})
+    h = r.certificate.payload["hilbert"]
+    assert h["is_minimal_generating_set"] is False
+    assert h["generates"] is False
+    assert h["unreachable_generators"] == ["c"]
+
+
+def test_unreachable_and_undecided_are_never_the_same_answer():
+    """A zero in the proposed set breaks the grading, so nothing below it
+    terminates. The first version reported that as `does not generate`."""
+    r = _sg(generators={"e1": (1, 0), "e2": (0, 1)},
+            hilbert={"z": (0, 0), "e1": (1, 0), "e2": (0, 1)})
+    h = r.certificate.payload["hilbert"]
+    assert h["decided"] is False
+    assert h["is_minimal_generating_set"] is None      # not False
+    assert h["generates"] is None                      # not False
+    assert h["unreachable_generators"] == []
+    assert sorted(h["undecided_generators"]) == ["e1", "e2"]
+
+
+def test_a_redundant_generator_does_not_belong_to_the_minimal_set():
+    """S = N(1,0) + N(2,0) is generated by (1,0) alone."""
+    r = _sg(generators={"a": (1, 0), "dup": (2, 0)}, hilbert={"a": (1, 0)})
+    h = r.certificate.payload["hilbert"]
+    assert h["is_minimal_generating_set"] is True
+    assert h["generates"] is True
+
+
+def test_irreducibility_is_decided_one_rung_down_in_the_grading():
+    """`h` is reducible exactly when some generator `a` has `h - a` in S and
+    non-zero -- k questions, each of strictly smaller degree."""
+    from certo.semigroup import irreducible_in, positive_functional
+
+    gens = [(1, 0), (1, 1), (1, 3)]
+    u = positive_functional(gens)
+    assert irreducible_in(gens, [1, 1], u)["irreducible"] is True
+    out = irreducible_in(gens, [2, 1], u)
+    assert out["irreducible"] is False
+    assert out["rest"] in ([1, 0], [1, 1])
+
+
+def test_asking_nothing_about_a_hilbert_basis_leaves_the_field_absent():
+    """An optional field the frozen schema allows, absent when unasked."""
+    r = _sg(generators={"a": (1, 0), "b": (1, 1)})
+    assert r.certificate.payload["hilbert"] is None
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

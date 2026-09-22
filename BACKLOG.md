@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-09-18, at **0.11.1**.
+Last updated: 2026-09-21, at **0.13.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -28,8 +28,76 @@ Unlike the command tables, there is no test that can enforce it: what belongs
 on a backlog is a judgement, and a judgement cannot be recomputed. It is the
 one surface here still held together by remembering.
 
+**And then by nine.** This file said 0.11.1 through the whole of 0.11.2 to
+0.12.1 -- nine releases in three days, most of them fixing defects a user
+reported, none of them touching the document that says what is worth doing
+next. The rule was written here and broken here, by the largest margin yet,
+which is worth recording rather than quietly correcting: a list of priorities
+that is nine releases behind does not merely go unread, it redirects whoever
+does read it.
+
+The releases that caused it were reactive -- feedback arrived, a defect was
+real, it shipped. That is the right order. What it does not excuse is leaving
+the ranking untouched while the ground under it moved: three separate asks
+were settled by work done for other reasons, and nobody noticed until this
+was read end to end.
+
 ---
 
+
+## Who calls certo, and what that changes
+
+This was never written down here, and ranking without it has been wrong.
+
+There are two consumers and they want different things. A **referee** brings
+one finished argument and needs a single certificate to be airtight: value is
+DEPTH on a fixed object. A **language model exploring** brings a route space
+and needs many cheap conclusive answers to decide what to abandon: value is
+BREADTH -- how much of that space certo can settle at all.
+
+The second is the one this tool was built for, and the code says so where the
+backlog never did. `status.py` opens by explaining why there are six result
+states rather than three: *"an LLM that reads 'unknown' writes 'no solution
+exists'; you have to distinguish why."* Six states, an MCP server exposing
+every command, `out_of_theory` as a first-class verdict, a work budget, an
+in-process API -- all of it is machinery for a caller that asks hundreds of
+questions unattended and must be able to trust a negative. None of that is
+referee machinery.
+
+**What follows from it, and what does not.**
+
+*Coverage stops being a nice-to-have.* Under the referee model, a domain certo
+cannot touch is a gap in polish -- the referee simply checks that part by
+hand. Under the explorer model it is a region of route space where the caller
+goes back to guessing, which is the exact failure this project exists to
+remove. A route certo cannot speak about is not neutral; it is a route that
+gets pursued on a hunch.
+
+*But breadth beats depth, and they are not the same ask.* One more KIND of
+question that can be settled conclusively opens a new region. More power
+inside a domain certo already reaches makes big instances tractable. For
+discarding routes the first dominates, because **routes are usually killed by
+a cheap fact, not a hard one** -- if settling it needs a serious computation,
+the route was being pursued rather than discarded. That is an argument for the
+rule this file already states, applied much harder: take the object as INPUT
+and CHECK it. A checker over a new domain is S-M and opens the region; an
+engine that computes the object is L and mostly serves depth.
+
+*Discoverability is coverage.* Three asks this cycle were answered by
+documentation rather than code -- the capability existed and could not be
+found. For a human that is a papercut. For a caller that can only see what
+`commands`, `what` and `dsl_guide` tell it, **a capability it cannot discover
+has coverage zero**. Those surfaces are not docs, they are the coverage
+surface, and they should be ranked as such.
+
+*And the one thing coverage must never buy.* The moment certo returns
+something that looks conclusive over a domain it half-supports, the explorer
+model fails worse than with no coverage at all: the caller discards a live
+route and never revisits it. A wrong `unsat` is not a bug here, it is the
+whole edifice. New domains enter as checkers with an honest `out_of_theory`,
+or they do not enter.
+
+---
 
 ## What is open, in one screen
 
@@ -42,11 +110,119 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P1** | Split `cli.py` and `spec.py` the way `certificate.py` was split | **M** | high | **high** | a new command touches six files today; the catalogue removed two of them |
-| **P2** | Affine semigroups: saturation, normality, Hilbert basis — as a CHECKER | **M** | med | low | the part of the toric route `cone` does not cover |
-| **P2** | Chow ring and toric intersection | **L** | **low** | none | — |
+| **P1** | READ the coverage log: the map itself, once there is data | **S** | **high** | low | blocked on time, not on work. The recording landed in 0.13.0 and the file starts empty |
+| **P1** | Honour `Limits.timeout_ms` in the remaining out-of-process backends | **M** | **high** | med | 0.13.0 bounded the one call that had NO bound; the hard-coded constants are still hard-coded |
+| **P2** | A certified integer UPPER bound for packings | **L** | **low** | med | the half `opt --gap` leaves open; `branch_frontier` may already be most of it |
+| **P2** | Derived expectations for the seams `doctor` reads, not hand-built fixtures | **M** | **high** | low | three tests agreed with a bug this cycle; two patched one seam while the code read another |
+| **P2** | Chow ring and toric intersection | **L** | **low** | none | route space, but depth-shaped: an engine, not a checker. See the breadth/depth split above |
 | **P3** | A canonical form that scales, on its own | **L** | med | **high** | nothing that is currently blocked |
+| **P3** | Split `cli.py` and `spec.py` the way `certificate.py` was split | **M** | high | med | **demoted from P1**, see below |
 | **P3** | Content-addressed certificate cache for `compose` / `status` | **M** | med | med | nobody has measured these as slow; it also adds a staleness surface |
+| **P3** | `commands` / `what` / `dsl_guide` as a measured coverage surface | **S** | med | low | three asks this cycle were reachability, not capability |
+
+### Blocked, and on whom
+
+Kept separate because "not done" and "cannot be done yet" are different facts,
+and a list that mixes them makes the second look like neglect.
+
+| Item | Waiting on | What unblocks it |
+|---|---|---|
+| The three quarantined payloads | a user | the files themselves. Three claims of certificates that verify and should not could not be reproduced; the reconstructions all came back INVALID, which means they differ from the originals |
+| A resume protocol for `branch_frontier` | a decision nobody has stated | what is GUARANTEED when two partial runs are recombined. Emitting a frontier is not retaking one, and 0.12.1 deliberately stopped at the first |
+| Citing a fact a certificate cannot recompute | a second instance | the trigger is *the second kind that needs to cite something it cannot recompute cheaply*. The first, `toric_cone`, turned out to carry the fact already |
+| A required reviewer on the `pypi` environment | the repository owner | one setting. Nine versions have reached the index in three days with nobody approving the step, and a version on PyPI cannot be replaced |
+
+**The coverage map, and why the row that shipped said *record* rather
+than *map*.** *(the recording landed in 0.13.0; reading it is still open)*
+
+The idea first: **every `out_of_theory` is a recorded instance of a question
+certo was asked and could not settle** -- a route whose caller had to abandon
+it or pursue it without help. Counting those by command and by domain turns
+"which mathematics should certo cover next" from a judgement into a
+measurement, which matters because the rows below were ranked from two users'
+written reports, and this file has said for three releases that every estimate
+made from a specification rather than an instance was wrong on contact.
+
+**This item was itself written that way, and it was wrong on contact.** It
+first went into this table as "a coverage map derived from the ledger, effort
+S, the data is already on disk". Then somebody ran `wc -l` on the ledger:
+**two lines, both conclusive.** The ledger is opt-in -- `--ledger` per run --
+so nothing accumulates unless a person remembers a flag, and nobody does. The
+instrument was assumed, not checked, in the row arguing for checking rather
+than assuming. It is left here in full rather than quietly rewritten, because
+this is the third time in one file that an estimate made from a specification
+collapsed the moment an instance was looked at, and the pattern is worth more
+than the embarrassment.
+
+What survives is the precondition. Recording a non-conclusive verdict by
+default -- command, status, the shape of what was asked, no payload -- is S,
+and it is the only version of this that can start today. It has a real cost
+the map did not: **writing to disk that the caller did not ask for.** That
+needs an explicit opt-out, a bounded file, and nothing in it that a spec would
+not already reveal. A tool whose whole argument is honesty does not get to
+start logging quietly.
+
+And it pays off later rather than now. Until it has run for a while, the
+question "where is the coverage thin" still has no measured answer, which is
+why the breadth-shaped P2 below it is the thing to build in the meantime
+rather than after.
+
+One caveat that will keep applying once data exists: this records only what
+somebody thought to ask. A domain nobody attempted because it obviously would
+not work leaves no trace, and that silence is the most expensive kind of gap.
+
+**The budget that stops at z3.** *(the unbounded call was fixed in 0.13.0;
+the rest of this still stands)* `Limits` carries a timeout, an rlimit and a
+memory cap, and `apply_to` hands all three to a z3 solver. No other backend
+reads any of them. Every subprocess certo runs carries a constant instead --
+5 s for `git`, 20 s and 60 s in `doctor`, 900 s for `lake env lean` -- and
+`graphs.enumerate_graphs` runs `geng` with **no timeout and no cap at all**,
+buffering the whole of stdout, on an `n` the caller chose. At n=12 that is
+more graphs than the machine has memory for, and the only thing that ends the
+run is the operating system.
+
+This is not a hypothetical: it is four lines of `grep` against the tree. What
+makes it P1 is the gap between what the flag promises and what it does -- a
+user who sets a budget and watches it be ignored has been told something
+false, which is the one failure mode this project is supposed not to have.
+
+**And it is worse for the caller this tool was built for.** A person watching
+a run that will not end notices, gets bored, and presses Ctrl-C. A model
+sweeping a route space unattended does not: it blocks on a question that was
+supposed to cost ten seconds, and the exploration stops. An unenforced budget
+is not only a dishonest flag, it is a throughput bug in the one workflow that
+depends on asking many cheap questions and abandoning the expensive ones
+quickly. Discarding a route requires being ABLE TO STOP.
+
+Two shapes are worth separating: *honouring* `Limits` in the out-of-process
+backends, and *bounding* the one call that honours nothing. The second is
+small and can land alone.
+
+**The half `opt --gap` leaves open.** *(still open)* A packing question has two sides. The
+lower one is solved and exact: a feasible packing is its own witness, and
+`opt` certifies it. The upper one -- *no packing does better than k* -- comes
+today from the LP relaxation, which is a rational and usually not tight; when
+the relaxation gives 5 and the answer is 4, certo can say "at most 5" and
+nothing sharper. A user asked for a certified INTEGER upper bound on their own
+instance and there is no honest way to give one yet.
+
+Confidence is low deliberately. The obvious routes are a rounding argument
+that needs a side condition certo cannot check in general, a counting argument
+that is instance-specific, and exhausting the branch tree -- which is exactly
+what `branch_frontier` now records the state of. That last one is the reason
+this sits at P2 rather than P3: the machinery to say "these are all the
+remaining cases" landed in 0.12.1, and an upper bound is what you get when
+that list is empty. The item may turn out to be a report over work already
+done rather than new mathematics. Nobody has measured it, which is why the
+confidence column says so.
+
+**Demoting the split.** It sat at P1 on the strength of one measurement: three
+commands in 0.10.0 each touching seven files. That measurement still holds.
+What changed is thirty-odd defects later, across 0.11.2 to 0.12.1, **not one
+of them came from file size** -- they came from an absent field, a sign, a
+comparison against an unresolved path, a text sort, a pointer nothing checked.
+Hygiene is real and this is hygiene; it stops being P1 when the evidence says
+the cost is being paid somewhere else.
 
 ### Shipped, and removed from this list
 
@@ -67,6 +243,46 @@ the shape of the corpus LPs all changed the moment they were measured.
 | `determinism` in CI, plus macOS and 3.13 | **0.11.0** |
 | A job that tests the install carrying only z3 and pulp | `minimal`, **0.11.1** |
 | A channel for a certificate that verifies and should not | `SECURITY.md`, **0.11.1** |
+| `variable_range` refusing an unbounded end with no ray behind it | **0.11.2** — a certificate that verified and was wrong |
+| The tier a command delivers, derived rather than hand-written | `routing.TIER`, **0.11.2** — the old set understated six commands |
+| The exact simplex reachable when no rounded primal is | `exact.certify`, **0.11.3** — it sat inside the loop it was written to replace |
+| An absent dual is not a zero dual | **0.11.3** |
+| `opt` never writing a certificate its own verifier rejects | **0.11.3** |
+| `bb` no longer reading "no certificate" as "empty subtree" | **0.11.3** |
+| **An in-process API**: `run` / `runnable` / `options` | `certo.api`, **0.11.4** — 1.2 s of interpreter per question, gone |
+| `lint` warning at the degree where `prove` falls off | **0.11.4** — measured at 11, not guessed |
+| Minimisations reported in the sense they were asked | **0.11.4** — and `declared` in the payload |
+| The generators in the lattice's own coordinates | `toric_cone.relative`, **0.11.5** |
+| The fingerprint's residue convention, travelling with the recipe | **0.11.5** |
+| Lean export for a Smith normal form | **0.11.5** — compiled against Mathlib before it was registered |
+| `certo status --manifest`, with relations derived from content | **0.11.5** / **0.12.1** |
+| `certo doctor --repair`, preview by default | **0.11.5** |
+| A structural check on every Lean file certo emits | `check_emission`, **0.11.5** — the gate `run_lean.py` cannot be |
+| `--gap` no longer reporting ZERO from a flag combination | **0.11.6** |
+| `--target` compared rather than dropped, with `reached` | **0.11.6** |
+| `certo what <command>` | **0.11.6** |
+| `doctor` telling an install from a source tree from a leftover | **0.11.7** / **0.12.1** |
+| A binding carrying the certificate it is about | **0.11.7** — it named a path and checked nothing |
+| Integer labels ordered as integers | **0.12.0** — `10` sorted before `2` |
+| **A stopped search leaving an artefact** | `branch_frontier`, **0.12.1** — the 48th kind |
+| A nested sweep inheriting the spec it came from | **0.12.1** — one field, two symptoms |
+| `--brief`: the certificate summarised in `--json` | **0.12.1** — 94 KB became 0.5 KB |
+| `exists` answering the empty universe that `cover` certified | **0.12.1** |
+| **`certo semigroup`**: affine semigroups as a CHECKER | `affine_semigroup`, **0.13.0** — the 49th kind. Refutes normality with a witness, never asserts it |
+| A search whose bound is computed and travels with the answer | **0.13.0** — the grading turns "not in the semigroup" from a conjecture into a certificate |
+| **The questions certo could not settle, recorded** | **0.13.0** — on by default, sizes only, `CERTO_NO_COVERAGE=1` to stop |
+| An enumeration that could not run forever | **0.13.0** — `geng` had no clock and no memory cap at all |
+| The smallest-set recipe, documented and exercised | `docs/CASES.md` + `examples/smallest_deletion.py`, **0.11.4** |
+
+**Three items left this list without being worked on**, which is the part
+worth noticing. A *colourability defect* command was asked for and is not
+needed: `cases` with a counting constraint answers it, `bisect` sweeps it, and
+the encoding is now documented -- the gap was discoverability, not capability.
+A *certified frontier for weighted packings* turned out to need no packing
+work at all, because the weights were already there and only the frontier was
+missing. And *citing a fact* turned out to be unnecessary for the case that
+prompted it, because the cone already recomputes what the citation would have
+asserted.
 
 **Modularisation moved to the top, and it is the first item here ranked from
 a measurement of this repository rather than of a problem.** Adding `range`,
@@ -108,12 +324,25 @@ underneath, which is now the expected rate rather than a surprise. See
 
 ### Two things the table is saying quietly
 
-**The cheapest P2 unblocks the two expensive ones.** Exact integer linear
-algebra is the only mathematical item two different routes both asked for, it
-has no radius, and Bareiss fraction-free elimination already exists in
-`resultants.py` -- so determinant and rank fall out, and Hermite and Smith are
-classical and testable against brute force. Doing it first makes the two below
-it cheaper and better specified.
+**Neither P1 is mathematics, and one of them is about mathematics.** The top
+of the table is a measurement of what certo cannot settle, and a budget that
+does not bind. Neither adds a theorem; both decide how much theorem-adding is
+worth doing and in what order. It used to be: for several releases the
+top of this table was exact integer linear algebra, then it was a refactor.
+What sits there now is a flag that does not do what it says. That is not a
+coincidence -- it is what nine releases of external feedback taught. Of the
+defects fixed between 0.11.2 and 0.12.1, the overwhelming majority were of one
+shape: **the tool said something that was not so.** A dual reported as zero
+when there was none, a gap reported as zero when it was 3/2, a minimum
+reported with the wrong sign, a binding naming a file it never opened, a
+doctor reporting an install that was not there. None of them was a missing
+capability. All of them were a promise the output made and the code did not
+keep, and every one was found from outside.
+
+The old first paragraph here argued that the cheapest P2 unblocks the
+expensive ones, and pointed at exact integer linear algebra. That shipped as
+`certo matrix` in 0.8 and the paragraph was still making the case for it nine
+releases later, which is the staleness this file is about.
 
 **The toric items can be made much smaller, by the rule this project already
 follows.** A Hilbert basis is genuinely hard to COMPUTE -- Normaliz exists for
@@ -293,6 +522,25 @@ division this project has:
 Everything in P2 is chosen to feed that first arrow. Nothing in it is an
 attempt at the last three.
 
+**What that statement left out is who is holding the pipeline.** It says where
+certo stops and Lean starts, which is a division of labour between two tools,
+and it silently assumes the thing between them is a person assembling a final
+argument. Usually it is not. Usually it is a model deciding whether this
+pipeline is worth entering at all -- and that decision is made long before any
+certificate reaches Lean, on the strength of answers that cost seconds.
+
+So the boundary has a second half, which belongs next to the first:
+
+    a model proposes a route
+      -> certo settles what it can, conclusively, cheaply
+      -> the route is abandoned, or it earns the pipeline above
+
+The first arrow of the Lean pipeline is what a SURVIVING route needs. Most
+routes do not survive, and the work certo does for those is the work that
+never appears in a paper and saves the most time. Ranking by what the final
+certificate needs systematically undervalues it, which is what this file has
+been doing.
+
 ---
 
 ## What changed the ranking, again
@@ -342,6 +590,51 @@ highest-value MATHEMATICAL item, because it is the only one two routes share.
 certo should not become a second Lean. It produces finite, explicit,
 verifiable certificates; Lean proves the structural theorems and does the
 geometric transport. That is now the stated policy rather than an implication.
+
+### Reordered again 2026-09-21, after nine releases
+
+Not one report, this time: five, across four days, from a user running certo
+against real work. What they changed about the ranking is less about any
+single item than about where ranking information comes from.
+
+**Every significant defect was found by something outside the code that
+produced it.** A user hitting it, a derived table disagreeing with a
+hand-written one, an engine's own verifier rejecting what the engine wrote, a
+Lean compiler refusing a file. Not once by the code reviewing itself.
+
+**Three tests were found agreeing with the bug rather than catching it.** Two
+patched one seam while the code under test read another, so they passed
+against a machine that was broken. One fixture was built from the same wrong
+assumption as the defect -- it put scripts where the bug thought they were --
+so it confirmed the bug and reported success. This is the sharpest thing this
+cycle produced and it generalises: a test written by whoever wrote the code,
+reading the seam that code reads, cannot be relied on to disagree with it.
+The countermeasure that has worked here is not more tests, it is **derived
+expectations** -- the catalogue, `_declared_against_emitted` -- where the
+thing being compared against is computed from a different source. That is now
+a P2 item in its own right rather than a habit.
+
+**Three asks were settled without building what was asked for.** A command, a
+primitive and a mechanism were each requested, and each turned out to be a
+documentation gap, an adjacent feature, or already true. Worth remembering
+before the next ask is priced: the first question is whether the thing is
+missing or merely unreachable.
+
+**The premise the ranking rested on was never checked.** Every ordering in
+this file, from the first version to this one, implicitly ranked by what a
+careful REVIEWER of a finished argument would want. The owner named the other
+consumer -- a model testing and discarding routes fast, on objective results
+-- and the code has said so since `status.py` was written, in the comment that
+explains why there are six result states. A backlog can be stale about
+versions, which this one has been three times; it can also be stale about who
+the work is for, which is worse, because nothing in the repository contradicts
+it visibly. That is the correction that produced the section at the top and
+the coverage map at P1.
+
+**The one new item came from reading another project, not from a user.** The
+bounded-subprocess pattern now at P1 was found by looking at how a neighbouring
+tool runs untrusted work, and then checking certo's own tree against it. That
+is a cheap source of items and this list had never used it.
 
 ---
 
@@ -435,7 +728,8 @@ read as following from something.
 
 | | Decision | Consequence |
 |---|---|---|
-| **PyPI** | Not yet. Revisit at a stable version. | Installation stays `git clone` + `pip install -e`. No release workflow to maintain, and payload changes stay cheap until then. |
+| **PyPI** | ~~Not yet. Revisit at a stable version.~~ **Superseded.** | Was: installation stays `git clone` + `pip install -e`, no release workflow to maintain. Revisited and reversed: certo ships as `certo-math` via Trusted Publishing, and the release workflow described at the foot of this file is the thing that was being avoided here. Kept rather than deleted because the reason it was deferred -- keeping payload changes cheap -- is the same reason the schema freeze now matters. |
+| **Who this is for** | The primary caller is a model exploring, not a person refereeing. | Stated 2026-09-21, after nine releases of ranking as though it were the other way. Drives the coverage section at the top of this file; see also `status.py`, which has assumed it since it was written. |
 | **Certificate schema** | **Frozen from 0.4**, once that version closes. | Until 0.4 ships, payload fields may still move (readers keep accepting the old shapes). From 0.4 a payload change needs a schema bump and a migration note. Anything produced for a paper before then should be re-run after 0.4. |
 | **Lean** | Deeper Lean is **not the focus**. certo helps establish the mathematics; a separate tool generates and compiles the Lean. | P1 "Lean statements, not only structure" drops to P3. What stays is the export as it is -- data, `linarith` examples with their hints, and the theorem/bridge boundary -- because those are the *mathematical* content, not a formalisation. Revisit if the handoff turns out to lose something. |
 | **Admin rights** | Not available on this machine, and not coming. | `cadical` / `kissat` moves from Blocked to Closed. The built-in CDCL is the answer: correct, and slow. `certo doctor` says so in one line. |
@@ -548,7 +842,11 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.6.1**. The certificate schema has been **frozen** since 0.4.0 and `SCHEMA_VERSION` is still 4: everything since has been an optional field or a command that emits no certificate.
+Current: **0.12.1**, with **48 certificate kinds**. The certificate schema
+has been **frozen** since 0.4.0 and `SCHEMA_VERSION` is still 4: everything
+since has been a new kind, an optional field, or a command that emits no
+certificate. The optional fields added under the freeze so far are `loads`,
+`declared` and `relative`.
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:
@@ -558,3 +856,19 @@ removals, no changes of meaning. What stays allowed, permanently:
 
 Anything else needs a `SCHEMA_VERSION` bump and a migration note. Every item
 left below is of the first kind, which is why none of them is urgent.
+
+### The gate, and the hole in it
+
+Publication runs through Trusted Publishing in `publish.yml`: `guard` (the tag
+and `__version__` and the CHANGELOG entry must agree) -> `tests` -> `build` ->
+`publish`. No token is held anywhere, by anyone, and the guard has refused a
+release for disagreeing with itself, which is the job.
+
+**What it does not have is a human.** The `pypi` GitHub environment has no
+required reviewer, so the last step runs as soon as the tag lands. Nine
+versions reached the index in three days that way. Every one was authorised by
+the owner in conversation first -- the practice held -- but the practice is the
+only thing holding it, and a version on PyPI cannot be replaced, only yanked.
+That is the same shape as everything else on this list: a safeguard that
+works because somebody remembers. It is one setting, and only the repository
+owner can change it.

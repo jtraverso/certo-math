@@ -9,6 +9,7 @@ from __future__ import annotations
 import itertools
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 
 
@@ -294,11 +295,92 @@ def _geng_path():
     return shutil.which("geng")
 
 
-def enumerate_graphs(n: int, filters=None, use_geng: bool = True, connected_only=False):
+class WorkBudget(RuntimeError):
+    """`geng` was stopped by a bound instead of finishing.
+
+    THE PARTIAL OUTPUT IS DISCARDED, always. A truncated enumeration looks
+    exactly like a complete one -- a list of graphs -- and `sweep` would go on
+    to report "every graph on n vertices satisfies the predicate" having seen
+    a prefix of them. That is not a slow answer, it is a wrong one, and it is
+    the single failure this tool exists to prevent. So exceeding a bound is an
+    ERROR that propagates, never a shorter list.
+    """
+
+    def __init__(self, reason: str, detail: str = ""):
+        super().__init__(detail or reason)
+        self.reason = reason          # "timeout" | "output"
+
+
+def _run_geng(args, timeout_s: float, max_bytes: int) -> str:
+    """Run `geng`, reading it as it goes and stopping if it exceeds a bound.
+
+    `subprocess.run(capture_output=True)` was what this used to be, and it
+    buffers the whole of stdout before anyone can look at it: at n=12 that is
+    more than the machine has, so the bound has to be enforced DURING the
+    read, not after it.
+
+    One limitation, stated because it is real: the clock is checked once per
+    line, so a `geng` that produced nothing at all would not be noticed until
+    it did. `geng` emits steadily and the pathological cases here are large
+    rather than silent, so the remaining exposure is the final `wait`, which
+    is bounded separately.
+    """
+    proc = subprocess.Popen(args, stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE, text=True)
+    lines, size = [], 0
+    deadline = time.monotonic() + timeout_s
+    try:
+        for line in proc.stdout:
+            size += len(line)
+            if size > max_bytes:
+                raise WorkBudget(
+                    "output",
+                    "geng produced more than {} MB of graphs before any could "
+                    "be used".format(max_bytes // (1024 * 1024)))
+            if time.monotonic() > deadline:
+                raise WorkBudget(
+                    "timeout",
+                    "geng ran longer than {}s".format(int(timeout_s)))
+            lines.append(line)
+        left = max(1.0, deadline - time.monotonic())
+        try:
+            code = proc.wait(timeout=left)
+        except subprocess.TimeoutExpired:
+            raise WorkBudget("timeout",
+                             "geng ran longer than {}s".format(int(timeout_s)))
+        if code != 0:
+            err = (proc.stderr.read() or "").strip()
+            raise subprocess.CalledProcessError(code, args, stderr=err)
+    finally:
+        # Kill before close: closing the pipe on a still-running geng leaves
+        # it writing into a broken pipe rather than ending it.
+        if proc.poll() is None:
+            proc.kill()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        for stream in (proc.stdout, proc.stderr):
+            try:
+                stream.close()
+            except Exception:
+                pass
+    return "".join(lines)
+
+
+def enumerate_graphs(n: int, filters=None, use_geng: bool = True,
+                     connected_only=False, limits=None):
     """Todos los grafos con n vertices salvo isomorfismo, filtrados.
 
     Devuelve (lista_filtrada, motor_usado, total_antes_de_filtrar).
+
+    `limits` acota la enumeracion externa. Es opcional y su ausencia NO
+    significa "sin cota": se usan los valores por defecto de `Limits`, porque
+    el caso que motivo esto es precisamente el de quien no paso nada.
     """
+    from .limits import Limits
+
+    lim = limits or Limits()
     fns = compile_filters(filters)
     geng = _geng_path() if use_geng else None
 
@@ -307,7 +389,8 @@ def enumerate_graphs(n: int, filters=None, use_geng: bool = True, connected_only
         if connected_only or any(s == "connected" for s, _ in fns):
             args.append("-c")
         args.append(str(n))
-        out = subprocess.run(args, capture_output=True, text=True, check=True).stdout
+        out = _run_geng(args, lim.enumerate_timeout_s,
+                        lim.max_output_mb * 1024 * 1024)
         cands = [Graph.from_graph6(line) for line in out.split() if line]
         engine = "nauty/geng"
     else:

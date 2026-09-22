@@ -24,15 +24,33 @@ from .. import orbits as orb
 from ..certificate import (graph_set_certificate, outcome_code,
                            sweep_certificate, sweep_strength)
 from ..i18n import t
-from ..graphs import enumerate_graphs, filter_name
+from ..graphs import WorkBudget, enumerate_graphs, filter_name
 from ..limits import Limits
 from ..spec import Outcome
 from ..status import Result, Status, Verdict
 
 
+def _stopped(command, engine, t0, exc: WorkBudget) -> Result:
+    """A bound fired while enumerating. Which bound is part of the answer.
+
+    The caller has to be able to tell "there is no such graph" from "I never
+    got to look", and `sweep` returning an exception would leave a model with
+    neither. RESOURCE_EXHAUSTED and TIMEOUT are both inconclusive and they are
+    inconclusive for different reasons, which is the whole point of having six
+    states rather than three.
+    """
+    status = Status.TIMEOUT if exc.reason == "timeout" else Status.RESOURCE_EXHAUSTED
+    return Result(command, status, Verdict.INCONCLUSIVE, engine,
+                  (time.perf_counter() - t0) * 1000, None, detail=str(exc))
+
+
 def enum(n, filters=None, limits: Limits | None = None, use_geng=True) -> Result:
     t0 = time.perf_counter()
-    graphs, engine, total = enumerate_graphs(n, filters, use_geng=use_geng)
+    try:
+        graphs, engine, total = enumerate_graphs(n, filters, use_geng=use_geng,
+                                                 limits=limits)
+    except WorkBudget as exc:
+        return _stopped("enum", "nauty/geng", t0, exc)
     g6 = [g.to_graph6() for g in graphs]
     cert = graph_set_certificate(n, [filter_name(f) for f in (filters or [])], g6)
     ms = (time.perf_counter() - t0) * 1000
@@ -81,7 +99,12 @@ def sweep(spec, limits: Limits | None = None, use_geng=True,
                'none' (ninguno).
     """
     t0 = time.perf_counter()
-    graphs, engine, total = enumerate_graphs(spec.n, spec.filters, use_geng=use_geng)
+    try:
+        graphs, engine, total = enumerate_graphs(spec.n, spec.filters,
+                                                 use_geng=use_geng,
+                                                 limits=limits)
+    except WorkBudget as exc:
+        return _stopped("sweep", "nauty/geng", t0, exc)
 
     ids = [g.to_graph6() for g in graphs]
     groups = orb.build(spec, graphs, ids)

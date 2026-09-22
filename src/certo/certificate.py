@@ -874,6 +874,35 @@ def toric_cone_certificate(payload, title="") -> Certificate:
     )
 
 
+def affine_semigroup_certificate(payload, title="") -> Certificate:
+    """What is finite and checkable about `S = N.a_1 + ... + N.a_k`.
+
+    THE GAP THIS FILLS. `toric_cone` answers questions about the RATIONAL
+    cone. A semigroup is the lattice points you can actually reach by adding
+    generators, and the difference between the two is exactly where normality
+    lives: a point can be in the cone, and in the group, and still not be a
+    non-negative integer combination of the generators.
+
+    EVERY CLAIM CARRIES WHAT CHECKS IT. Membership carries coefficients.
+    Absence from the cone carries a separating functional -- one vector and
+    k+1 dot products, rather than a promise that a search was exhaustive.
+    Absence from the SEMIGROUP carries the graded bound that made the search
+    finite, so a verifier redoes it rather than believing it.
+
+    WHAT IT NEVER SAYS IS THAT S IS NORMAL. A witness refutes normality and
+    nothing here establishes it: that would mean deciding membership for every
+    lattice point of the cone, which is what Normaliz is for. `normal` is null
+    in the payload on purpose, so a reader of the certificate alone cannot
+    mistake an absent witness for a proof.
+    """
+    out = dict(payload)
+    out["title"] = title
+    return Certificate(
+        kind="affine_semigroup", solver_free=True, payload=out,
+        note_key="cert.note.affine_semigroup",
+    )
+
+
 def range_certificate(payload, title="") -> Certificate:
     """The admissible interval of one variable, with the multipliers for each
     end.
@@ -2411,6 +2440,200 @@ def _verify_toric_cone(cert, limits) -> VerifyReport:
         detail=t("verify.toric.detail", n=len(order),
                  dim=p["dimension"], mult=str(p["multiplicity"])),
     )
+
+
+def _verify_affine_semigroup(cert, limits) -> VerifyReport:
+    """Redo every claim from the generators. None of it needs a solver.
+
+    The asymmetry worth knowing about: a POSITIVE membership claim is checked
+    by one multiplication, and a NEGATIVE one is checked by redoing the search
+    the certificate says was exhaustive. The second costs what the original
+    cost -- which is the price of a negative that means anything.
+    """
+    from fractions import Fraction
+
+    from . import semigroup as sg
+
+    p = cert.payload
+    order = list(p["order"])
+    gens = {n: list(map(int, v)) for n, v in p["generators"].items()}
+    A = [gens[n] for n in order]
+    checks = []
+
+    # 1. the grading, which is what makes every search below terminate
+    u = p.get("grading")
+    if u is None:
+        checks.append((t("verify.semigroup.grading"), p.get("pointed") is False,
+                       t("verify.semigroup.no_grading")))
+        vec = None
+    else:
+        vec = [Fraction(x) for x in u]
+        ok = bool(A) and all(sg.dot(vec, a) >= 1 for a in A)
+        checks.append((t("verify.semigroup.grading"), ok,
+                       t("verify.semigroup.grading_is",
+                         values=", ".join(map(str, u[:4])))))
+
+    # 2. every coefficient vector is redone by arithmetic
+    bad = []
+    for name, e in sorted((p.get("points") or {}).items()):
+        v = [int(x) for x in e["point"]]
+        cone = e.get("cone_coefficients")
+        if cone is not None:
+            lam = [Fraction(x) for x in cone]
+            if any(c < 0 for c in lam) or not _combines(A, lam, v):
+                bad.append(name)
+        grp = e.get("group_coefficients")
+        if grp is not None:
+            if not _combines(A, [Fraction(c) for c in grp], v):
+                bad.append(name)
+        sgc = e.get("semigroup_coefficients")
+        if sgc is not None:
+            if (any(int(c) < 0 for c in sgc)
+                    or not _combines(A, [Fraction(c) for c in sgc], v)):
+                bad.append(name)
+    checks.append((t("verify.semigroup.coefficients"), not bad,
+                   t("verify.semigroup.points", n=len(p.get("points") or {}),
+                     bad=", ".join(sorted(set(bad))[:3]) or "-")))
+
+    # 3. every separating functional actually separates
+    unsep = []
+    for name, e in sorted((p.get("points") or {}).items()):
+        y = e.get("separating")
+        if y is None:
+            continue
+        v = [int(x) for x in e["point"]]
+        if not (all(sg.dot(y, a) <= 0 for a in A) and sg.dot(y, v) > 0):
+            unsep.append(name)
+    checks.append((t("verify.semigroup.separating"), not unsep,
+                   t("verify.semigroup.separators",
+                     n=sum(1 for e in (p.get("points") or {}).values()
+                           if e.get("separating")),
+                     bad=", ".join(unsep[:3]) or "-")))
+
+    # 4. THE NEGATIVES, redone rather than believed. A point the certificate
+    # says is not in the semigroup is searched for again, under the bound the
+    # certificate itself states.
+    wrong = []
+    if vec is not None:
+        for name, e in sorted((p.get("points") or {}).items()):
+            if e.get("in_semigroup") is not False:
+                continue
+            got = sg.in_semigroup(A, [int(x) for x in e["point"]], vec)
+            if got.get("coefficients") is not None or got.get("gave_up"):
+                wrong.append(name)
+    checks.append((t("verify.semigroup.absence"), not wrong,
+                   t("verify.semigroup.absences",
+                     n=sum(1 for e in (p.get("points") or {}).values()
+                           if e.get("in_semigroup") is False),
+                     bad=", ".join(wrong[:3]) or "-")))
+
+    # 5. a refutation of normality is the three parts together, or it is not
+    # a refutation
+    forged = [n for n, e in sorted((p.get("points") or {}).items())
+              if e.get("refutes_normality")
+              and not (e.get("in_cone") and e.get("in_group")
+                       and e.get("in_semigroup") is False)]
+    checks.append((t("verify.semigroup.witness"), not forged,
+                   t("verify.semigroup.witnesses",
+                     n=len(p.get("normality_witnesses") or []),
+                     bad=", ".join(forged[:3]) or "-")))
+
+    # 6. normality is never asserted, and a payload claiming it is refused
+    checks.append((t("verify.semigroup.never_normal"),
+                   p.get("normal") is None,
+                   t("verify.semigroup.scope_note")))
+
+    # 7. THE SUMMARIES, recomputed from the parts they summarise. Every one of
+    # these was found by the adversarial suite: each is a field that states a
+    # conclusion, and a stated conclusion nothing recomputes is a field anyone
+    # can edit. `pointed` is the existence of the grading, `minimal` is the
+    # emptiness of `redundant`, and the normality summary is the set of points
+    # that carry all three parts of a refutation.
+    want_w = sorted(n for n, e in (p.get("points") or {}).items()
+                    if e.get("refutes_normality"))
+    summaries = [
+        (p.get("pointed") is (u is not None), "pointed"),
+        (p.get("dimension") == (len(A[0]) if A else 0), "dimension"),
+        (p.get("rank") == sg._rank(A) if A else True, "rank"),
+        (sorted(p.get("normality_witnesses") or []) == want_w, "witnesses"),
+        (bool(p.get("not_normal")) == bool(want_w), "not_normal"),
+        (p.get("minimal") is (None if u is None
+                              else not p.get("redundant")), "minimal"),
+    ]
+    if u is not None:
+        want_d = {n: str(sg.dot(vec, gens[n])) for n in order}
+        summaries.append(((p.get("degrees") or {}) == want_d, "degrees"))
+    off = [name for ok, name in summaries if not ok]
+    checks.append((t("verify.semigroup.summaries"), not off,
+                   t("verify.semigroup.summaries_off",
+                     bad=", ".join(off[:4]) or "-")))
+
+    # 8. every generator the payload calls redundant really is reachable from
+    # the others, and no generator it leaves out is.
+    wrong_r = []
+    if u is not None:
+        claimed = dict(p.get("redundant") or {})
+        for i, name in enumerate(order):
+            others = [a for j, a in enumerate(A) if j != i]
+            if not others:
+                continue
+            got = sg.in_semigroup(others, gens[name], vec)
+            reachable = got.get("coefficients") is not None
+            if reachable != (name in claimed):
+                wrong_r.append(name)
+    checks.append((t("verify.semigroup.redundancy"), not wrong_r,
+                   t("verify.semigroup.redundancies",
+                     n=len(p.get("redundant") or {}),
+                     bad=", ".join(wrong_r[:3]) or "-")))
+
+    # 9. A PROPOSED minimal generating set, decided again. This is the one
+    # claim here that is settled rather than merely refuted, so the verifier
+    # cannot lean on a witness: it redoes all three questions.
+    hb = p.get("hilbert")
+    if hb is not None and u is not None:
+        pairs = [(n, [int(x) for x in e["element"]])
+                 for n, e in sorted((hb.get("elements") or {}).items())]
+        want = sg.check_hilbert(A, pairs, vec, gen_names=order)
+        same = (want["is_minimal_generating_set"]
+                == hb.get("is_minimal_generating_set")
+                and want["decided"] == hb.get("decided")
+                and want["generates"] == hb.get("generates")
+                and sorted(want["why_not"]) == sorted(hb.get("why_not") or [])
+                and sorted(want["unreachable_generators"])
+                == sorted(hb.get("unreachable_generators") or []))
+        # And each element's own two answers, not only the summary.
+        for name, got in want["elements"].items():
+            claimed = (hb.get("elements") or {}).get(name) or {}
+            if (got.get("in_semigroup") != claimed.get("in_semigroup")
+                    or got.get("irreducible") != claimed.get("irreducible")):
+                same = False
+        checks.append((t("verify.semigroup.hilbert"), same,
+                       t("verify.semigroup.hilbert_is",
+                         n=len(pairs),
+                         verdict=str(hb.get("is_minimal_generating_set")))))
+
+    return VerifyReport(
+        all(c[1] for c in checks), "affine_semigroup", True, checks=checks,
+        warnings=[t("verify.semigroup.scope")],
+        method_key="verify.semigroup.method",
+        detail=t("verify.semigroup.detail", n=len(order),
+                 dim=p.get("dimension"), rank=p.get("rank"),
+                 witnesses=len(p.get("normality_witnesses") or [])),
+    )
+
+
+def _combines(A, coeffs, v) -> bool:
+    """Does `sum coeffs[i] A[i]` equal `v`? One multiplication per entry."""
+    from fractions import Fraction
+
+    if len(coeffs) != len(A):
+        return False
+    for i in range(len(v)):
+        got = sum((Fraction(c) * Fraction(A[j][i])
+                   for j, c in enumerate(coeffs)), Fraction(0))
+        if got != Fraction(v[i]):
+            return False
+    return True
 
 
 def _verify_variable_range(cert, limits) -> VerifyReport:
@@ -4718,6 +4941,7 @@ VERIFIERS = {
     "dependency_cycle": _verify_dependency_cycle,
     "lean_binding": _verify_lean_binding,
     "toric_cone": _verify_toric_cone,
+    "affine_semigroup": _verify_affine_semigroup,
     "equitable_quotient": _verify_equitable_quotient,
     "linear_system": _verify_linear_system,
     "parametric_symmetry": _verify_parametric_symmetry,

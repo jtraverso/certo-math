@@ -180,6 +180,13 @@ def run(command: str, spec, limits=None, *, spec_path=None,
         res.certificate.stamp(spec_path)
     if self_check and res.certificate is not None:
         _check(res, limits)
+
+    # The in-process surface is the one a model sweeping a route space uses,
+    # so it is the one whose unanswered questions are worth the most. Silent
+    # here by design: `run()` returns a Result and prints nothing, ever.
+    from . import coverage
+
+    coverage.record(res, "api")
     return res
 
 

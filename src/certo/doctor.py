@@ -524,8 +524,15 @@ def report() -> dict:
         })
 
     caps = {r["key"]: r["ok"] for r in rows}
+    from . import coverage
+
     return {
         "rows": rows,
+        # Not a capability, so not a row: nothing is missing when it is empty.
+        # It is here because `doctor` is where somebody looks to find out what
+        # certo is doing on their machine, and writing a file is one of those
+        # things.
+        "coverage": dict(coverage.summary(), enabled=coverage.enabled()),
         "missing_required": missing_required,
         "numerics": caps["flint"] or caps["mpmath"],
         "sat_external": caps["cadical"] or caps["kissat"],

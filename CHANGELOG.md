@@ -6,6 +6,170 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-21
+
+**Three things, and the thread joining them is who certo is for.** The
+ranking in `BACKLOG.md` had always been made as though the reader were a
+referee checking one finished argument. The likelier caller is a model
+testing and discarding routes quickly, and `status.py` has said so since it
+was written -- *"an LLM that reads `unknown` writes `no solution exists`;
+you have to distinguish why"*. These three are what that consumer needs and
+did not have: more of the map, a way to find out where the map is blank, and
+the ability to stop.
+
+A minor rather than a patch: `affine_semigroup` is a NEW kind -- the
+forty-ninth -- so no existing payload changes shape, and certificates
+written before this are untouched. Two new optional fields on `Limits`,
+which older readers ignore.
+
+### `certo semigroup` — affine semigroups, as a checker
+
+`cone` answers questions about the RATIONAL cone over a set of generators. A
+semigroup is what you can actually reach by ADDING them, and the difference
+between the two is exactly where normality lives. That gap was unreachable:
+for `S = N(1,0) + N(1,1) + N(1,3)` the point `(1,2)` is in the cone, is in
+the group -- which is all of `Z^2` -- and is **not** in the semigroup, and
+certo could not say any of it.
+
+Now it says all three, and each is arithmetic: non-negative rational
+coefficients for the cone, integer coefficients via Hermite normal form for
+the group, non-negative integer coefficients for the semigroup. Together
+they **refute normality**.
+
+**Why every search here terminates.** A pointed semigroup carries a grading:
+a functional `u` with `<u, a_i> >= 1` on every generator. Then any
+representation `v = sum c_i a_i` with `c_i >= 0` satisfies
+`sum c_i <= <u, v>`, so the search is over a finite set whose size is
+computed rather than guessed. **The bound travels in the certificate and
+`verify` redoes the search rather than believing it** -- which is what a
+negative answer costs, and why it means something. The grading is also
+*chosen* rather than taken: every valid functional proves pointedness
+equally, but a small one is a cheaper search, and on the first real instance
+that was a bound of 1 against 11.
+
+**A point outside the cone carries a separating functional**, not a promise:
+`y` with `<y, a_i> <= 0` and `<y, v> > 0` is one vector checked by `k+1` dot
+products, instead of a claim that some search was exhaustive.
+
+**Not pointed is an answer about the object, not a failure.** With no
+grading no search here is finite, so the command returns `out_of_theory` --
+together with the certificate it can still establish, since the generators,
+the rank and the cone answers remain exact.
+
+**It never claims a semigroup IS normal.** A witness refutes normality;
+establishing it means deciding membership for every lattice point of the
+cone, which is what Normaliz is for. `normal` is null in the payload on
+purpose, so a reader of the certificate alone cannot mistake an absent
+witness for a proof.
+
+The adversarial suite found nine payload fields stating conclusions that
+nothing recomputed -- `pointed`, `minimal`, `rank`, the normality summary,
+the degrees, the redundancy claims. All are now redone from the parts they
+summarise. The two that survive mutation are excused by name with the
+reason: any *valid* grading defines a search space containing every
+representation, so swapping one for another changes no answer.
+
+And the base case had a real defect, found by a test rather than by review:
+the search only compared a point to the target AFTER taking a step, so the
+ORIGIN came back "not in the semigroup" -- and then, being in the cone and
+in the group, certified **every** semigroup non-normal from its own zero.
+Zero is in every semigroup by the empty combination. A wrong `unsat` is the
+one failure this project cannot have, and it was sitting in the base case.
+
+### A proposed minimal generating set, decided
+
+`hilbert` on the spec proposes a set and certo settles whether it is the
+minimal generating system of `S`. This is the one POSITIVE assertion in the
+command, and it is worth the contrast with normality, where the opposite
+holds: for a pointed semigroup the minimal generating set is unique and is
+exactly the set of irreducible non-zero elements, so the two inclusions are
+both finite questions and their conjunction is the equality.
+
+Three bounded checks, all on the grading that already shipped: every element
+is in `S`, every element is IRREDUCIBLE, and every generator is reachable
+from the proposed set. Irreducibility has a characterisation that costs one
+rung: `h` is reducible exactly when some generator `a` has `h - a` in S and
+`h - a` non-zero, so it is `k` membership questions of strictly smaller
+degree. A reducible element comes back with the decomposition that reduces
+it, because "not irreducible" is a claim and a claim carries something.
+
+**Unreachable and undecided are not the same answer**, and the first version
+of this counted them together: a zero in the proposed set breaks the grading,
+every search below it gives up, and "could not tell" was being reported as
+"does not generate". That is the substitution this module exists to refuse,
+one level down.
+
+### certo now records the questions it could not settle
+
+Every `out_of_theory`, `timeout`, `unknown_solver` and `resource_exhausted`
+is an instance of a question somebody brought and this tool could not
+answer. Nothing recorded them. The ledger looked like the place and is not:
+it is opt-in, and it ties a CLAIM to a re-verifiable artefact, which an
+unanswered question does not have. Read for coverage after a year of
+releases, the ledger held **two lines**, both conclusive.
+
+So there is now a separate log, and it is **on by default** -- a switch
+nobody remembers to flip measures nothing. What it holds is numbers about
+SIZE and nothing else: the command, the status, the engine, which surface
+asked, the version, and whichever allowlisted scalars the result already
+reported. Not the detail string, which interpolates the caller's own names;
+not a title, not a path, not a spec, not an answer.
+
+Because a tool whose whole argument is that it does not claim more than it
+knows does not get to start writing files quietly either: it writes one file
+in the user's data directory and never the working directory, says so once
+the first time, is reported by `certo doctor`, stops rather than rotating
+when it fills -- discarding the oldest evidence is the failure it exists to
+fix -- and never fails a command when it cannot be written.
+`CERTO_NO_COVERAGE=1` turns it off everywhere; `CERTO_COVERAGE_FILE` moves
+it.
+
+### An example answering "certo is not a sweep engine"
+
+A user went outside certo to compute an invariant over thousands of chordal
+graphs before deciding what to certify, on the grounds that "its spec is a
+`.py` with `spec()` per instance". The conclusion -- fast search, exact proof
+-- is right; the premise stopped being true in 0.11.4, when `api.run` began
+taking a spec OBJECT, and `chordal` has been a built-in filter throughout.
+
+`examples/sweep_with_scipy.py` runs `scipy.optimize.milp` INSIDE a sweep
+predicate, so the search and the artefact come out of one run: the family
+already up to isomorphism and filtered, `collect` giving min, max, the mean as
+an exact rational and the extremal graphs in graph6, the level reported
+honestly as `reproducible` with the uncertified evaluations counted, and
+`cert_mode="failures"` certifying only the counterexamples.
+
+**And a measurement worth having before taking that advice.** scipy is the
+SLOWER of the two paths at these sizes, by a factor of ten, for the same
+numbers: 3.99 s against 0.42 s over the 1614 connected chordal graphs on eight
+vertices. A `milp` call spends about 2.5 ms on setup before HiGHS sees
+anything, and an independence number on eight vertices is a quarter of a
+millisecond of Python. Over thousands of small instances the obvious loop
+wins. The example says so, and keeps both paths -- scipy is optional and is
+not a certo dependency, so without it the fallback runs and produces the same
+calibration.
+
+### The enumeration that had no bound at all
+
+`graphs.enumerate_graphs` ran `geng` under
+`subprocess.run(capture_output=True)`: no clock, no memory cap, all of stdout
+in a buffer, on an `n` the caller chose. At n=12 that is more graphs than the
+machine has memory for, and the only thing that ended the run was the
+operating system.
+
+It is now read as it goes and stopped by two bounds, both on `Limits` and
+both deliberately SEPARATE from `timeout_ms` -- enumerating every graph on n
+vertices and deciding a formula are different jobs, and giving them one
+number because both are "time" is the quiet substitution this project
+refuses elsewhere.
+
+**A truncated enumeration is never returned as a shorter list.** Partial
+output is discarded and the bound propagates, because a prefix of the graphs
+looks exactly like all of them and `sweep` would go on to report that every
+graph on n vertices satisfies the predicate. The engines turn it into
+`timeout` or `resource_exhausted` -- inconclusive, and inconclusive for
+different reasons, which is the point of having six states.
+
 
 ## [0.12.1] — 2026-09-21
 

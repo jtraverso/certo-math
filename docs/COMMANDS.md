@@ -1,4 +1,4 @@
-# The forty-six commands
+# The forty-seven commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -721,6 +721,59 @@ rather than a vacuous `True`.
 A non-simplicial cone still gets an answer: the missing multiplicity is
 recorded with the reason, rather than refusing the certificate and losing the
 other three quantities.
+
+### `certo semigroup`
+
+**Question** — Is this lattice point a non-negative integer combination of
+these generators, and is the semigroup normal?
+**Spec** — `SemigroupSpec`
+**Answers** — whether the semigroup is pointed, with the grading that proves
+it; whether the generating set is minimal, naming any redundant generator; and
+per point, membership of the cone, of the group and of the semigroup itself
+**Certificate** — `affine_semigroup`, **solver-free**: exact integer and
+rational arithmetic
+**Not established** — that the semigroup **is** normal. A witness refutes
+normality; establishing it means deciding membership for every lattice point
+of the cone, which is what Normaliz is for. `normal` is null by construction.
+
+**The gap this fills.** `cone` answers questions about the *rational* cone
+over a set of generators. A semigroup is what you can actually reach by
+*adding* them, and the difference between the two is exactly where normality
+lives. For `S = ℕ(1,0) + ℕ(1,1) + ℕ(1,3)`, the point `(1,2)` is in the cone,
+is in the group — which is all of `ℤ²` — and is **not** in the semigroup. Those
+three facts together refute normality, and each of them is arithmetic.
+
+**Why every search terminates.** A pointed semigroup carries a grading: a
+functional `u` with `⟨u,aᵢ⟩ ≥ 1` on every generator. Then any representation
+`v = Σ cᵢaᵢ` with `cᵢ ≥ 0` satisfies `Σ cᵢ ≤ ⟨u,v⟩`, so the search is over a
+finite set whose size is **computed, not guessed**, and the bound travels in
+the certificate. `verify` redoes the search rather than believing it — which
+is what a negative answer costs, and why it means something.
+
+**A point outside the cone carries a separating functional**, not a promise.
+`y` with `⟨y,aᵢ⟩ ≤ 0` for every generator and `⟨y,v⟩ > 0` is one vector,
+checked by `k+1` dot products, instead of a claim that some search was
+exhaustive.
+
+**Not pointed is an answer, not a failure.** With no grading no search here is
+finite, so the command says so and returns `out_of_theory` — with the
+certificate it *can* establish, since the generators, the rank and the cone
+answers are all still exact.
+
+**A proposed minimal generating set is *decided*, not merely refuted.** Give
+`hilbert` a set and certo settles whether it is the minimal generating system
+of `S` — the one positive assertion in this command. For a pointed semigroup
+that set is unique and is exactly the irreducible non-zero elements, so three
+bounded questions settle it: every element is in `S`, every element is
+irreducible, and every generator is reachable from the proposed set. The two
+inclusions are the equality. `h` is reducible exactly when some generator `a`
+has `h − a ∈ S` and `h − a ≠ 0`, which is `k` membership questions one rung
+down in the grading — and a reducible element comes back with the
+decomposition, because "not irreducible" is a claim.
+
+**Unreachable and undecided are different answers.** A zero in the proposed
+set breaks the grading and nothing below it terminates; that is reported as
+`None`, never as "does not generate".
 
 ### `certo range`
 

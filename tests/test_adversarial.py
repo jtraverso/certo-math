@@ -69,6 +69,16 @@ DESCRIPTIVE = {
     # still refuted. Truncating further IS caught, which is the property that
     # matters.
     "proof",
+    # `affine_semigroup`: the grading is the REASON the searches terminate,
+    # not a claim of its own, and check 1 refuses one that is not valid. Any
+    # grading that survives that check defines a search space containing every
+    # representation of every point -- a larger `u` only widens it -- so every
+    # absence in the payload stays proven under it. Swapping one valid grading
+    # for another changes no answer, which is why nothing here catches it.
+    "grading",
+    # And the sentence explaining that normality is never asserted. The claim
+    # itself is `normal is None`, which check 6 enforces; this is its prose.
+    "normal_why",
 }
 
 #: Mutations that make the certificate claim LESS. Not catching these is
@@ -464,6 +474,110 @@ def test_drat_and_cnf_model():
     b = ok.var("b")
     ok.add(b)
     _report("cnf_model", probe(sat.cases(CNFSpec(cnf=ok), LIM).certificate))
+
+
+def test_affine_semigroup():
+    """The kind whose negatives are the expensive half.
+
+    A membership claim is checked by one multiplication. A NON-membership
+    claim is checked by redoing the bounded search, so a payload that quietly
+    widens the search bound, or drops a generator, or relabels a point, has to
+    be caught by that redoing and not by a stored number agreeing with itself.
+    """
+    from certo import SemigroupSpec
+    from certo.engines import algebra
+
+    spec = SemigroupSpec(
+        generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+        points={"w": (1, 2), "reachable": (2, 1), "outside": (1, -1)},
+        # The proposed set goes in so the generic mutation harness sees the
+        # field at all: a payload entry that is None when probed is a field
+        # nothing here is testing.
+        hilbert={"a": (1, 0), "b": (1, 1), "c": (1, 3), "extra": (2, 1)},
+        title="not normal, and the witness says so",
+    )
+    cert = algebra.affine_semigroup(spec, LIM).certificate
+    _report("affine_semigroup", probe(cert))
+
+
+def test_a_semigroup_cannot_claim_a_point_it_never_reaches():
+    """The forgery this kind exists to refuse: a witness that is not one."""
+    from certo import SemigroupSpec, verify
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    spec = SemigroupSpec(generators={"e1": (1, 0), "e2": (0, 1)},
+                         points={"v": (3, 4)})
+    cert = algebra.affine_semigroup(spec, LIM).certificate
+    assert verify(cert, LIM).ok
+
+    # (3,4) IS in the semigroup. Claiming it is not -- and that this refutes
+    # normality -- is exactly the lie that would discard a live route.
+    d = json.loads(json.dumps(cert.to_dict()))
+    d["payload"]["points"]["v"]["in_semigroup"] = False
+    d["payload"]["points"]["v"]["semigroup_coefficients"] = None
+    d["payload"]["points"]["v"]["refutes_normality"] = True
+    d["payload"]["not_normal"] = True
+    d["payload"]["normality_witnesses"] = ["v"]
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_a_semigroup_certificate_may_never_assert_normality():
+    """`normal` is null by construction, and a payload that fills it in is
+    refused rather than read."""
+    from certo import SemigroupSpec, verify
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    spec = SemigroupSpec(generators={"e1": (1, 0), "e2": (0, 1)})
+    cert = algebra.affine_semigroup(spec, LIM).certificate
+    d = json.loads(json.dumps(cert.to_dict()))
+    d["payload"]["normal"] = True
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_a_proposed_minimal_generating_set_cannot_be_talked_into_passing():
+    """The verdict is recomputed, so flipping it is caught -- and so is
+    flipping the per-element answers it is built from."""
+    from certo import SemigroupSpec, verify
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    spec = SemigroupSpec(
+        generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+        hilbert={"a": (1, 0), "b": (1, 1), "c": (1, 3), "extra": (2, 1)})
+    cert = algebra.affine_semigroup(spec, LIM).certificate
+    assert verify(cert, LIM).ok
+    assert cert.payload["hilbert"]["is_minimal_generating_set"] is False
+
+    for edit in (
+        lambda d: d["payload"]["hilbert"].update(
+            {"is_minimal_generating_set": True, "why_not": []}),
+        lambda d: d["payload"]["hilbert"]["elements"]["extra"].update(
+            {"irreducible": True}),
+        lambda d: d["payload"]["hilbert"].update({"generates": False}),
+    ):
+        d = json.loads(json.dumps(cert.to_dict()))
+        edit(d)
+        assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_a_hilbert_claim_cannot_be_smuggled_in_by_dropping_an_element():
+    """Removing the element that fails leaves a set that really is minimal --
+    for a DIFFERENT proposal. The verdict must move with the elements."""
+    from certo import SemigroupSpec, verify
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    spec = SemigroupSpec(
+        generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+        hilbert={"a": (1, 0), "b": (1, 1), "c": (1, 3), "extra": (2, 1)})
+    cert = algebra.affine_semigroup(spec, LIM).certificate
+    d = json.loads(json.dumps(cert.to_dict()))
+    del d["payload"]["hilbert"]["elements"]["extra"]
+    # The remaining three ARE the minimal set, so the recomputed verdict is
+    # True while the payload still says False: caught either way round.
+    assert not verify(Certificate.from_dict(d), LIM).ok
 
 
 if __name__ == "__main__":

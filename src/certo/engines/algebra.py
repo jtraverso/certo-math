@@ -50,6 +50,7 @@ ENGINE_LATTICE = "certo/unimodular"
 ENGINE_ORBIT = "certo/orbit-quotient"
 ENGINE_EXACT = "certo/exact-elimination"
 ENGINE_TORIC = "certo/toric-local"
+ENGINE_SEMIGROUP = "certo/affine-semigroup"
 ENGINE_RANGE = "certo/exact-range"
 ENGINE_CYCLE = "certo/growth-classes"
 ENGINE_BIND = "certo/lean-binding"
@@ -337,6 +338,73 @@ def equitable_quotient(spec, limits: Limits | None = None,
               "physical_columns": out["physical_columns"],
               "rows": len(out["N"]), "columns": len(out["M"]),
               "identities": len(out["B"])})
+
+
+def affine_semigroup(spec, limits: Limits | None = None,
+                    spec_path: str = "") -> Result:
+    """The finite questions about `S = N.a_1 + ... + N.a_k`, each with its
+    check."""
+    from ..certificate import affine_semigroup_certificate
+    from ..semigroup import NotASemigroup, certify
+
+    t0 = time.perf_counter()
+    try:
+        out = certify(spec)
+    except NotASemigroup as e:
+        return Result("semigroup", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_SEMIGROUP, 0.0, None, detail=str(e))
+
+    ms = (time.perf_counter() - t0) * 1000
+
+    # A semigroup with no grading is not a failure to report as one: it is a
+    # statement about the object, and every search below it would be infinite.
+    # The certificate is still worth having -- the generators, the rank and
+    # the cone answers are all established -- so it is emitted and the verdict
+    # says what was NOT settled.
+    if not out["pointed"]:
+        cert = affine_semigroup_certificate(out, title=spec.title).stamp(
+            spec_path or None)
+        return Result(
+            "semigroup", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+            ENGINE_SEMIGROUP, ms, cert,
+            detail=t("engine.semigroup.not_pointed"),
+            meta={"generators": len(out["order"]), "rank": out["rank"],
+                  "dimension": out["dimension"], "pointed": False})
+
+    cert = affine_semigroup_certificate(out, title=spec.title).stamp(
+        spec_path or None)
+
+    detail = t("engine.semigroup.summary", gens=len(out["order"]),
+               rank=out["rank"])
+    if out["not_normal"]:
+        detail += " -- " + t("engine.semigroup.not_normal",
+                             n=len(out["normality_witnesses"]))
+    if out["redundant"]:
+        detail += " -- " + t("engine.semigroup.redundant",
+                             n=len(out["redundant"]))
+
+    meta = {"generators": len(out["order"]), "rank": out["rank"],
+            "dimension": out["dimension"], "pointed": True,
+            "minimal": out["minimal"],
+            "not_normal": out["not_normal"],
+            "witnesses": list(out["normality_witnesses"]),
+            "redundant": sorted(out["redundant"])}
+
+    hb = out.get("hilbert")
+    if hb is not None:
+        verdict = hb["is_minimal_generating_set"]
+        meta["hilbert"] = verdict
+        if verdict is True:
+            detail += " -- " + t("engine.semigroup.hilbert_yes")
+        elif verdict is False:
+            detail += " -- " + t("engine.semigroup.hilbert_no",
+                                 why=", ".join(hb["why_not"][:3]) or "-")
+        else:
+            detail += " -- " + t("engine.semigroup.hilbert_unknown")
+
+    return Result(
+        "semigroup", Status.UNSAT, Verdict.PROVED, ENGINE_SEMIGROUP, ms, cert,
+        detail=detail, meta=meta)
 
 
 def toric_cone(spec, limits: Limits | None = None,

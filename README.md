@@ -6,7 +6,7 @@ the claims that are false, measure what survives, reduce it to what it really
 is, and assemble the rest — and every step comes back with a **certificate
 anyone can re-check without trusting certo.**
 
-CLI and MCP. Forty-six commands. Runs in milliseconds where a formalisation
+CLI and MCP. Forty-seven commands. Runs in milliseconds where a formalisation
 costs hours.
 
 *Español: [README.es.md](README.es.md) · run any command with `--lang es`.*
@@ -14,7 +14,7 @@ costs hours.
 | | |
 |---|---|
 | **[Project page →](https://jtraverso.github.io/certo-math/)** | the didactic introduction: what certo is for, in one page, in both languages |
-| **[Commands](docs/COMMANDS.md)** | all forty-six, one entry each: the question, the spec, the certificate, and what it does not establish |
+| **[Commands](docs/COMMANDS.md)** | all forty-seven, one entry each: the question, the spec, the certificate, and what it does not establish |
 | **[Specs](docs/SPECS.md)** | the DSL: every spec type with a minimal working example, shared options, exit codes |
 | **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the forty-seven kinds, which re-check without a solver |
 | **[Worked cases](docs/CASES.md)** | real problems end to end: symmetry, sweeps, parametric bounds, packings, toric data |
@@ -140,7 +140,7 @@ your terminal, in your language.
    dominates, and a fallback written to avoid it is a fallback in floating
    point.
 
-## The forty-six commands
+## The forty-seven commands
 
 Grouped as [`certo commands`](docs/COMMANDS.md) groups them. Full entries,
 with what each one does **not** establish, in
@@ -169,6 +169,7 @@ with what each one does **not** establish, in
 | `solve` | `A x = b` exactly, over ℚ or ℤ | exact elimination, Smith | **the solution and the system**, one product to check; an obstruction when there is none |
 | `quotient` | A partition of a program, and the equivalence it induces | exact counting | **the class data and both regularities**, solver-free |
 | `cone` | Local toric data: primitivity, multiplicity, the height functional, discrepancies | exact det and solve | **the numbers two geometric theorems consume**, solver-free |
+| `semigroup` | Affine semigroups as a checker: pointedness, minimality, and membership of the cone, the group and the semigroup | exact integer and rational arithmetic | **refutes normality with a witness, never asserts it**, solver-free |
 | `family` | The largest of ten thousand linear programs, and why nothing beats it | exact LP | **the winner and a dual for the rest**, solver-free |
 | `ratio` | A fraction inequality for EVERY n | exact polynomials | **the cleared numerator and the sign of the denominator**, solver-free |
 | `moment` | Is the expected number of bad events below one, so a good object exists? | exact rationals | **the moment and the mass it leaves over**, solver-free |

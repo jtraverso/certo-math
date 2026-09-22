@@ -202,9 +202,39 @@ def emit(res: Result, args) -> int:
         if not getattr(args, "json", False):
             print("  " + t("cli.ledger.logged", path=path))
 
+    # A question certo could not settle is the raw material of a coverage
+    # map, and nothing was keeping it. Silent by design after the first time,
+    # never fatal, and `CERTO_NO_COVERAGE=1` turns it off.
+    from . import coverage
+
+    if coverage.record(res, "cli") and not getattr(args, "json", False):
+        _announce_coverage()
+
     if selfcheck is False:
         return 1
     return 0 if res.status.conclusive else 2
+
+
+def _announce_coverage() -> None:
+    """Say it once, the first time, and never again.
+
+    A tool whose whole argument is that it does not claim more than it knows
+    does not get to start writing files without mentioning it. A marker beside
+    the log is how "the first time" survives between processes.
+    """
+    from . import coverage
+
+    try:
+        marker = coverage.default_path().with_suffix(".announced")
+        if marker.exists():
+            return
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("", encoding="utf-8")
+        print("  " + t("cli.coverage.first",
+                       path=str(coverage.default_path()),
+                       off=coverage.ENV_OFF))
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _self_check(res, args):
@@ -350,6 +380,55 @@ def cmd_cone(args):
         print("  " + t("verify.toric.lattice", where=p["multiplicity_in"]))
         print("  " + t("verify.toric.scope"))
     return rc
+
+
+def cmd_semigroup(args):
+    from .engines import algebra
+    from .spec import SemigroupSpec, load_spec
+
+    spec = load_spec(args.spec, SemigroupSpec)
+    res = algebra.affine_semigroup(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.certificate is not None:
+        p = res.certificate.payload
+        if p.get("grading"):
+            print("  u = " + ", ".join(p["grading"])
+                  + "   (" + t("verify.semigroup.grading") + ")")
+        for name in p["order"]:
+            deg = (p.get("degrees") or {}).get(name, "?")
+            mark = "  redundant" if name in (p.get("redundant") or {}) else ""
+            print("  {:<12} {:<18} degree {}{}".format(
+                name, str(tuple(p["generators"][name])), deg, mark))
+        for name, e in sorted((p.get("points") or {}).items()):
+            print("  {:<12} {:<18} cone {:<6} group {:<6} semigroup {}".format(
+                name, str(tuple(e["point"])), _say(e["in_cone"]),
+                _say(e["in_group"]), _say(e["in_semigroup"])))
+            if e.get("refutes_normality"):
+                print("               " + t("cli.semigroup.witness", name=name))
+        hb = p.get("hilbert")
+        if hb is not None:
+            print("  " + t("cli.semigroup.hilbert") + ": "
+                  + _say(hb["is_minimal_generating_set"]))
+            for name, e in sorted((hb.get("elements") or {}).items()):
+                extra = ""
+                if e.get("reduces_as"):
+                    extra = "  = {} + {}".format(
+                        p["order"][e["reduces_as"]["generator"]],
+                        tuple(e["reduces_as"]["rest"]))
+                print("    {:<12} {:<18} in S {:<10} irreducible {}{}".format(
+                    name, str(tuple(e["element"])), _say(e.get("in_semigroup")),
+                    _say(e.get("irreducible")), extra))
+            if hb.get("unreachable_generators"):
+                print("    " + t("cli.semigroup.unreachable",
+                                 names=", ".join(hb["unreachable_generators"])))
+        print("  " + t("verify.semigroup.scope"))
+    return rc
+
+
+def _say(v) -> str:
+    """yes / no / unknown -- and unknown is never printed as no."""
+    return t("cli.yes") if v is True else (
+        t("cli.no") if v is False else t("cli.unknown"))
 
 
 def cmd_range(args):
@@ -770,6 +849,23 @@ def cmd_doctor(args):
         print("    " + t("doctor.mcp.not_registered"))
     print("    " + (t("doctor.mcp.starts") if m["starts"]
                     else t("doctor.mcp.fails", detail=m["detail"])))
+
+    print()
+    cov = rep.get("coverage") or {}
+    print("  " + t("doctor.coverage.title"))
+    from . import coverage as _cov
+
+    if not cov.get("enabled", True):
+        print("    " + t("doctor.coverage.off", off=_cov.ENV_OFF))
+    elif cov.get("full"):
+        print("    " + t("doctor.coverage.full", lines=cov.get("lines", 0),
+                         path=cov.get("path", "")))
+    elif cov.get("lines"):
+        print("    " + t("doctor.coverage.some", lines=cov["lines"],
+                         first=(cov.get("first") or "")[:10],
+                         path=cov.get("path", "")))
+    else:
+        print("    " + t("doctor.coverage.none", path=cov.get("path", "")))
 
     print()
     print("  " + (t("doctor.all_required") if rep["ok"]
@@ -2157,6 +2253,11 @@ def build_parser():
                      "functional and discrepancies")
     sp.add_argument("spec", help=".py file returning a ConeSpec")
     sp.set_defaults(func=cmd_cone)
+    sp = add("semigroup", "an affine semigroup as a CHECKER: pointedness, a "
+                          "minimal generating set, and membership with the "
+                          "coefficients or the bound that settles it")
+    sp.add_argument("spec", help=".py file returning a SemigroupSpec")
+    sp.set_defaults(func=cmd_semigroup)
     sp = add("quotient", "a partition of a program's rows and columns, and "
                          "the equivalence it induces: same attainable values")
     sp.add_argument("spec", help=".py file returning an EquitableQuotientSpec")

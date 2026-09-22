@@ -6,7 +6,7 @@ romper las afirmaciones falsas, medir lo que sobrevive, reducirlo a lo que
 realmente es, y ensamblar el resto— y cada paso vuelve con un **certificado
 que cualquiera puede re-comprobar sin fiarse de certo.**
 
-CLI y MCP. Cuarenta y seis comandos. Corre en milisegundos donde una
+CLI y MCP. Cuarenta y siete comandos. Corre en milisegundos donde una
 formalización cuesta horas.
 
 *English: [README.md](README.md) · cualquier comando acepta `--lang en`.*
@@ -14,7 +14,7 @@ formalización cuesta horas.
 | | |
 |---|---|
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
-| **[Comandos](docs/es/COMMANDS.md)** | los cuarenta y seis, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
+| **[Comandos](docs/es/COMMANDS.md)** | los cuarenta y siete, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
 | **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cuarenta y siete tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
@@ -140,7 +140,7 @@ en tu idioma.
    un bucle sobre la CLI: manda el arranque, y un apaño escrito para evitarlo
    es un apaño en punto flotante.
 
-## Los cuarenta y seis comandos
+## Los cuarenta y siete comandos
 
 Agrupados como los agrupa [`certo commands`](docs/es/COMMANDS.md). Las entradas
 completas, con lo que cada uno **no** establece, en
@@ -169,6 +169,7 @@ completas, con lo que cada uno **no** establece, en
 | `solve` | `A x = b` exactamente, sobre ℚ o ℤ | eliminación exacta, Smith | **la solución y el sistema**, un producto que comprobar; una obstrucción cuando no hay |
 | `quotient` | Una partición de un programa, y la equivalencia que induce | conteo exacto | **los datos de clase y ambas regularidades**, sin solver |
 | `cone` | Datos tóricos locales: primitividad, multiplicidad, funcional de altura, discrepancias | det y solve exactos | **los números que consumen dos teoremas geométricos**, sin solver |
+| `semigroup` | Semigrupos afines como comprobador: puntiagudez, minimalidad y pertenencia al cono, al grupo y al semigrupo | aritmética entera y racional exacta | **refuta la normalidad con un testigo, nunca la afirma**, sin solver |
 | `family` | El mayor de diez mil programas lineales, y por qué nada lo supera | LP exacto | **el ganador y un dual para el resto**, sin solver |
 | `ratio` | Una desigualdad de fracciones para TODO n | polinomios exactos | **el numerador despejado y el signo del denominador**, sin solver |
 | `moment` | ¿El número esperado de eventos malos es menor que uno, así que existe un objeto bueno? | racionales exactos | **el momento y la masa que deja**, sin solver |
