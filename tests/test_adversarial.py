@@ -30,129 +30,24 @@ from certo.certificate import Certificate
 
 LIM = Limits(timeout_ms=20_000)
 
-#: Fields that carry NO CLAIM: names, counts, prose, and data the checked
-#: content is derived from. Mutating one should change nothing, and each is
-#: here because somebody decided it rather than because a rule swallowed it.
-DESCRIPTIVE = {
-    "title", "describe", "conclusion", "note", "spec_path", "spec_sha256",
-    "engine", "names", "var_names", "dropped", "hypotheses", "goals",
-    "filters", "mode", "id", "labelled", "spot_checks", "family_graph6",
-    "values", "stats", "counts", "evaluations", "certified", "evaluated",
-    "orbits", "sizes", "first_failure", "stopped_early", "inconclusive",
-    "skeleton_from", "kinds", "level", "tight", "part_report", "sorts",
-    "clash", "expect", "cancelled", "loads", "prec", "backend", "iterations",
-    "candidate", "counterexamples", "steps", "trace", "blocked", "witnesses",
-    "bridge", "bridges", "used", "unused", "lemmas", "base", "k0",
-    "base_upto", "step_from", "question", "cores", "table", "claim",
-    # `peak`: the name of the integer variable. It labels a column of the
-    # objective and nothing else -- rename it in both places and every
-    # coefficient, every check and the answer are identical.
-    "variable",
-    "order", "deg_f", "deg_g", "lead_f", "lead_g", "lead_f_constant",
-    "lead_g_constant", "multiplicities", "max_size", "half_degree",
-    "original_sense", "original_optimum", "discrete_gain", "conditional",
-    # `sos` keeps three counters beside the content: the squares themselves
-    # are `terms`, and `poly` is what they have to sum to. Both are checked.
-    "squares", "basis_size", "basis",
-    # A sweep whose predicate cannot be re-run says so in a warning, loudly,
-    # and then nothing checks the outcomes -- which is the honest behaviour
-    # and is why mutating them changes no check.
-    "outcomes", "outcomes_sha256", "no_predicate", "by_orbit", "count",
-    "family_count", "nvars",
-    # `sos` records a denominator that `_verify_sos` never reads: the terms
-    # carry their own coefficients and are expanded and compared directly.
-    # Excused because it is genuinely inert, and flagged here because an inert
-    # field in a payload that claims to be checkable is worth knowing about.
-    "denominator",
-    # Dropping the final empty clause from a DRAT proof is accepted, because
-    # the prefix that remains still propagates to a conflict -- the formula is
-    # still refuted. Truncating further IS caught, which is the property that
-    # matters.
-    "proof",
-    # `affine_semigroup`: the grading is the REASON the searches terminate,
-    # not a claim of its own, and check 1 refuses one that is not valid. Any
-    # grading that survives that check defines a search space containing every
-    # representation of every point -- a larger `u` only widens it -- so every
-    # absence in the payload stays proven under it. Swapping one valid grading
-    # for another changes no answer, which is why nothing here catches it.
-    "grading",
-    # And the sentence explaining that normality is never asserted. The claim
-    # itself is `normal is None`, which check 6 enforces; this is its prose.
-    "normal_why",
-}
-
-#: Mutations that make the certificate claim LESS. Not catching these is
-#: correct: an exact cover really is an at-least cover, and a design that
-#: stops claiming global optimality is making a smaller true statement. A
-#: forgery claims MORE; weakening is a reader's loss, not a lie.
-WEAKENING = {
-    "exact",            # exact cover -> at-least cover
-    "cliques",          # stops asserting the parts are cliques
-    "nonlinear",        # farkas: changes which tactic is claimed
-    "globally_optimal", # mixed: drops the optimality claim
-    "integer",          # lp_dual: an ILP flag with no integral point warns
-    "vacuous",          # dropping a warning flag does not create a claim
-    "sense",            # reading a max as a min makes the bound weaker
-    "target",           # a target is a question, not an assertion
-    "relaxation",       # mixed: an optional side certificate
-    "residual",         # mixed: checked when present; absence is not a claim
-    "system",           # mixed: ditto, the full point is checked either way
-    "parameters", "objective", "constraints", "variables", "eliminated",
-    "equations",        # parametric/eliminate: restating the problem smaller
-    "terms", "collected", "var",   # asymptotic: the Laurent data it reports
-    "base_rows",        # farkas: the pre-product rows, kept for reading
-    "rows",             # unsat_core: now tied to core_smt2, checked there
-}
-
-
-def _mutate(value):
-    """A different value of the same shape, so the failure is semantic."""
-    if isinstance(value, bool):
-        return not value
-    if isinstance(value, int):
-        return value + 1
-    if isinstance(value, str):
-        try:
-            return str(Fraction(value) + 1)
-        except (ValueError, ZeroDivisionError):
-            return value + "_x" if value else "x"
-    if isinstance(value, list) and value:
-        return value[:-1]
-    if isinstance(value, dict) and value:
-        # A NESTED CERTIFICATE. Mutating its first key changes the schema
-        # number or the kind label, which is not an interesting forgery -- the
-        # claim lives in the payload, so go in and change that instead.
-        # Without this, a field holding a whole sub-certificate looks unchecked
-        # when it is checked thoroughly.
-        if "payload" in value and isinstance(value["payload"], dict)                 and value["payload"]:
-            return dict(value, payload=_mutate(value["payload"]))
-        k = next(iter(value))
-        return {kk: (_mutate(vv) if kk == k else vv)
-                for kk, vv in value.items()}
-    return None
+#: The lists and the mutator now live in the PACKAGE, not beside it. A user
+#: asked for this battery as a tool, so it became `certo.tamper`; importing it
+#: here rather than keeping a second copy is the whole point -- two
+#: implementations of one rule is how the rule drifts.
+from certo.tamper import DESCRIPTIVE, WEAKENING, mutate as _mutate  # noqa: E402
+from certo.tamper import probe as _probe                            # noqa: E402
 
 
 def probe(cert, skip=()):
-    """Mutate each payload field in turn. Returns {field: caught}."""
-    base = json.loads(json.dumps(cert.to_dict()))
-    assert verify(Certificate.from_dict(base), LIM).ok, "the original must pass"
+    """Mutate each payload field in turn. Returns {field: caught}.
 
-    out = {}
-    for field, value in sorted(base["payload"].items()):
-        if field in DESCRIPTIVE or field in WEAKENING or field in skip:
-            continue
-        changed = _mutate(value)
-        if changed is None or changed == value:
-            continue
-        d = json.loads(json.dumps(base))
-        d["payload"][field] = changed
-        try:
-            out[field] = not verify(Certificate.from_dict(d), LIM).ok
-        except Exception:
-            # A verifier that raises on a malformed payload has still refused
-            # it, which is the behaviour that matters here.
-            out[field] = True
-    return out
+    The suite wants a flat verdict per field; `certo.tamper.probe` reports
+    lists so a person can read it. Same run, different shape.
+    """
+    out = _probe(cert, LIM, skip=skip)
+    assert out["original_ok"], "the original must pass"
+    return dict([(f, True) for f in out["caught"]]
+                + [(f, False) for f in out["uncaught"]])
 
 
 def _report(kind, results):
@@ -577,6 +472,77 @@ def test_a_hilbert_claim_cannot_be_smuggled_in_by_dropping_an_element():
     del d["payload"]["hilbert"]["elements"]["extra"]
     # The remaining three ARE the minimal set, so the recomputed verdict is
     # True while the payload still says False: caught either way round.
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_capacity_profile():
+    """A certificate whose subject is a FUNCTION. Every field of it -- a dual
+    price, a source mass, a breakpoint, a segment end -- moves the claim, so
+    every one has to be caught."""
+    import importlib.util
+    import pathlib as _p
+
+    from certo.engines import algebra
+
+    path = _p.Path(__file__).resolve().parent.parent / "examples" / "capacity_profile.py"
+    spec = importlib.util.spec_from_file_location("_adv_profile", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cert = algebra.capacity_profile(mod.spec(), LIM).certificate
+    # `capacity` is skipped HERE and not excused globally, because the reason
+    # is about this instance: the harness mutates the first row alphabetically
+    # and in this profile that row is priced ZERO by every dual. Relaxing such
+    # a row cannot change the profile -- the bound never mentions it, and
+    # loosening a constraint cannot drop an optimum already attained -- so the
+    # certificate stays true. Every capacity the duals DO price is caught, and
+    # the test below pins that rather than leaving it to this comment.
+    _report("capacity_profile", probe(cert, skip={"capacity"}))
+
+
+def test_a_capacity_the_dual_prices_cannot_be_edited():
+    """The other half of the skip above. `02` is priced zero and is inert;
+    everything the dual actually pays for moves the profile and is refused."""
+    import importlib.util
+    import pathlib as _p
+
+    from certo import verify
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    path = _p.Path(__file__).resolve().parent.parent / "examples" / "capacity_profile.py"
+    spec = importlib.util.spec_from_file_location("_adv_profile3", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    base = json.loads(json.dumps(
+        algebra.capacity_profile(mod.spec(), LIM).certificate.to_dict()))
+
+    for row in ("23", "45", "13"):
+        priced = [s["dual"].get(row, "0") for s in base["payload"]["segments"]]
+        assert any(p != "0" for p in priced), row
+        d = json.loads(json.dumps(base))
+        d["payload"]["capacity"][row] = "2"
+        assert not verify(Certificate.from_dict(d), LIM).ok, row
+
+
+def test_a_profile_cannot_be_widened_by_editing_its_domain():
+    """Claiming the same two segments decide a LARGER interval is the forgery
+    this kind is most exposed to: the numbers all still check out locally."""
+    import importlib.util
+    import pathlib as _p
+
+    from certo import verify
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    path = _p.Path(__file__).resolve().parent.parent / "examples" / "capacity_profile.py"
+    spec = importlib.util.spec_from_file_location("_adv_profile2", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cert = algebra.capacity_profile(mod.spec(), LIM).certificate
+    assert verify(cert, LIM).ok
+
+    d = json.loads(json.dumps(cert.to_dict()))
+    d["payload"]["domain"]["hi"] = "2"
     assert not verify(Certificate.from_dict(d), LIM).ok
 
 

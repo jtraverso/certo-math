@@ -115,3 +115,55 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # PUBLISHING IS NOT THE WHOLE OF SHIPPING, and treating it as such left ten
+  # tags with no GitHub Release -- every version from 0.11.1 to 0.13.0 reached
+  # the index while the repository's own front door still advertised 0.11.0.
+  # Nothing was broken; a step nobody had written simply never ran.
+  #
+  # It runs AFTER `publish`, deliberately. A release note announcing a version
+  # that failed to reach the index would be the same class of lie this project
+  # exists to refuse -- a document saying something the world does not confirm.
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: the section of the CHANGELOG this tag is about
+        id: notes
+        shell: bash
+        run: |
+          set -e
+          V="${GITHUB_REF_NAME#v}"
+          # From `## [V]` to the next `## [`, exclusive.
+          #
+          # NO REGEX ON PURPOSE. The first version of this used one, and the
+          # backslashes did not survive the trip through YAML and the shell:
+          # awk read the bracket escape as a character class and matched
+          # nothing, so every release note would have shipped empty. A prefix
+          # test with `index` has nothing to escape, and this one was checked
+          # against three real sections before being written here.
+          awk -v hdr="## [$V]" \
+            'index($0,hdr)==1 {on=1; next}
+             on && index($0,"## [")==1 {exit}
+             on {print}' CHANGELOG.md > notes.md
+          # The guard job has already refused the tag when the section is
+          # absent, so nothing here is a missing entry -- an empty extraction
+          # is a bug in THIS step, and it fails loudly rather than publishing
+          # a blank release note.
+          if [ -z "$(sed '/^[[:space:]]*$/d' notes.md)" ]; then
+            echo "::error::extracted no notes for $V after the guard passed"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+      - name: create it
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "${{ steps.notes.outputs.version }}" \
+            --notes-file notes.md \
+            --verify-tag

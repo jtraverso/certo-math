@@ -1,4 +1,4 @@
-# The forty-seven commands
+# The forty-eight commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -721,6 +721,45 @@ rather than a vacuous `True`.
 A non-simplicial cone still gets an answer: the missing multiplicity is
 recorded with the reason, rather than refusing the certificate and losing the
 other three quantities.
+
+### `certo profile`
+
+**Question** — How does the optimum respond as ONE capacity runs from `lo` to
+`hi` — the whole function, not one value?
+**Spec** — `ProfileSpec`
+**Answers** — the piecewise-affine `f(t)`, its breakpoints, the dual that
+bounds each segment and the source that attains each breakpoint
+**Certificate** — `capacity_profile`, **solver-free**: exact rational
+arithmetic
+**Not established** — that the columns are all the columns, or that the rows
+mean what they are called. A profile is a statement about the column set it
+declares; if those came from a graph, that translation is a separate
+obligation this does not discharge.
+
+**Not `parametric`.** That certifies a *bound* for a family whose parameter
+sits in the data, `A(p)`, `b(p)`, `c(p)`. This certifies a *function* of one
+capacity, and the answer is concave, piecewise affine, with breakpoints.
+
+**Why it decides rather than bounds.** Three finite facts give a statement
+about a continuum. A dual's feasibility is `Aᵀy ≥ c`, which never mentions a
+capacity — so **one dual bounds every `t` in its segment at once**. Two sources
+at a segment's ends attain the whole segment, because interpolating them is
+feasible at the interpolated capacity and its value is the interpolation. And
+sorted segments sharing their endpoints tile the domain. Bound plus attainment
+plus coverage is an equality.
+
+**What it is for.** `f(1)` is the ordinary optimum; the shape near `t = 0` is
+what a single optimum throws away. Two chordal pieces can be the same graph
+with the same gap, and repeating one along an interface leaves the gap bounded
+while repeating the other makes it grow — the difference is in the profile,
+not in the value.
+
+**You supply the breakpoints, the duals and the sources.** Finding them is
+parametric programming and any solver may do it; `α`, `β` and every value are
+recomputed here from the columns. A profile whose segments leave a gap, whose
+dual misses a column, whose source overloads a row, or whose bound never meets
+its source is **refused with no certificate** — a profile that does not hold is
+not a smaller profile.
 
 ### `certo semigroup`
 

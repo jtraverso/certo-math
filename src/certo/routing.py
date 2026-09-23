@@ -37,14 +37,14 @@ SPEC_OF = {
     "number": "NumberSpec", "compose": "ProofSpec", "lint": "*",
     "audit": "*", "reduce": "SymmetrySpec", "matrix": "MatrixSpec", "solve": "LinearSystemSpec",
     "quotient": "EquitableQuotientSpec", "cone": "ConeSpec",
-    "semigroup": "SemigroupSpec",
+    "semigroup": "SemigroupSpec", "profile": "ProfileSpec",
     "range": "Spec", "cycle": "CycleSpec",
     "bind": "BindSpec",
 }
 
 #: Which commands leave a certificate that re-checks with NO solver.
 SOLVER_FREE = {
-    "cone", "semigroup", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
+    "cone", "semigroup", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
     "cover", "ideal", "eliminate", "sos", "number", "order", "bounds",
     "cases",
 }
@@ -74,6 +74,7 @@ BY_QUESTION = (
         ("commands.q.matrix", "matrix"),
         ("commands.q.cone", "cone"),
         ("commands.q.semigroup", "semigroup"),
+        ("commands.q.profile", "profile"),
         ("commands.q.range", "range --var X"),
         ("commands.q.cycle", "cycle"),
         ("commands.q.solve", "solve"),
@@ -199,7 +200,7 @@ TIER = {
     "mixed": YES, "farkas": YES, "ratio": YES, "parametric": YES,
     "peak": YES, "entry": YES, "moment": YES, "cover": YES, "exists": YES,
     "cases": YES, "number": YES, "sos": YES, "ideal": YES, "eliminate": YES,
-    "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "reduce": YES,
+    "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "reduce": YES,
     "order": YES, "bounds": YES, "check": YES, "enum": YES, "shrink": YES,
     "range": YES, "cycle": YES,
 
@@ -249,7 +250,7 @@ KIND_OF = {
     "reduce": ("symmetry_reduction", "parametric_symmetry"),
     "matrix": "integer_matrix",
     "solve": "linear_system", "quotient": "equitable_quotient",
-    "cone": "toric_cone", "semigroup": "affine_semigroup",
+    "cone": "toric_cone", "semigroup": "affine_semigroup", "profile": "capacity_profile",
     "range": "variable_range",
     "cycle": "dependency_cycle", "bind": "lean_binding",
     "family": "family_extremum", "ratio": "ratio_bound",
@@ -291,6 +292,7 @@ RUNNERS = {
     "quotient": ("certo.engines.algebra", "equitable_quotient"),
     "cone": ("certo.engines.algebra", "toric_cone"),
     "semigroup": ("certo.engines.algebra", "affine_semigroup"),
+    "profile": ("certo.engines.algebra", "capacity_profile"),
     # `range` stays out on purpose: it needs `--var`, which is a decision
     # `ask` cannot make. `cycle` and `bind` need nothing, so routing them
     # is the whole point of having one entry point.

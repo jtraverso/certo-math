@@ -39,6 +39,7 @@ CASES = [
     ("interchange_matrix.py", "matrix", []),
     ("toric_cone.py", "cone", []),
     ("affine_semigroup.py", "semigroup", []),
+    ("capacity_profile.py", "profile", []),
     ("sweep_with_scipy.py", "sweep", []),
     ("linear_system.py", "solve", []),
     ("equitable_quotient.py", "quotient", []),

@@ -104,12 +104,41 @@ class PackingSpec:
         return to_fraction(self.capacities)
 
     def restricted(self, kinds) -> "PackingSpec":
-        """Only items of these kinds. This is the 'optimum by type'."""
+        """Only items of these kinds. This is the 'optimum by type'.
+
+        THE CONTRACT: this is a RESTRICTION, never a relaxation. Keeping only
+        some kinds is exactly forcing every other item to zero, so the feasible
+        set shrinks and the optimum cannot improve.
+
+        LOADS TRAVEL, PROJECTED. A user reported that they did not: the new
+        spec came back with `loads` empty, so a packing carrying
+        `t0 <= 0` was restricted to t0's own kind and the restricted problem
+        happily returned `t0 = 1`. A transformation that drops constraints does
+        not produce a smaller problem, it produces a DIFFERENT one, and a
+        solver cannot notice -- every optimum it reports is a true optimum of
+        the model it was handed.
+
+        Forcing an item to zero removes its TERM from a load, not the load.
+        The distinction matters at the edges: a load whose items all disappear
+        becomes `0 <= bound`, which is vacuous when the bound is non-negative
+        and INFEASIBLE when it is negative. Dropping it would turn an
+        infeasible restriction into a feasible one, silently, which is the
+        same failure one level down.
+        """
         keep = {str(k) for k in kinds}
+        alive = {n for n, _r, _g, k in self.items if k in keep}
+        loads = []
+        for load in self.loads or []:
+            name, weights, sense, bound = load
+            loads.append((name,
+                          {i: w for i, w in dict(weights).items()
+                           if str(i) in alive},
+                          sense, bound))
         return PackingSpec(
             items=[(n, r, g, k) for n, r, g, k in self.items if k in keep],
             capacities=self.capacities, sense=self.sense,
             integer=self.integer,
+            loads=loads,
             title="{} [{}]".format(self.title, ", ".join(sorted(keep))),
         )
 

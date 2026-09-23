@@ -1898,19 +1898,12 @@ def test_every_command_is_in_the_readme_table_and_the_count_is_right():
     is wrong."""
     import re
 
-    NUMBER = {28: "twenty-eight", 29: "twenty-nine", 30: "thirty",
-              31: "thirty-one", 32: "thirty-two", 33: "thirty-three",
-              34: "thirty-four", 35: "thirty-five", 36: "thirty-six",
-              37: "thirty-seven", 38: "thirty-eight", 39: "thirty-nine",
-              40: "forty", 41: "forty-one", 42: "forty-two",
-              43: "forty-three", 44: "forty-four", 45: "forty-five",
-              46: "forty-six", 47: "forty-seven", 48: "forty-eight"}
+    # The number words live in `catalogue`, which the tool itself uses to
+    # write them. Two hand-kept tables is how one of them ends at forty-seven
+    # while the other keeps going -- which is exactly what happened here.
+    from certo import catalogue
 
-    SPANISH = {28: "veintiocho", 29: "veintinueve", 30: "treinta",
-               39: "treinta y nueve", 40: "cuarenta", 41: "cuarenta y un",
-               42: "cuarenta y dos", 43: "cuarenta y tres",
-               44: "cuarenta y cuatro", 45: "cuarenta y cinco",
-               46: "cuarenta y seis", 47: "cuarenta y siete"}
+    NUMBER, SPANISH = catalogue.WORDS_EN, catalogue.WORDS_ES
 
     root = pathlib.Path(__file__).resolve().parent.parent
     commands = set(_subcommands())
@@ -10988,6 +10981,612 @@ def test_asking_nothing_about_a_hilbert_basis_leaves_the_field_absent():
     """An optional field the frozen schema allows, absent when unasked."""
     r = _sg(generators={"a": (1, 0), "b": (1, 1)})
     assert r.certificate.payload["hilbert"] is None
+
+
+# --- a capacity profile, as a certified function ---------------------------
+
+
+def _profile_spec(**over):
+    """The six-vertex chordal piece from a user's own write-up."""
+    import importlib.util
+
+    path = pathlib.Path(__file__).resolve().parent.parent / "examples" / "capacity_profile.py"
+    spec = importlib.util.spec_from_file_location("_cap_profile", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    base = mod.spec()
+    for k, v in over.items():
+        setattr(base, k, v)
+    return base
+
+
+def _profile(**over):
+    from certo.engines import algebra
+    return algebra.capacity_profile(_profile_spec(**over), LIM)
+
+
+def test_a_profile_is_decided_not_merely_bounded():
+    from certo import verify
+
+    r = _profile()
+    p = r.certificate.payload
+    assert p["holds"] is True and p["failures"] == []
+    assert [q["value"] for q in p["piecewise"]] == ["6 + 3 t", "7 + 1 t"]
+    assert p["breakpoints"] == ["0", "1/2", "1"]
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def test_the_profile_is_not_the_line_between_its_endpoints():
+    """The whole reason the kind exists: f(0)=6, f(1)=8, and f(1/2)=15/2 --
+    not the 7 a straight line would give."""
+    from fractions import Fraction
+
+    p = _profile().certificate.payload
+    at = {k: Fraction(v["value"]) for k, v in p["sources"].items()}
+    assert at["0"] == 6 and at["1"] == 8
+    assert at["1/2"] == Fraction(15, 2)
+    assert at["1/2"] != (at["0"] + at["1"]) / 2
+
+
+def test_a_dual_that_does_not_cover_every_column_is_refused():
+    from certo.status import Verdict
+
+    r = _profile(segments=[{"from": 0, "to": 1,
+                            "dual": {"01": 2, "23": 2, "14": 1, "24": 1,
+                                     "34": 1, "45": 1}}])
+    assert r.verdict is Verdict.REFUTED
+    assert r.certificate is None            # never a smaller profile
+    assert "dual_infeasible" in {f["why"] for f in r.meta["failures"]}
+
+
+def test_segments_that_leave_a_gap_are_refused():
+    r = _profile(segments=[{"from": 0, "to": "1/3",
+                            "dual": {"01": 3, "23": 2, "14": 1, "24": 1,
+                                     "34": 1, "45": 1}}])
+    assert r.certificate is None
+    assert "not_covered" in {f["why"] for f in r.meta["failures"]}
+
+
+def test_a_source_that_overloads_a_row_is_refused():
+    bad = dict(_profile_spec().sources)
+    bad[0] = {"023": 1, "124": 1, "345": 1, "012": 1}
+    r = _profile(sources=bad)
+    assert r.certificate is None
+    assert "source_infeasible" in {f["why"] for f in r.meta["failures"]}
+
+
+def test_a_bound_that_never_meets_its_source_is_refused():
+    """A dual alone bounds and a source alone attains something. Equality is
+    the two agreeing, and that is checked at every breakpoint."""
+    bad = dict(_profile_spec().sources)
+    bad["1/2"] = {"023": 1, "124": 1, "345": 1}      # feasible, value 6, not 15/2
+    r = _profile(sources=bad)
+    assert r.certificate is None
+    assert "bound_and_source_disagree" in {f["why"] for f in r.meta["failures"]}
+
+
+def test_slopes_that_increase_are_refused_as_not_concave():
+    s = _profile_spec()
+    r = _profile(segments=[dict(s.segments[1], **{"from": 0, "to": "1/2"}),
+                           dict(s.segments[0], **{"from": "1/2", "to": 1})])
+    assert r.certificate is None
+    assert "not_concave" in {f["why"] for f in r.meta["failures"]}
+
+
+def test_the_parameter_row_may_not_also_carry_a_fixed_capacity():
+    """`t` is its capacity; a second number would be a silent second answer."""
+    from certo.status import Status
+
+    s = _profile_spec()
+    r = _profile(capacity=dict(s.capacity, **{s.parameter: 1}))
+    assert r.status is Status.OUT_OF_THEORY
+    assert r.certificate is None
+
+
+def test_a_flat_profile_is_a_profile():
+    """The pendant edge: no positive column touches it, so f is constant."""
+    import importlib.util
+
+    from certo.engines import algebra
+
+    path = pathlib.Path(__file__).resolve().parent.parent / "examples" / "capacity_profile.py"
+    spec = importlib.util.spec_from_file_location("_cap_profile2", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    r = algebra.capacity_profile(mod.pendant(), LIM)
+    p = r.certificate.payload
+    assert p["holds"] is True
+    assert p["piecewise"] == [{"from": "0", "to": "1", "value": "8 + 0 t"}]
+
+
+# --- a transformation that changed the problem -----------------------------
+
+
+def test_restricting_a_packing_keeps_its_loads():
+    """Reported against 0.13.0: `restricted()` returned a spec with `loads`
+    empty, so a packing carrying `t0 <= 0` restricted to t0's own kind
+    happily admitted `t0 = 1`. A solver cannot notice -- every optimum it
+    reports is a true optimum of the model it was handed."""
+    from certo import PackingSpec
+
+    p = PackingSpec(items=[("t0", ["e1"], 1, "K3"), ("t1", ["e2"], 1, "K4")],
+                    capacities=1,
+                    loads=[("cap_t0", {"t0": 1}, "<=", 0)])
+    r = p.restricted({"K3"})
+    assert r.loads == [("cap_t0", {"t0": 1}, "<=", 0)]
+
+
+def test_restricting_projects_a_load_rather_than_dropping_it():
+    """Forcing an item to zero removes its TERM, not the constraint. A load
+    left with no items is `0 <= bound` -- vacuous when the bound is
+    non-negative and INFEASIBLE when it is negative, and dropping it would
+    turn an infeasible restriction into a feasible one."""
+    from certo import PackingSpec
+
+    p = PackingSpec(items=[("t0", ["e1"], 1, "K3"), ("t1", ["e2"], 1, "K4")],
+                    capacities=1,
+                    loads=[("mixed", {"t0": 1, "t1": 1}, "<=", 1),
+                           ("only_t1", {"t1": 1}, ">=", 1)])
+    r = p.restricted({"K3"})
+    names = {n: (w, se, b) for n, w, se, b in r.loads}
+    assert names["mixed"] == ({"t0": 1}, "<=", 1)     # t1's term is gone
+    assert names["only_t1"] == ({}, ">=", 1)          # 0 >= 1, still infeasible
+    assert len(r.loads) == 2
+
+
+def test_an_empty_program_is_reported_as_vacuous_not_certified():
+    """No variables and no rows. Its optimum is the empty sum -- zero -- and
+    a certificate of that establishes nothing, so none is written. Before
+    this it raised `ValueError: min() iterable argument is empty`."""
+    from certo import LPSpec
+    from certo.engines import lp
+
+    r = lp.opt(LPSpec(obj={}, cons=[], sense="max"), LIM)
+    assert r.meta["vacuous"] is True
+    assert r.meta["objective"] == "0"
+    assert r.certificate is None
+    assert r.meta["min_dual"] is None
+
+
+def test_the_smallest_price_of_an_empty_dual_is_nothing_not_zero():
+    from certo.engines.lp import _min_or_none
+
+    assert _min_or_none([]) is None
+    assert _min_or_none([3, 1, 2]) == "1"
+
+
+def test_relaxing_an_lp_drops_integrality_and_nothing_else():
+    """The same defect as `restricted`, found by auditing for it. `target` is
+    the caller's question and `load_names` is a fact about the model; neither
+    has anything to do with whether the variables are whole."""
+    from certo import LPSpec
+
+    s = LPSpec(sense="max", title="x")
+    s.variable("a", 0, 5)
+    s.objective({"a": 1})
+    s.constraint({"a": 1}, "<=", 3, name="r1")
+    s.integer, s.target, s.load_names = True, "99", ["r1"]
+
+    r = s.relaxed()
+    assert r.target == "99"
+    assert r.load_names == ["r1"]
+    assert r.cons == s.cons and r.bounds == s.bounds
+    assert r.integer is False        # the one thing a relaxation DOES drop
+
+
+# --- what a transformation promises ----------------------------------------
+
+
+def test_every_transformation_has_a_contract():
+    """Found by reflection, not by a list. A transformation added without a
+    contract fails here instead of losing a constraint in somebody's model two
+    releases later -- which is how `restricted` dropping `loads` reached a
+    published version."""
+    from certo import transform
+
+    missing = sorted("{}.{}".format(c, m) for c, m in transform.transformations()
+                     if transform.contract_of(c, m) is None)
+    assert not missing, missing
+
+
+def test_restricting_declares_everything_it_changes():
+    from certo import PackingSpec, transform
+
+    p = PackingSpec(items=[("t0", ["e1"], 1, "K3"), ("t1", ["e2"], 1, "K4")],
+                    capacities=1, loads=[("cap_t0", {"t0": 1}, "<=", 0)],
+                    title="x")
+    rep = transform.report(p, p.restricted({"K3"}), "PackingSpec", "restricted")
+    assert rep["contract"] == transform.RESTRICTION
+    assert rep["undeclared"] == [], rep["undeclared"]
+    # `loads` is declared and unchanged here: every item the load mentions
+    # survived the restriction. A contract says what MAY change.
+    assert "loads" in rep["unchanged_but_declared"]
+
+    # And an instance where it really does move: `t1` is dropped, so its term
+    # leaves the load while the load itself stays.
+    q = PackingSpec(items=[("t0", ["e1"], 1, "K3"), ("t1", ["e2"], 1, "K4")],
+                    capacities=1,
+                    loads=[("both", {"t0": 1, "t1": 1}, "<=", 1)], title="x")
+    rep2 = transform.report(q, q.restricted({"K3"}), "PackingSpec", "restricted")
+    assert rep2["undeclared"] == [], rep2["undeclared"]
+    assert "loads" in rep2["changed"]
+
+
+def test_relaxing_and_freezing_declare_everything_they_change():
+    from certo import LPSpec, transform
+
+    s = LPSpec(sense="max", title="x")
+    s.variable("a", 0, 5)
+    s.variable("k", 0, 3, kind="integer")
+    s.objective({"a": 1, "k": 2})
+    s.constraint({"a": 1, "k": 1}, "<=", 4, name="r1")
+    s.target, s.load_names = "99", ["r1"]
+
+    rep = transform.report(s, s.relaxed(), "LPSpec", "relaxed")
+    assert rep["undeclared"] == [], rep["undeclared"]
+
+    out, _const = s.frozen({"k": 1})
+    rep = transform.report(s, out, "LPSpec", "frozen")
+    assert rep["undeclared"] == [], rep["undeclared"]
+
+
+def test_a_frozen_target_is_shifted_not_copied():
+    """The one omission whose right fix was NOT to carry the field across. The
+    residual objective is missing `const`, so a residual optimum z meets the
+    original target T exactly when z + const >= T."""
+    from fractions import Fraction
+
+    from certo import LPSpec
+
+    s = LPSpec(sense="max", title="x")
+    s.variable("a", 0, 5)
+    s.variable("k", 0, 3, kind="integer")
+    s.objective({"a": 1, "k": 2})
+    s.constraint({"a": 1, "k": 1}, "<=", 4, name="r1")
+    s.target = "99"
+
+    out, const = s.frozen({"k": 1})
+    assert const == 2
+    assert Fraction(out.target) == Fraction(99) - 2
+
+
+def test_a_silent_change_is_reported_as_undeclared():
+    """The check has to be able to FAIL, so this breaks one on purpose."""
+    from certo import PackingSpec, transform
+
+    p = PackingSpec(items=[("t0", ["e1"], 1, "K3")], capacities=1, title="x")
+    other = PackingSpec(items=[("t0", ["e1"], 1, "K3")], capacities=7,
+                        title=p.title)
+    rep = transform.report(p, other, "PackingSpec", "restricted")
+    assert "capacities" in rep["undeclared"]
+
+
+# --- finding a profile rather than checking one ----------------------------
+
+
+def _erased():
+    """The example with its answer removed: the program, and nothing else."""
+    s = _profile_spec()
+    s.segments = None
+    s.sources = None
+    return s
+
+
+def test_the_search_finds_the_profile_it_was_not_told():
+    """The honest test: erase the answer and see whether it comes back. The
+    breakpoint at 1/2 is computed from two lines meeting, not sampled."""
+    from certo.profile import discover
+
+    out = discover(_erased())
+    assert out["breakpoints"] == ["0", "1/2", "1"]
+    assert len(out["segments"]) == 2
+    # A handful of programs, not a grid.
+    assert out["solves"] <= 12
+
+
+def test_what_the_search_finds_goes_through_the_same_gate():
+    """A search with a bug cannot produce a wrong certificate, only a refused
+    one. That property is why the checking half was built first."""
+    from certo import verify
+    from certo.engines import algebra
+    from certo.profile import certify, discover
+
+    s = _erased()
+    found = discover(s)
+    s.segments, s.sources = found["segments"], found["sources"]
+    got = certify(s)
+    assert got["holds"] is True and got["failures"] == []
+
+    r = algebra.capacity_profile(_erased(), LIM)
+    assert r.meta["discovered"] is True
+    assert r.meta["piecewise"] == ["6 + 3 t", "7 + 1 t"]
+    assert verify(r.certificate, LIM).ok
+
+
+def test_the_search_recovers_the_hand_written_duals_exactly():
+    """Not merely A valid profile: the same one a person wrote by hand."""
+    from certo.profile import discover
+
+    from fractions import Fraction
+
+    def norm(segs):
+        return {Fraction(str(s["from"])):
+                {k: str(Fraction(str(v))) for k, v in s["dual"].items()}
+                for s in segs}
+
+    written = norm(_profile_spec().segments)
+    found = norm(discover(_erased())["segments"])
+    assert set(found) == set(written)
+    for at, dual in written.items():
+        assert found[at] == dual, at
+
+
+def test_a_primal_reconstructed_by_slackness_is_not_good_enough():
+    """`exact.primal_from_dual` pins a candidate without requiring x >= 0, and
+    on this instance returned negative masses. Sources are SOLVED for, because
+    feasibility is the whole job of a source."""
+    from fractions import Fraction
+
+    from certo.profile import _read, discover
+
+    found = discover(_erased())
+    data = _read(_erased())
+    for at, mass in found["sources"].items():
+        assert all(Fraction(v) >= 0 for v in mass.values()), (at, mass)
+        assert all(n in data["columns"] for n in mass), at
+
+
+def test_a_flat_program_is_found_as_one_segment():
+    from certo.profile import discover
+
+    s = _erased()
+    s.parameter = "26"
+    s.capacity = dict(s.capacity)
+    s.capacity["01"] = 1
+    s.capacity.pop("26", None)
+    out = discover(s)
+    assert len(out["segments"]) == 1
+    assert out["breakpoints"] == ["0", "1"]
+
+
+def test_the_search_is_bounded_and_says_so():
+    """A budget that runs out is reported, never rounded into a shorter
+    profile -- the same rule as the bounded enumeration."""
+    from certo.profile import Undiscovered, discover
+
+    try:
+        discover(_erased(), max_solves=1)
+        raise AssertionError("an exhausted search returned a profile")
+    except Undiscovered as e:
+        assert "1" in str(e)
+
+
+# --- which doctor tests read the machine this is running on ----------------
+#
+# THE MEASUREMENT THIS REPLACED AN OPINION WITH. The backlog carried an item
+# reading "derived expectations for the seams `doctor` reads, not hand-built
+# fixtures", sized M, on the strength of three tests that had agreed with a
+# bug. Instrumenting first said something else: eighteen of the twenty-three
+# were already hermetic, and every one of the five that are not reads the real
+# machine ON PURPOSE, asserting properties that hold whatever it looks like.
+#
+# The historical defect was never "the test touched the real machine". It was
+# "the test patched one seam while the code read another", which 0.11.7 fixed
+# one test at a time. What was missing is this: something that notices when a
+# NEW doctor test quietly joins the second group.
+#
+# So the derived expectation is about the test suite, not about fixtures. The
+# allowlist below is five names with reasons, and anything else that leaves
+# its own fixture fails here.
+
+#: Tests that read the real machine deliberately, each with why. A test not in
+#: this set must touch nothing outside its own temporary directory.
+READS_THE_REAL_MACHINE = {
+    "test_doctor_reports_every_capability_with_its_fallback":
+        "it asserts every capability row carries prose and a fallback, which "
+        "is a property of the REPORT on whatever machine runs it",
+    "test_doctor_names_the_interpreter_startup_rather_than_blaming_certo":
+        "measuring how long an interpreter takes to start needs an "
+        "interpreter to start",
+    "test_the_classification_is_read_off_the_metadata_directory":
+        "`whatever this machine looks like, the helper agrees with itself` -- "
+        "a consistency property, and its assertions name no path",
+    "test_the_source_of_the_metadata_is_located_not_assumed":
+        "same shape: where the metadata came from is a fact about this "
+        "machine, and the assertion is that the answer is located rather "
+        "than guessed",
+    "test_doctor_names_a_half_finished_install":
+        "it runs the real leftovers probe to check the probe's shape; the "
+        "assertions are about the report, not about this machine's contents",
+}
+
+
+def _fixture_reads(fn):
+    """Run `fn` and return the reads that left the test's own fixture.
+
+    Counting SYSCALLS would be the wrong instrument and was the first one
+    tried: `Path.resolve` on a directory the test just created is a real call
+    that reads nothing of the developer's machine. What matters is whether a
+    read touched a path outside the fixture, which is the same distinction the
+    `--repair --apply` near-miss was about.
+    """
+    import glob as _glob
+    import shutil as _shutil
+    import subprocess as _subprocess
+    import tempfile
+
+    from certo import doctor
+
+    tmp = pathlib.Path(tempfile.gettempdir()).resolve()
+    outside = []
+
+    def leaves(p):
+        try:
+            r = pathlib.Path(str(p)).resolve()
+            r.relative_to(tmp)
+            return False
+        except Exception:  # noqa: BLE001
+            return True
+
+    def note(label, target):
+        if target is None or leaves(target):
+            outside.append(label)
+
+    saved = {k: getattr(doctor, k) for k in ("shutil", "subprocess", "Path")
+             if hasattr(doctor, k)}
+
+    class _Shutil:
+        def which(self, *a, **k):
+            note("shutil.which", None)
+            return _shutil.which(*a, **k)
+
+        def __getattr__(self, i):
+            return getattr(_shutil, i)
+
+    class _Sub:
+        def run(self, *a, **k):
+            note("subprocess.run", None)
+            return _subprocess.run(*a, **k)
+
+        def __getattr__(self, i):
+            return getattr(_subprocess, i)
+
+    base = doctor.Path
+
+    class _Path(base):
+        def exists(self, *a, **k):
+            note("Path.exists", self)
+            return base.exists(self, *a, **k)
+
+        def resolve(self, *a, **k):
+            note("Path.resolve", self)
+            return base.resolve(self, *a, **k)
+
+        def glob(self, *a, **k):
+            note("Path.glob", self)
+            return base.glob(self, *a, **k)
+
+        def iterdir(self, *a, **k):
+            note("Path.iterdir", self)
+            return base.iterdir(self, *a, **k)
+
+    doctor.shutil, doctor.subprocess, doctor.Path = _Shutil(), _Sub(), _Path
+    try:
+        fn()
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        for k, v in saved.items():
+            setattr(doctor, k, v)
+    return outside
+
+
+def _doctor_test_names():
+    src = (pathlib.Path(__file__).resolve()).read_text(
+        encoding="utf-8").splitlines()
+    starts = [(i, l) for i, l in enumerate(src) if l.startswith("def test_")]
+    out = []
+    for k, (i, l) in enumerate(starts):
+        end = starts[k + 1][0] if k + 1 < len(starts) else len(src)
+        body = "\n".join(src[i:end])
+        name = l[4:l.index("(")]
+        if "doctor" in body and name != "test_doctor_tests_stay_hermetic":
+            out.append(name)
+    return out
+
+
+def test_doctor_tests_stay_hermetic():
+    """A new doctor test may not quietly start reading this machine.
+
+    Two failures are possible and they are different. A test that leaves its
+    fixture without saying so joins a group whose passes depend on whoever
+    ran them. And a name on the allowlist that no longer reads anything is a
+    reason describing code that changed under it.
+    """
+    import sys
+
+    module = sys.modules[__name__]
+    surprises, cured = [], []
+    for name in _doctor_test_names():
+        fn = getattr(module, name, None)
+        if fn is None:
+            continue
+        left = _fixture_reads(fn)
+        if left and name not in READS_THE_REAL_MACHINE:
+            surprises.append((name, sorted(set(left))))
+        if not left and name in READS_THE_REAL_MACHINE:
+            cured.append(name)
+
+    assert not surprises, (
+        "these doctor tests read the machine they run on and do not say so. "
+        "Either make them hermetic or add them to READS_THE_REAL_MACHINE "
+        "with a reason: {}".format(surprises))
+    assert not cured, (
+        "these are on READS_THE_REAL_MACHINE and no longer read anything; "
+        "the reason describes code that has changed: {}".format(cured))
+
+
+# --- the project page is the front door, and it went stale ------------------
+
+
+def _page():
+    return (pathlib.Path(__file__).resolve().parent.parent
+            / "docs" / "index.html").read_text(encoding="utf-8")
+
+
+def test_the_project_page_states_the_version_it_describes():
+    """THE CONTROL THAT WAS MISSING. The page named no version at all, so the
+    only thing a test could check was its counts -- and it went a whole cycle
+    without naming a single command added to it while every count passed.
+
+    A page that states its version can be tied to the code's; shipping without
+    updating it now fails here instead of on somebody's screen.
+    """
+    import certo
+
+    want = "v" + certo.__version__
+    assert want in _page(), (
+        "docs/index.html does not say {}. GitHub Pages builds it from "
+        "main/docs on every push, so the live page is whatever this file "
+        "says -- update it in the release commit.".format(want))
+
+
+def test_every_command_the_page_names_exists():
+    """The page's table is a SELECTION, not the list -- so it is not required
+    to name all of them. What it may not do is name one that is gone."""
+    import re
+
+    commands = set(_subcommands())
+    named = set()
+    for cell in re.findall(r'class="q">([^<]+)<', _page()):
+        named.add(cell.split()[0])          # `sweep --witnesses` -> `sweep`
+    unknown = sorted(named - commands)
+    assert not unknown, unknown
+
+
+def test_no_spelled_number_on_the_page_is_a_stale_count():
+    """`All forty-three` sat on the live page while the chip beside it said
+    48. The count test could not see it: it matches `<number> commands`, and
+    that sentence does not contain the word. Every spelled number in a
+    sentence about the reference has to be the current count."""
+    import re
+
+    from certo import catalogue
+
+    counts = catalogue.counts()
+    words = {catalogue.WORDS_EN[counts["commands"]],
+             catalogue.WORDS_ES[counts["commands"]]}
+    page = _page()
+    wrong = []
+    for lead in ("All ", "Los "):
+        for m in re.finditer(re.escape(lead) + r"([a-zñáéíóú -]+?),", page):
+            said = m.group(1).strip()
+            # Only sentences that are counting the commands: they are the ones
+            # followed by a link to the command reference.
+            tail = page[m.end():m.end() + 400]
+            if "COMMANDS.md" in tail and said not in words:
+                wrong.append({"says": said, "should be": sorted(words)})
+    assert not wrong, wrong
 
 
 if __name__ == "__main__":

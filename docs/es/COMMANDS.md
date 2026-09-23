@@ -1,4 +1,4 @@
-# Los cuarenta y siete comandos
+# Los cuarenta y ocho comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -732,6 +732,46 @@ nombrada la respuesta es `None` y no un `True` vacuo.
 Un cono no simplicial igual recibe respuesta: la multiplicidad ausente se
 registra con su razón, en vez de rechazar el certificado y perder las otras
 tres cantidades.
+
+### `certo profile`
+
+**Pregunta** — ¿Cómo responde el óptimo cuando UNA capacidad va de `lo` a
+`hi` — la función entera, no un valor?
+**Spec** — `ProfileSpec`
+**Responde** — la `f(t)` afín a trozos, sus quiebres, el dual que acota cada
+tramo y la fuente que alcanza cada quiebre
+**Certificado** — `capacity_profile`, **sin solver**: aritmética racional
+exacta
+**No establece** — que las columnas sean todas las columnas, ni que las filas
+signifiquen lo que su nombre sugiere. Un perfil es una afirmación sobre el
+conjunto de columnas que declara; si vinieron de un grafo, esa traducción es
+una obligación aparte que esto no salda.
+
+**No es `parametric`.** Aquél certifica una *cota* para una familia cuyo
+parámetro está en los datos, `A(p)`, `b(p)`, `c(p)`. Éste certifica una
+*función* de una capacidad, y la respuesta es cóncava, afín a trozos, con
+quiebres.
+
+**Por qué decide en vez de acotar.** Tres hechos finitos dan una afirmación
+sobre un continuo. La factibilidad de un dual es `Aᵀy ≥ c`, que no menciona
+ninguna capacidad — así que **un dual acota todo `t` de su tramo a la vez**.
+Dos fuentes en los extremos alcanzan el tramo entero, porque interpolarlas es
+factible en la capacidad interpolada y su valor es la interpolación. Y los
+tramos ordenados, compartiendo extremos, cubren el dominio. Cota más
+alcanzabilidad más cobertura es una igualdad.
+
+**Para qué sirve.** `f(1)` es el óptimo ordinario; la forma cerca de `t = 0`
+es lo que un óptimo solo tira. Dos piezas cordales pueden ser el mismo grafo
+con el mismo gap, y repetir una por una interfaz deja el gap acotado mientras
+repetir la otra lo hace crecer — la diferencia está en el perfil, no en el
+valor.
+
+**Tú aportas los quiebres, los duales y las fuentes.** Encontrarlos es
+programación paramétrica y puede hacerlo cualquier solver; `α`, `β` y cada
+valor se recomputan aquí desde las columnas. Un perfil cuyos tramos dejen un
+hueco, cuyo dual no cubra una columna, cuya fuente sobrecargue una fila o cuya
+cota no se encuentre con su fuente se **rechaza sin certificado** — un perfil
+que no se sostiene no es un perfil más pequeño.
 
 ### `certo semigroup`
 

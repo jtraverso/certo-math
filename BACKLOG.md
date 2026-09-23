@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-09-21, at **0.13.0**.
+Last updated: 2026-09-23, at **0.15.0** (unreleased).
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -110,10 +110,12 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | A GitHub Release per tag, from `publish.yml` | **S** | **high** | low | ten tags have none. The workflow publishes to PyPI and stops |
+| **P1** | The project page names the commands, not only how many there are | **S** | **high** | low | the count test passes while `index.html` mentions no command added since 0.10 |
 | **P1** | READ the coverage log: the map itself, once there is data | **S** | **high** | low | blocked on time, not on work. The recording landed in 0.13.0 and the file starts empty |
 | **P1** | Honour `Limits.timeout_ms` in the remaining out-of-process backends | **M** | **high** | med | 0.13.0 bounded the one call that had NO bound; the hard-coded constants are still hard-coded |
+| **P2** | Certify the MAP: which clique a row is, which edge a capacity is | **M** | med | med | a perfectly certified LP that was badly translated leaves the original problem unproven. NOT the users' physical auditor — see below |
 | **P2** | A certified integer UPPER bound for packings | **L** | **low** | med | the half `opt --gap` leaves open; `branch_frontier` may already be most of it |
-| **P2** | Derived expectations for the seams `doctor` reads, not hand-built fixtures | **M** | **high** | low | three tests agreed with a bug this cycle; two patched one seam while the code read another |
 | **P2** | Chow ring and toric intersection | **L** | **low** | none | route space, but depth-shaped: an engine, not a checker. See the breadth/depth split above |
 | **P3** | A canonical form that scales, on its own | **L** | med | **high** | nothing that is currently blocked |
 | **P3** | Split `cli.py` and `spec.py` the way `certificate.py` was split | **M** | high | med | **demoted from P1**, see below |
@@ -130,6 +132,7 @@ and a list that mixes them makes the second look like neglect.
 | The three quarantined payloads | a user | the files themselves. Three claims of certificates that verify and should not could not be reproduced; the reconstructions all came back INVALID, which means they differ from the originals |
 | A resume protocol for `branch_frontier` | a decision nobody has stated | what is GUARANTEED when two partial runs are recombined. Emitting a frontier is not retaking one, and 0.12.1 deliberately stopped at the first |
 | Citing a fact a certificate cannot recompute | a second instance | the trigger is *the second kind that needs to cite something it cannot recompute cheaply*. The first, `toric_cone`, turned out to carry the fact already |
+| Recorded machine profiles for the `doctor` fixtures | access to varied machines | a Linux box, a venv, an editable install and a deliberately broken one. The code is S; what is missing is the machines, which is CI rather than a person |
 | A required reviewer on the `pypi` environment | the repository owner | one setting. Nine versions have reached the index in three days with nobody approving the step, and a version on PyPI cannot be replaced |
 
 **The coverage map, and why the row that shipped said *record* rather
@@ -197,6 +200,52 @@ quickly. Discarding a route requires being ABLE TO STOP.
 Two shapes are worth separating: *honouring* `Limits` in the out-of-process
 backends, and *bounding* the one call that honours nothing. The second is
 small and can land alone.
+
+**The doctor item that measuring dissolved.** This list carried "derived
+expectations for the seams `doctor` reads, not hand-built fixtures", sized M,
+on the strength of three tests that had agreed with a bug. Before paying for
+it, the seams were instrumented -- which is cheap, and which this project has
+started doing before believing itself.
+
+The first instrument counted syscalls and said eleven of twenty-three tests
+read the real machine. It was the wrong instrument: `Path.resolve` on a
+directory the test just created is a real call that reads nothing of anybody's
+machine. Counting only reads that LEAVE the fixture -- the same distinction
+the `--repair --apply` near-miss was about -- said **eighteen of twenty-three
+are hermetic**, and every one of the five that are not reads the real machine
+deliberately, asserting properties that hold whatever it looks like.
+
+So the item as written was aimed at a problem that 0.11.7 had already fixed
+one test at a time. The historical defect was never "the test touched the real
+machine"; it was "the test patched one seam while the code read another". What
+was missing was something that notices a NEW test quietly joining the
+non-hermetic group, and that is what shipped: a guard with a five-name
+allowlist, each with a reason, that fails in both directions -- a test that
+leaves its fixture without saying so, and a name whose reason no longer
+describes anything.
+
+**An M-sized refactor of the file with the subtlest bugs in the repository,
+avoided by an afternoon of measurement.** Recording real machine profiles --
+the other half of the original idea -- moves to Blocked: the code is S and the
+obstacle is access to a Linux machine, a venv, an editable install and a
+broken one, which is CI rather than anybody here.
+
+**Certifying the map, and why NOT the whole auditor.** A group using 0.13.0
+asked for native certificates of physical resources: cliques, loads,
+partitions reconstructed from the graph, so that a repeated radial or a
+non-existent clique is refused. The need is real -- certo accepts rows and has
+no idea where they came from, and a perfectly certified LP that was badly
+translated leaves the original problem unproven.
+
+But they also wrote, in the same report, that their separate auditor imports
+neither certo nor the generator nor NetworkX, and that **the two coverages
+should be kept apart rather than added together**. Absorbing their auditor
+into certo would delete the only check that does not share certo's
+assumptions, which is precisely the check that has been catching things all
+year. So the item is the narrow half: a declarative contract tying each row to
+the clique it is, and each capacity to the edge it is, so certo can refuse a
+translation error WITHOUT replacing the independent reconstruction. Agreed in
+shape, not yet in detail.
 
 **The half `opt --gap` leaves open.** *(still open)* A packing question has two sides. The
 lower one is solved and exact: a feasible packing is its own witness, and
@@ -272,6 +321,13 @@ the cost is being paid somewhere else.
 | A search whose bound is computed and travels with the answer | **0.13.0** — the grading turns "not in the semigroup" from a conjecture into a certificate |
 | **The questions certo could not settle, recorded** | **0.13.0** — on by default, sizes only, `CERTO_NO_COVERAGE=1` to stop |
 | An enumeration that could not run forever | **0.13.0** — `geng` had no clock and no memory cap at all |
+| **`certo profile`**: a certificate whose subject is a FUNCTION | `capacity_profile`, **0.14.0** — the 50th kind. Bound + attainment + coverage is an equality on an interval |
+| The forgery battery as a tool, and ONE implementation of it | `certo verify --tamper`, **0.14.0** — the adversarial suite now imports it |
+| `verify` accepting the dict it serialises to | **0.14.0** — an adapter's `AttributeError` was certo's bug, not theirs |
+| **Transformation contracts**: equivalent / restriction / relaxation, and what travels | **0.15.0** — found 3 of 6 transformations losing fields silently |
+| **Finding a profile**, not only checking one | `profile.discover`, **0.15.0** — exact, no sampling; the breakpoints come from two lines meeting |
+| A guard that keeps the `doctor` tests hermetic | **0.15.0** — and the measurement that made the refactor unnecessary |
+| `restricted()` keeping its loads, `relaxed`/`frozen` keeping what is theirs | **0.15.0** — a soundness defect a user reported, plus two found auditing for it |
 | The smallest-set recipe, documented and exercised | `docs/CASES.md` + `examples/smallest_deletion.py`, **0.11.4** |
 
 **Three items left this list without being worked on**, which is the part
@@ -856,6 +912,28 @@ removals, no changes of meaning. What stays allowed, permanently:
 
 Anything else needs a `SCHEMA_VERSION` bump and a migration note. Every item
 left below is of the first kind, which is why none of them is urgent.
+
+### What a release is, beyond the index
+
+Publishing to PyPI is not the whole of shipping, and treating it as such left
+**ten tags with no GitHub Release** -- every version from 0.11.1 to 0.13.0.
+`publish.yml` runs guard -> tests -> build -> publish and stops. Nothing wrote
+a release note, so the repository's own front door still advertises 0.11.0.
+
+The project page is the other half and behaves differently: GitHub Pages
+builds it automatically from `main`/`docs`, so its COUNTS are always right --
+a derived test enforces them. What it does not do is name anything. The live
+page mentions no command added since 0.10, because the test checks the number
+and nothing checks the content. A number nobody recomputes was the failure
+this project started with; this is its mirror, a number recomputed beside
+prose nobody does.
+
+So a release is four things, and only the first is automated:
+
+  1. the tag, guarded against `__version__` and the CHANGELOG, then PyPI;
+  2. a GitHub Release carrying that version's CHANGELOG section;
+  3. `docs/index.html` saying what is new, not only how much there is;
+  4. the installed copy on the maintainer's machine, so `doctor` agrees.
 
 ### The gate, and the hole in it
 

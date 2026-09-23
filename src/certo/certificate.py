@@ -874,6 +874,35 @@ def toric_cone_certificate(payload, title="") -> Certificate:
     )
 
 
+def capacity_profile_certificate(payload, title="") -> Certificate:
+    """A FUNCTION, certified: how an optimum responds to one capacity.
+
+    Every other kind here settles a number or a yes. This settles `f` on a
+    whole interval -- concave, piecewise affine, with breakpoints -- from
+    finite data, and the reason that is possible is worth carrying next to the
+    payload:
+
+      * a dual's feasibility is `A^T y >= c`, which never mentions a capacity,
+        so ONE dual bounds every `t` in its segment at once;
+      * two sources at a segment's ends attain the whole segment, because
+        interpolating them is feasible at the interpolated capacity and its
+        value is the interpolation;
+      * sorted segments sharing endpoints tile the domain.
+
+    Bound plus attainment plus coverage is equality on `[lo, hi]`.
+
+    IT IS A STATEMENT ABOUT ITS COLUMN SET. Not that the columns are all the
+    columns, nor that the rows mean what they are called. If they came from a
+    graph, that translation is a separate obligation.
+    """
+    out = dict(payload)
+    out["title"] = title
+    return Certificate(
+        kind="capacity_profile", solver_free=True, payload=out,
+        note_key="cert.note.capacity_profile",
+    )
+
+
 def affine_semigroup_certificate(payload, title="") -> Certificate:
     """What is finite and checkable about `S = N.a_1 + ... + N.a_k`.
 
@@ -1585,7 +1614,29 @@ def _replay(cert, limits, kind):
 
 
 
-def verify(cert: Certificate, limits=None) -> VerifyReport:
+def verify(cert, limits=None) -> VerifyReport:
+    """Re-check a certificate. Takes a `Certificate` or its serialised dict.
+
+    THE DICT IS ACCEPTED ON PURPOSE. A user's revalidation adapter read
+    certificates back from JSON and passed the dict straight here; what came
+    back was `AttributeError: 'dict' object has no attribute 'kind'`, which
+    names neither the problem nor the fix, in the one function an adapter is
+    certain to call. A dict that round-tripped through JSON is unambiguously a
+    serialised certificate, so it is deserialised rather than refused: the
+    mistake stops being possible instead of getting a better error message.
+    Anything else is refused by name, saying what would have worked.
+    """
+    if isinstance(cert, dict):
+        try:
+            cert = Certificate.from_dict(cert)
+        except Exception as e:  # noqa: BLE001
+            return VerifyReport(
+                False, "?", False,
+                detail=t("verify.bad_dict", message=e),
+            )
+    elif not isinstance(cert, Certificate):
+        raise TypeError(t("verify.wrong_type", got=type(cert).__name__))
+
     fn = VERIFIERS.get(cert.kind)
     if fn is None:
         return VerifyReport(
@@ -2439,6 +2490,80 @@ def _verify_toric_cone(cert, limits) -> VerifyReport:
         method_key="verify.toric.method",
         detail=t("verify.toric.detail", n=len(order),
                  dim=p["dimension"], mult=str(p["multiplicity"])),
+    )
+
+
+def _verify_capacity_profile(cert, limits) -> VerifyReport:
+    """Redo the whole profile from the columns. No solver, and no belief.
+
+    The payload carries duals and sources; both are re-checked against the
+    columns, the segment arithmetic is recomputed, and coverage is re-derived.
+    A profile that no longer holds is refused, and so is one whose stated
+    piecewise form disagrees with what its own duals give.
+    """
+    from types import SimpleNamespace
+
+    from . import profile as pr
+
+    p = cert.payload
+    rebuilt = SimpleNamespace(
+        columns=p["columns"], gain=p["gain"], capacity=p["capacity"],
+        parameter=p["parameter"],
+        domain=(p["domain"]["lo"], p["domain"]["hi"]),
+        segments=[{"from": s["from"], "to": s["to"], "dual": s["dual"]}
+                  for s in p["segments"]],
+        sources={at: e["mass"] for at, e in (p.get("sources") or {}).items()},
+        title="")
+    try:
+        got = pr.certify(rebuilt)
+    except pr.NotAProfile as e:
+        return VerifyReport(False, "capacity_profile", True,
+                            detail=str(e))
+
+    checks = [
+        (t("verify.profile.dual"),
+         all(f["why"] not in ("dual_infeasible", "negative_price")
+             for f in got["failures"]),
+         t("verify.profile.columns", n=len(p["columns"]),
+           s=len(p["segments"]))),
+        (t("verify.profile.sources"),
+         all(f["why"] != "source_infeasible" for f in got["failures"]),
+         t("verify.profile.at", n=len(p.get("sources") or {}))),
+        (t("verify.profile.meet"),
+         all(f["why"] not in ("bound_and_source_disagree", "no_source_at")
+             for f in got["failures"]),
+         t("verify.profile.equality")),
+        (t("verify.profile.cover"),
+         all(f["why"] != "not_covered" for f in got["failures"]),
+         t("verify.profile.domain", lo=p["domain"]["lo"],
+           hi=p["domain"]["hi"])),
+        (t("verify.profile.concave"),
+         all(f["why"] != "not_concave" for f in got["failures"]),
+         t("verify.profile.slopes",
+           values=", ".join(s["beta"] for s in p["segments"][:4]))),
+        # And the stated shape has to be the shape the duals actually give.
+        (t("verify.profile.stated"),
+         got["piecewise"] == p["piecewise"] and got["holds"]
+         and p.get("holds") is True,
+         t("verify.profile.pieces", n=len(p["piecewise"]))),
+        # THE BOOKKEEPING, recomputed. Each of these was found by the
+        # adversarial suite: a derived list that nobody re-derives, and a
+        # source whose own `at` need not match the capacity it is filed under.
+        # Both are edits that leave every other number looking right.
+        (t("verify.profile.bookkeeping"),
+         got["breakpoints"] == p.get("breakpoints")
+         and all(e.get("at") == at
+                 for at, e in (p.get("sources") or {}).items()),
+         t("verify.profile.derived", n=len(p.get("breakpoints") or []))),
+    ]
+
+    return VerifyReport(
+        all(c[1] for c in checks), "capacity_profile", True, checks=checks,
+        warnings=[t("verify.profile.scope")],
+        method_key="verify.profile.method",
+        detail=t("verify.profile.detail", param=p["parameter"],
+                 lo=p["domain"]["lo"], hi=p["domain"]["hi"],
+                 n=len(p["segments"])),
     )
 
 
@@ -4942,6 +5067,7 @@ VERIFIERS = {
     "lean_binding": _verify_lean_binding,
     "toric_cone": _verify_toric_cone,
     "affine_semigroup": _verify_affine_semigroup,
+    "capacity_profile": _verify_capacity_profile,
     "equitable_quotient": _verify_equitable_quotient,
     "linear_system": _verify_linear_system,
     "parametric_symmetry": _verify_parametric_symmetry,

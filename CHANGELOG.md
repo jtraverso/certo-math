@@ -6,6 +6,245 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-09-23
+
+**A transformation that changed the problem, a search that finds what the
+last release could only check, and the release step nobody had written.** No
+payload changes shape; the two new optional fields on `capacity_profile` say
+where a proposal came from and older readers ignore them.
+
+### `restricted()` was dropping every load — and two more like it
+
+A user built a packing carrying `t0 <= 0`, restricted it to t0's own kind,
+and got back a model that admitted `t0 = 1`. `PackingSpec.restricted()`
+constructed the new spec without passing `loads`. Their sentence is the one
+worth keeping:
+
+    a correct solver cannot repair that omission
+
+Every optimum it reported was a true optimum of the model it was handed, and
+nothing downstream can notice, because nothing downstream sees the model that
+was meant.
+
+The fix is not "pass the loads". Keeping some kinds is exactly forcing the
+other items to zero, so what leaves a load is a TERM, not the constraint. A
+load whose items all disappear becomes `0 <= bound` — vacuous when the bound
+is non-negative and INFEASIBLE when it is negative, so dropping it would turn
+an infeasible restriction into a feasible one, silently, one level down.
+
+Auditing for the same shape found `LPSpec.relaxed()` losing `target` and
+`load_names`, and then a reflection over the tree found a transformation
+nobody had looked at, `LPSpec.frozen()`, losing the same two. **Three of the
+six transformations in the repository**, and not one said anywhere what it
+was supposed to preserve.
+
+`frozen` is also where copying the field across would have been the WRONG
+fix: its residual objective is missing the constant the frozen variables
+contribute, so a residual optimum `z` meets the original target `T` exactly
+when `z + const >= T`. The target is SHIFTED, not carried. Finding the
+omissions is mechanical; deciding what each should have been is not.
+
+### Transformation contracts
+
+Every transformation now declares a RELATION — equivalent, restriction or
+relaxation — and what may legitimately differ, field by field with a reason.
+The relation is not decoration: it says which direction a comparison between
+the two optima is allowed to go, which is what a reader holding two numbers
+actually wants.
+
+The expectation is DERIVED rather than remembered. `transformations()` finds
+them by looking for methods that construct a spec — catching `relaxed`, whose
+return annotation says nothing, which is exactly the one that had the defect —
+and a test requires each to have a contract and to change nothing it does not
+declare. A transformation added next year without one fails there, instead of
+losing a constraint in somebody's model two releases later.
+
+### `certo profile` now FINDS the profile, not only checks one
+
+0.14.0 could admit a piecewise-affine capacity profile. It could not produce
+one. Now a `ProfileSpec` with no segments means "find them", and the search
+is **exact, with no sampling anywhere**.
+
+`f(t)` is the minimum, over dual-feasible `y`, of `alpha_y + beta_y t`, so it
+is the lower envelope of a finite family of lines and every line comes from
+one linear program. That turns discovery into a question with a termination
+argument rather than a grid: solve at both ends; if the lines agree the piece
+is settled; otherwise they cross at `t*`, and solving there either confirms
+`t*` as a breakpoint or exhibits a third piece strictly between. Breakpoints
+are computed from two lines meeting, never guessed.
+
+**Nothing it finds is trusted.** The search produces a PROPOSAL, and
+`certify` admits or refuses it on exactly the same terms as one written by
+hand. A search with a bug cannot produce a wrong certificate, only a refused
+one — which is why this half could be built after the checking half instead
+of before it, and it earned that immediately: the first version rebuilt its
+sources with `exact.primal_from_dual`, which pins a candidate by
+complementary slackness without requiring `x >= 0`, and returned negative
+masses. The checker refused them. Sources are now SOLVED for, because
+feasibility is the whole job of a source.
+
+On the instance a user wrote by hand it recovers their answer exactly — the
+breakpoint at 1/2 and both duals, entry for entry — from five linear
+programs.
+
+### An empty program is vacuous, and says so
+
+`certo opt` on a program with no variables and no rows raised
+`ValueError: min() iterable argument is empty`. The line that caused it
+carried the right comment already — *"`None`, not 0.0, when there is no dual:
+the smallest entry of a vector nobody produced is not zero, it is nothing"* —
+and only the exact branch disagreed with it.
+
+It now returns the empty sum, zero, marked `vacuous` and **with no
+certificate**. A certificate of the optimum of a program with no columns
+establishes nothing, and reporting "EXACT optimum certified: 0" would be a
+vacuous result wearing a good one's clothes.
+
+### `verify` accepts the dict it serialises to
+
+A revalidation adapter read certificates back from JSON and passed the dict
+to `verify`, which answered `AttributeError: 'dict' object has no attribute
+'kind'` — in the one function an adapter is certain to call, naming neither
+the problem nor the fix. The group filed it as their own error; it was
+certo's. A dict that round-tripped through JSON is unambiguously a serialised
+certificate, so it is deserialised rather than refused, and anything else is
+refused by name saying what would have worked.
+
+### `certo verify --tamper`, and one implementation of it
+
+certo's own suite takes a valid certificate, changes one payload field and
+requires the change to be noticed. A user rebuilding that around THEIR
+certificates asked for it as a command. It is now `certo.tamper`, and certo's
+adversarial suite imports it — one implementation rather than two that drift.
+
+It REPORTS rather than asserts: an uncaught field either carries no claim, and
+does not belong in a payload that says it is checkable, or carries one nobody
+checks, and only a reader can tell those apart.
+
+### The release step nobody had written
+
+`publish.yml` ran guard -> tests -> build -> publish and stopped, so **ten
+tags reached PyPI with no GitHub Release** — every version from 0.11.1 to
+0.13.0, while the repository's front door still advertised 0.11.0. Nothing
+was broken; a step that did not exist simply never ran. It exists now, after
+`publish` deliberately: a release note announcing a version that failed to
+reach the index would be a document saying something the world does not
+confirm.
+
+Its first draft extracted the CHANGELOG section with a regex whose
+backslashes did not survive YAML and the shell — awk read the bracket escape
+as a character class and matched nothing, so every note would have shipped
+empty. Checked against three real sections before being written, and replaced
+with a prefix test that has nothing to escape.
+
+**And the project page now states its version.** It named none, so the only
+thing a test could check was its counts — which is how it went a whole cycle
+with every count passing while `All forty-three` sat beside a chip saying 48,
+and while it mentioned no command added since 0.10. A page that states its
+version can be tied to `__version__`; shipping without updating it now fails
+the suite instead of somebody's expectations.
+
+### A measurement that cancelled a refactor
+
+The backlog carried "derived expectations for the seams `doctor` reads", at
+M, on the strength of three tests that had agreed with a bug. Instrumenting
+first — which is cheap — said something else.
+
+The first instrument counted syscalls and reported eleven of twenty-three
+tests reading the real machine. It was the wrong instrument: `Path.resolve`
+on a directory the test just created is a real call that reads nothing of
+anybody's machine. Counting only reads that LEAVE the fixture said
+**eighteen of twenty-three are hermetic**, and all five that are not read the
+real machine deliberately, asserting properties that hold whatever it looks
+like.
+
+The item was aimed at a defect 0.11.7 had already fixed one test at a time.
+What was missing was something that notices a NEW test quietly joining the
+non-hermetic group, and that is what shipped: a guard with a five-name
+allowlist, each with a reason, failing in both directions — a test that leaves
+its fixture without saying so, and a name whose reason no longer describes
+anything. An M-sized refactor of the file with the subtlest bugs in the
+repository, avoided by an afternoon of measurement.
+
+## [0.14.0] — 2026-09-23
+
+**Three asks from a research group using 0.13.0 against a chordal-graph
+problem.** A minor rather than a patch: `capacity_profile` is a NEW kind --
+the fiftieth -- so no existing payload changes shape.
+
+### `certo profile` — a certificate whose subject is a FUNCTION
+
+Every other kind here settles a number or a yes. This settles
+
+    f(t) = max { gain : load on ONE named row <= t, every other load <= 1 }
+
+on a whole interval: concave, piecewise affine, with breakpoints. The group
+had written one by hand -- `f_e(t) = min{6 + 3t, 7 + t}` on `[0,1]`, with a
+dual per branch and sources at `t = 0, 1/2, 1` -- and asked for the machinery.
+
+**It is not `parametric`, and the difference is the point.** That certifies a
+BOUND for a family whose parameter sits in the data, `A(p)`, `b(p)`, `c(p)`.
+Here the parameter is one capacity and the answer is a FUNCTION.
+
+**Why finite data settles a continuum**, which is the whole argument:
+
+  * a dual's feasibility is `A^T y >= c` and never mentions a capacity, so ONE
+    dual bounds every `t` in its segment at once;
+  * two sources at a segment's ends attain the whole segment, because
+    interpolating them is feasible at the interpolated capacity and its value
+    is the interpolation;
+  * sorted segments sharing endpoints tile the domain.
+
+Bound plus attainment plus coverage is an EQUALITY, not a bound.
+
+**What it is for.** `f(1)` is the ordinary optimum; the shape near zero is
+what a single optimum throws away. Two chordal pieces can be the same graph
+with the same gap, and gluing copies along one interface leaves the gap
+bounded while gluing along another makes it grow linearly. The difference is
+in the profile.
+
+You supply breakpoints, duals and sources -- finding them is parametric
+programming and any solver may do it. `alpha`, `beta` and every value are
+recomputed from the columns. A profile whose segments leave a gap, whose dual
+misses a column, whose source overloads a row, or whose bound never meets its
+source is refused **with no certificate**: a profile that does not hold is not
+a smaller profile.
+
+Two defects found while building it, neither by review. The concavity test
+compared the slopes the wrong way round and flagged the correct instance --
+slopes 3 then 1 -- as a failure, caught by running it against a real profile.
+And the adversarial suite found six payload fields that no check recomputed:
+`at_lo` and `at_hi` were deleted rather than excused, since they only
+duplicated values already in `sources`, and the rest are now re-derived.
+
+### `certo verify --tamper` — the forgery battery, as a tool
+
+certo's own suite takes a valid certificate, changes one payload field and
+requires the change to be noticed. A user rebuilding that around THEIR
+certificates asked for it as a command, which it should have been.
+
+It is now `certo.tamper`, and **certo's own adversarial suite imports it** --
+one implementation rather than two that drift. It REPORTS rather than asserts:
+an uncaught field either carries no claim, and does not belong in a payload
+that says it is checkable, or carries one nobody checks, and only a reader can
+tell those apart. `--tamper-all` also probes the fields certo records as
+descriptive for its own kinds, which is what you want for a certificate that
+is not one of certo's.
+
+### `verify` accepts the dict it serialises to
+
+A revalidation adapter read certificates back from JSON and passed the dict
+straight to `verify`. What came back was
+
+    AttributeError: 'dict' object has no attribute 'kind'
+
+in the one function an adapter is certain to call, naming neither the problem
+nor the fix. The group filed it as their own error. It was certo's. A dict
+that round-tripped through JSON is unambiguously a serialised certificate, so
+it is now deserialised rather than refused -- the mistake stops being possible
+instead of getting a better message -- and anything else is refused by name,
+saying what would have worked.
+
 ## [0.13.0] — 2026-09-21
 
 **Three things, and the thread joining them is who certo is for.** The

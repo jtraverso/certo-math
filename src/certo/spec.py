@@ -194,10 +194,41 @@ class LPSpec:
             rest = {v: c for v, c in coeffs.items()
                     if v not in set(self.discrete)}
             out.constraint(rest, sense, to_fraction(rhs) - moved, name=name)
+
+        # WHICH ROWS ARE LOADS survives a substitution: shifting a right-hand
+        # side does not turn an argument about a region into an encoding
+        # detail. It used to be dropped, like `PackingSpec.restricted` dropped
+        # the loads themselves.
+        out.load_names = list(self.load_names)
+
+        # THE TARGET IS SHIFTED, NOT COPIED, and this is the one place in this
+        # audit where carrying the field verbatim would have been the WRONG
+        # fix. The caller's target is about the whole objective; this spec's
+        # objective is missing `const`, the part the frozen variables already
+        # contribute. A residual optimum `z` meets the original target `T`
+        # exactly when `z + const >= T`, so the residual's target is
+        # `T - const`. Copying `T` across would compare a partial sum against
+        # a whole one -- a wrong answer rather than a missing one.
+        if self.target is not None:
+            out.target = to_fraction(self.target) - const
+
         return out, const
 
     def relaxed(self):
-        """Every variable continuous. The bound over ALL discrete choices."""
+        """Every variable continuous. The bound over ALL discrete choices.
+
+        THE CONTRACT: a RELAXATION. The feasible set grows, so a maximum
+        cannot fall and a minimum cannot rise. Integrality is the only thing
+        this drops, and dropping it is the point.
+
+        WHAT TRAVELS, and why it has to. `target` is the question the caller
+        asked -- it has nothing to do with integrality, and losing it made
+        `meets_target` come back null instead of answered. `load_names` says
+        which rows are loads rather than capacities, which is a fact about the
+        model and not about whether its variables are whole; losing it stopped
+        the certificate pricing them. Both used to be dropped here, found
+        while auditing the same defect in `PackingSpec.restricted`.
+        """
         out = LPSpec(sense=self.sense, title=self.title)
         for v in self.var_names:
             lo, hi = self.bounds[v]
@@ -205,6 +236,8 @@ class LPSpec:
         out.objective(dict(self.obj))
         for name, coeffs, sense, rhs in self.cons:
             out.constraint(dict(coeffs), sense, rhs, name=name)
+        out.target = self.target
+        out.load_names = list(self.load_names)
         return out
 
     def objective(self, coeffs: dict):
@@ -1151,6 +1184,53 @@ class ConeSpec:
     lattice: object = None           # a basis, as rows; None means Z^n
     subdivision: dict = None         # name -> coordinates, for discrepancies
     order: object = None             # the order the generators are read in
+    title: str = ""
+
+
+@dataclass
+class ProfileSpec:
+    """How an optimum responds to ONE capacity, as a certified function.
+
+        ProfileSpec(
+            columns={"012": {"01": 1, "02": 1, "12": 1}, ...},
+            gain={"012": 2, ...},
+            capacity={"02": 1, "12": 1, ...},     # every row EXCEPT the one below
+            parameter="01",
+            domain=(0, 1),
+            segments=[{"from": 0, "to": "1/2", "dual": {"01": 3, ...}},
+                      {"from": "1/2", "to": 1, "dual": {"01": 1, ...}}],
+            sources={0: {"023": 1, ...}, "1/2": {...}, 1: {...}},
+        )
+
+    NOT `ParametricSpec`. That one certifies a BOUND for a whole family, with
+    the parameter in the data. This certifies a FUNCTION -- concave, piecewise
+    affine -- of one capacity, and the answer has breakpoints.
+
+    WHAT IT DECIDES. `f(t) = alpha + beta t` on each segment, and hence on all
+    of `[lo, hi]`. Three finite facts give a statement about a continuum: a
+    dual bounds EVERY `t` at once, because its feasibility `A^T y >= c` never
+    mentions the capacities; two sources at a segment's ends attain the whole
+    segment, because interpolating them is feasible at the interpolated
+    capacity with the interpolated value; and sorted segments sharing their
+    endpoints tile the domain.
+
+    EVERYTHING IS SUPPLIED AND EVERYTHING IS CHECKED. Breakpoints, duals and
+    sources are input -- finding them is parametric programming, and any
+    solver may do it. `alpha`, `beta` and every value are recomputed from the
+    columns; nothing stated is believed.
+
+    A PROFILE IS ABOUT ITS COLUMN SET. That the columns are all the columns,
+    or that the rows mean what their names suggest, is a separate obligation
+    and this does not discharge it.
+    """
+
+    columns: dict                    # name -> {row: coefficient}
+    gain: dict                       # name -> objective coefficient
+    capacity: dict                   # row -> capacity, for every row but one
+    parameter: str = ""              # the row whose capacity is `t`
+    domain: object = None            # (lo, hi); default (0, 1)
+    segments: object = None          # [{from, to, dual}]
+    sources: object = None           # {t: {column: mass}}
     title: str = ""
 
 

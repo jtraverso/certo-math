@@ -159,6 +159,26 @@ def _duals(prob, cons_names):
     return out
 
 
+def ms_now(t0) -> float:
+    import time as _time
+    return (_time.perf_counter() - t0) * 1000
+
+
+def _min_or_none(values):
+    """The smallest entry, or None when there are no entries.
+
+    An empty program is a real thing -- no variables, no rows, optimum zero --
+    and its dual is empty too. "The smallest price in a price list nobody
+    wrote" has no value, and saying `0` would be a number somebody could read
+    as a binding constraint.
+    """
+    vals = list(values)
+    if not vals:
+        return None
+    from .. import exact as _exact
+    return _exact.serialize(min(vals))
+
+
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         target=None) -> Result:
     lim = limits or Limits()
@@ -169,6 +189,20 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
             raise ValueError(t("engine.opt.negative_bound", var=v))
 
     A, b, c, cons_names = spec.as_leq_system()
+
+    # AN EMPTY PROGRAM IS VACUOUS, and saying so is the difference between
+    # this and a tool that reports "EXACT optimum certified: 0" for a question
+    # nobody asked. No variables and no rows does have an optimum -- the empty
+    # sum, zero -- and a certificate of it establishes nothing about anything.
+    # `exists` already says this about an empty universe; a program with no
+    # columns is the same shape one level down.
+    if not c and not A:
+        return Result(
+            "opt", Status.SAT, Verdict.SATISFIABLE, ENGINE, ms_now(t0), None,
+            detail=t("engine.opt.empty_program"),
+            meta={"objective": "0", "variables": 0, "constraints": 0,
+                  "exact": True, "min_dual": None, "vacuous": True})
+
     solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=max(1, lim.timeout_ms // 1000))
 
     prob, xvars = _build(spec, A, b, c, cons_names)
@@ -342,7 +376,13 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
               "integer": discrete, "denominator": denom,
               # `None`, not 0.0, when there is no dual: the smallest entry of
               # a vector nobody produced is not zero, it is nothing.
-              "min_dual": (exact.serialize(min(y_ex)) if exact_ok
+              #
+              # THE EXACT BRANCH DID NOT KEEP THAT PROMISE. `min(y_ex)` on an
+              # empty dual raised `ValueError: min() iterable argument is
+              # empty`, which a user hit by running a program with no rows at
+              # all. The comment above was already right; only this line
+              # disagreed with it.
+              "min_dual": (_min_or_none(y_ex) if exact_ok
                            else (min([abs(v) for v in dual_float], default=0.0)
                                  if have_duals else None)),
               "target": None if target is None else exact.serialize(

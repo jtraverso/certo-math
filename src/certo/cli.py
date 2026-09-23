@@ -382,6 +382,33 @@ def cmd_cone(args):
     return rc
 
 
+def cmd_profile(args):
+    from .engines import algebra
+    from .spec import ProfileSpec, load_spec
+
+    spec = load_spec(args.spec, ProfileSpec)
+    res = algebra.capacity_profile(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.certificate is not None:
+        p = res.certificate.payload
+        print("  f({}) on [{}, {}]".format(p["parameter"], p["domain"]["lo"],
+                                           p["domain"]["hi"]))
+        for piece in p["piecewise"]:
+            print("    [{:>5}, {:>5}]   f(t) = {}".format(
+                piece["from"], piece["to"], piece["value"]))
+        from fractions import Fraction
+
+        for at, e in sorted((p.get("sources") or {}).items(),
+                            key=lambda kv: Fraction(kv[0])):
+            print("    t = {:<6} attained {:<8} load {}".format(
+                at, e["value"], e["parameter_load"]))
+        print("  " + t("verify.profile.scope"))
+    elif not args.json and res.certificate is None and res.meta.get("failures"):
+        for f in res.meta["failures"]:
+            print("    !! " + json.dumps(f, ensure_ascii=False))
+    return rc
+
+
 def cmd_semigroup(args):
     from .engines import algebra
     from .spec import SemigroupSpec, load_spec
@@ -1680,6 +1707,46 @@ def cmd_ledger(args):
     return 0 if bad == 0 else 1
 
 
+def _tamper(cert, args) -> int:
+    """Forge this certificate one field at a time and report what was caught.
+
+    A REPORT, not a verdict. An uncaught field means either that it carries no
+    claim -- and does not belong in a payload that claims to be checkable --
+    or that it carries one and nothing is checking it. Only a reader can tell
+    those apart, so this prints both columns and exits zero either way. The
+    one thing it refuses is probing a certificate that does not verify, where
+    every mutation would be "caught" by the failure already there.
+    """
+    from . import tamper
+
+    out = tamper.probe(cert, limits_from(args),
+                       excuse=not getattr(args, "tamper_all", False))
+    if args.json:
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return 0 if out["original_ok"] else 1
+
+    if not out["original_ok"]:
+        print(t("cli.tamper.original_fails", detail=out.get("detail", "")),
+              file=sys.stderr)
+        return 1
+
+    print(t("cli.tamper.header", kind=out["kind"]))
+    print("  " + t("cli.tamper.caught", n=len(out["caught"])))
+    for f in out["caught"]:
+        print("    ok  " + f)
+    if out["uncaught"]:
+        print("  " + t("cli.tamper.uncaught", n=len(out["uncaught"])))
+        for f in out["uncaught"]:
+            print("    !!  " + f)
+        print("  " + t("cli.tamper.means"))
+    if out["unshaped"]:
+        print("  " + t("cli.tamper.unshaped",
+                       names=", ".join(out["unshaped"][:6])))
+    if out["excused"]:
+        print("  " + t("cli.tamper.excused", n=len(out["excused"])))
+    return 0
+
+
 def cmd_verify(args):
     data = json.loads(Path(args.certificate).read_text(encoding="utf-8"))
     cert = Certificate.from_dict(data)
@@ -1704,6 +1771,9 @@ def cmd_verify(args):
             return 1
         if not args.json:
             print("  " + t("cli.verify.spec_matches", path=args.spec))
+
+    if getattr(args, "tamper", False):
+        return _tamper(cert, args)
 
     rep = verify_cert(cert, limits_from(args))
     if args.json:
@@ -2253,6 +2323,11 @@ def build_parser():
                      "functional and discrepancies")
     sp.add_argument("spec", help=".py file returning a ConeSpec")
     sp.set_defaults(func=cmd_cone)
+    sp = add("profile", "how an optimum responds to ONE capacity across an "
+                        "interval: a piecewise-affine function, decided by "
+                        "duals, sources and coverage")
+    sp.add_argument("spec", help=".py file returning a ProfileSpec")
+    sp.set_defaults(func=cmd_profile)
     sp = add("semigroup", "an affine semigroup as a CHECKER: pointedness, a "
                           "minimal generating set, and membership with the "
                           "coefficients or the bound that settles it")
@@ -2544,6 +2619,16 @@ def build_parser():
                          "was made from, by hash. Verifying an old "
                          "certificate correctly while believing it describes "
                          "the spec on your screen is the failure this catches")
+    sp.add_argument("--tamper", action="store_true",
+                    help="forge this certificate one payload field at a time "
+                         "and report which changes the verifier catches. A "
+                         "report, not a verdict: an uncaught field either "
+                         "carries no claim or carries one nobody checks")
+    sp.add_argument("--tamper-all", action="store_true", dest="tamper_all",
+                    help="with --tamper, probe every field including the ones "
+                         "certo records as descriptive for its OWN kinds -- "
+                         "which is what you want for a certificate that is "
+                         "not one of certo's")
     sp.set_defaults(func=cmd_verify)
 
     sp = add("export", "dump the spec to SMT-LIB2 or DIMACS, or a "

@@ -1511,6 +1511,39 @@ async def cone(spec_path: str | None = None, spec_source: str | None = None,
 
 
 @mcp.tool(description=(
+    "PROFILE: how an optimum responds to ONE capacity across an interval, as "
+    "a certified FUNCTION rather than a value. Not `parametric`, which bounds "
+    "a family whose parameter sits in the data; here the parameter is a single "
+    "row's capacity `t` and the answer is concave, piecewise affine, with "
+    "breakpoints. Reach for it when the question is not 'what is the optimum' "
+    "but 'what survives when only a fraction of the shared resource is "
+    "available' -- the shape near zero decides whether an obstruction "
+    "amplifies when a piece is repeated, which the single value at t=1 cannot "
+    "tell you. YOU SUPPLY the breakpoints, one dual per segment and one primal "
+    "source per breakpoint; finding them is parametric programming and any "
+    "solver may do it. certo CHECKS, and recomputes every number from the "
+    "columns. WHY FINITE DATA SETTLES A CONTINUUM: a dual's feasibility never "
+    "mentions a capacity, so one dual bounds every `t` in its segment at once; "
+    "two sources at a segment's ends attain the whole segment, because "
+    "interpolating them is feasible at the interpolated capacity with the "
+    "interpolated value; and sorted segments sharing endpoints tile the "
+    "domain. Bound plus attainment plus coverage is EQUALITY, not a bound. It "
+    "is a statement about the column set given: that those are all the "
+    "columns, or that the rows mean what they are called, is a separate "
+    "obligation it does not discharge."))
+@_guard
+async def profile(spec_path: str | None = None, spec_source: str | None = None,
+                  timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import ProfileSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), ProfileSpec)
+    res = await _off(algebra.capacity_profile, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
     "SEMIGROUP: an affine semigroup `S = N.a_1 + ... + N.a_k` as a CHECKER. "
     "`cone` answers questions about the RATIONAL cone over these generators; "
     "this answers questions about what you can actually REACH by adding them, "

@@ -51,6 +51,7 @@ ENGINE_ORBIT = "certo/orbit-quotient"
 ENGINE_EXACT = "certo/exact-elimination"
 ENGINE_TORIC = "certo/toric-local"
 ENGINE_SEMIGROUP = "certo/affine-semigroup"
+ENGINE_PROFILE = "certo/capacity-profile"
 ENGINE_RANGE = "certo/exact-range"
 ENGINE_CYCLE = "certo/growth-classes"
 ENGINE_BIND = "certo/lean-binding"
@@ -338,6 +339,75 @@ def equitable_quotient(spec, limits: Limits | None = None,
               "physical_columns": out["physical_columns"],
               "rows": len(out["N"]), "columns": len(out["M"]),
               "identities": len(out["B"])})
+
+
+def capacity_profile(spec, limits: Limits | None = None,
+                     spec_path: str = "") -> Result:
+    """A proposed profile, decided: bound, attainment and coverage."""
+    from ..certificate import capacity_profile_certificate
+    from ..profile import NotAProfile, certify
+
+    from ..profile import Undiscovered, discover
+
+    t0 = time.perf_counter()
+
+    # NO SEGMENTS MEANS FIND THEM. The search proposes breakpoints, duals and
+    # sources; `certify` then admits or refuses them on exactly the same terms
+    # as a profile written by hand. A search with a bug in it cannot produce a
+    # wrong certificate, only a refused one -- which is why the checking half
+    # was built first and this half could come after.
+    found = None
+    if not getattr(spec, "segments", None):
+        try:
+            found = discover(spec)
+        except NotAProfile as e:
+            return Result("profile", Status.OUT_OF_THEORY,
+                          Verdict.INCONCLUSIVE, ENGINE_PROFILE, 0.0, None,
+                          detail=str(e))
+        except Undiscovered as e:
+            return Result("profile", Status.RESOURCE_EXHAUSTED,
+                          Verdict.INCONCLUSIVE, ENGINE_PROFILE,
+                          (time.perf_counter() - t0) * 1000, None,
+                          detail=str(e))
+        spec.segments = found["segments"]
+        spec.sources = found["sources"]
+
+    try:
+        out = certify(spec)
+    except NotAProfile as e:
+        return Result("profile", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_PROFILE, 0.0, None, detail=str(e))
+    ms = (time.perf_counter() - t0) * 1000
+
+    if not out["holds"]:
+        # No certificate. A profile that does not hold is not a smaller
+        # profile, and a payload claiming one would fail its own verifier.
+        why = ", ".join(sorted({f["why"] for f in out["failures"]}))
+        return Result(
+            "profile", Status.SAT, Verdict.REFUTED, ENGINE_PROFILE, ms, None,
+            detail=t("engine.profile.fails", why=why),
+            meta={"holds": False, "failures": out["failures"][:6],
+                  "segments": len(out["segments"])})
+
+    out["discovered"] = found is not None
+    if found is not None:
+        out["solves"] = found["solves"]
+    cert = capacity_profile_certificate(out, title=spec.title).stamp(
+        spec_path or None)
+    detail = (t("engine.profile.found", n=len(out["segments"]),
+                s=found["solves"]) if found is not None else
+              t("engine.profile.holds", parameter=out["parameter"],
+                lo=out["domain"]["lo"], hi=out["domain"]["hi"],
+                n=len(out["segments"]), b=len(out["breakpoints"])))
+    return Result(
+        "profile", Status.UNSAT, Verdict.PROVED, ENGINE_PROFILE, ms, cert,
+        detail=detail,
+        meta={"holds": True, "segments": len(out["segments"]),
+              "breakpoints": out["breakpoints"],
+              "parameter": out["parameter"],
+              "discovered": found is not None,
+              "solves": None if found is None else found["solves"],
+              "piecewise": [p["value"] for p in out["piecewise"]]})
 
 
 def affine_semigroup(spec, limits: Limits | None = None,
