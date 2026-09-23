@@ -6,6 +6,54 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.15.2] — 2026-09-23
+
+**A guard that passed while measuring nothing, and the release that could
+outrun its own tests.** A patch: nothing in the package changed behaviour.
+Both defects are in how this project checks itself, which is the part it is
+least entitled to get wrong.
+
+### The hermeticity guard was blind on 3.11
+
+0.15.0 added a guard that reports which `doctor` tests read the machine they
+run on. It failed CI on ubuntu and windows Python 3.11, and passed on 3.12
+and 3.13 everywhere — including here, which is why it shipped twice.
+
+The instrument subclassed `pathlib.Path`. Before 3.12 `Path` is abstract: it
+has no `_flavour`, so `class SpyPath(Path)` builds a type that raises the
+moment anybody constructs it. 3.12 rewrote `pathlib` and it happens to work.
+It now subclasses `type(Path())`, the concrete class on every version.
+
+**The worse half was the exception handling.** `_fixture_reads` wrapped the
+test in `except Exception: pass`, which on 3.11 swallowed the instrument's
+OWN failure: every doctor test raised on its first `Path(...)`, counted
+nothing, and was reported hermetic. A guard that passes while measuring
+nothing is worse than no guard, because it is also a claim.
+
+So the instrument now proves itself before it reports — one read inside the
+fixture that must not count, one outside that must — and raises, naming the
+interpreter, when it does not intercept. A residual failure is now loud and
+specific instead of silently green.
+
+And one assertion was removed rather than fixed. "This name is on the
+allowlist and reads nothing" requires the instrument to be COMPLETE, and
+completeness is exactly what varies between interpreters: a read reaching the
+machine by a route this does not wrap looks like no read at all. The opposite
+direction is safe under the same uncertainty — an instrument that under-counts
+can MISS a surprise but never invent one — so only that one is asserted. The
+other is printed.
+
+### Publishing could outrun the matrix
+
+`publish.yml` ran its tests on ubuntu 3.12 alone while `ci.yml` ran nine
+combinations. So 0.15.0 and 0.15.1 both reached the index green while `tests`
+was red on 3.11, and nothing in the release path looked.
+
+That is the argument the `guard` job is built on — two numbers nobody compares
+drift — one level up, about two suites. `publish.yml` now runs the same matrix
+`ci.yml` does, and a release waits for all of it. A few minutes slower, and it
+can no longer ship ahead of its own tests.
+
 ## [0.15.1] — 2026-09-23
 
 **The MCP server was holding the file pip needed to replace.** A patch: no

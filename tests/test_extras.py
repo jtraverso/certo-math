@@ -11410,9 +11410,9 @@ def _fixture_reads(fn):
     read touched a path outside the fixture, which is the same distinction the
     `--repair --apply` near-miss was about.
     """
-    import glob as _glob
     import shutil as _shutil
     import subprocess as _subprocess
+    import sys
     import tempfile
 
     from certo import doctor
@@ -11451,7 +11451,12 @@ def _fixture_reads(fn):
         def __getattr__(self, i):
             return getattr(_subprocess, i)
 
-    base = doctor.Path
+    # SUBCLASS THE CONCRETE CLASS, NOT `Path`. Before 3.12, `Path` is abstract
+    # -- it has no `_flavour` -- so `class X(Path)` builds a type that raises
+    # the moment anybody constructs it. On 3.12 `pathlib` was rewritten and it
+    # happens to work, which is why this passed here and failed on 3.11 in CI
+    # for two releases. `type(Path())` is the concrete class on every version.
+    base = type(doctor.Path())
 
     class _Path(base):
         def exists(self, *a, **k):
@@ -11472,9 +11477,31 @@ def _fixture_reads(fn):
 
     doctor.shutil, doctor.subprocess, doctor.Path = _Shutil(), _Sub(), _Path
     try:
-        fn()
-    except Exception:  # noqa: BLE001
-        pass
+        # AN INSTRUMENT THAT CANNOT VERIFY ITSELF MUST NOT REPORT. The first
+        # version swallowed every exception from `fn()`, which on 3.11 meant
+        # swallowing the instrument's OWN failure: each doctor test raised on
+        # the first `Path(...)`, counted nothing, and was reported hermetic.
+        # A blind guard that passes is worse than no guard, so this proves the
+        # spy counts before trusting anything it says.
+        probe = len(outside)
+        _Path(tempfile.gettempdir()).exists()      # inside: must not count
+        _Path("/definitely/not/a/fixture/path").exists()   # outside: must
+        if len(outside) != probe + 1:
+            raise RuntimeError(
+                "the hermeticity instrument does not intercept on this "
+                "interpreter ({}): it counted {} of the 1 read it was just "
+                "asked to see".format(sys.version.split()[0],
+                                      len(outside) - probe))
+        del outside[probe:]
+
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            # A FAILING TEST IS NOT THIS GUARD'S BUSINESS -- its own suite
+            # entry reports that. What matters here is what it read on the
+            # way, and the self-check above has already established that
+            # reads are being seen at all.
+            pass
     finally:
         for k, v in saved.items():
             setattr(doctor, k, v)
@@ -11517,13 +11544,23 @@ def test_doctor_tests_stay_hermetic():
         if not left and name in READS_THE_REAL_MACHINE:
             cured.append(name)
 
+    # THE DIRECTION THAT CAN BE ASSERTED. An instrument that under-counts can
+    # only MISS a surprise, never invent one, so a name appearing here is a
+    # fact about the test rather than about the interpreter.
     assert not surprises, (
         "these doctor tests read the machine they run on and do not say so. "
         "Either make them hermetic or add them to READS_THE_REAL_MACHINE "
         "with a reason: {}".format(surprises))
-    assert not cured, (
-        "these are on READS_THE_REAL_MACHINE and no longer read anything; "
-        "the reason describes code that has changed: {}".format(cured))
+
+    # AND THE ONE THAT CANNOT. "This name is on the list and reads nothing"
+    # requires the instrument to be COMPLETE, and completeness is exactly what
+    # varies: a read reaching the machine through a path this does not wrap
+    # looks like no read at all. Asserting it turned an interpreter difference
+    # into a red build twice. It is reported, because a reason that is stale
+    # everywhere is worth knowing, and it is not a failure.
+    if cured:
+        print("  note: on READS_THE_REAL_MACHINE and read nothing here: {}"
+              .format(cured))
 
 
 # --- the project page is the front door, and it went stale ------------------

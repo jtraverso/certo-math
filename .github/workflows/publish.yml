@@ -52,22 +52,39 @@ jobs:
 
   # The artefact that ships is the artefact that was tested. Depending on a
   # green run of `ci.yml` would test a commit; this tests the tag.
+  # THE ARTEFACT THAT SHIPS IS THE ARTEFACT THAT WAS TESTED -- on every
+  # interpreter that claims to be supported, not on one of them.
+  #
+  # This job used to run ubuntu/3.12 alone, while `ci.yml` ran the matrix.
+  # Two suites nobody compares drift, which is the same argument the `guard`
+  # job below is built on, one level up: 0.15.0 and 0.15.1 both reached the
+  # index green while `tests` was RED on 3.11, because publishing never
+  # looked. The matrix is the same one `ci.yml` uses, and a release now waits
+  # for all of it.
   tests:
     needs: guard
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python: ["3.11", "3.12", "3.13"]
+        exclude:
+          - {os: macos-latest, python: "3.11"}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - run: pip install -e ".[mcp,numerics]"
-      - name: every suite
+      - name: tests
         shell: bash
         run: |
           for t in smoke mcp i18n extras adversarial determinism; do
             python tests/test_$t.py
           done
       - name: every example, and its certificate
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         run: python tests/run_examples.py
 
   build:
