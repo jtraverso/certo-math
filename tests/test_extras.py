@@ -11589,6 +11589,84 @@ def test_no_spelled_number_on_the_page_is_a_stale_count():
     assert not wrong, wrong
 
 
+# --- the executable the MCP server used to hold open ------------------------
+
+
+def test_the_mcp_registration_does_not_name_the_shim():
+    """THE BUG THIS CLOSES, which cost three broken installs on one machine.
+
+    `certo-mcp` is a launcher pip generates. On Windows the running process
+    holds that `.exe` open for its whole lifetime, so an upgrade fails with
+    WinError 32 -- and pip has already removed the old package by then, so
+    `import certo` stops working and a `~certo` directory is left behind.
+
+    Starting the server as `<interpreter> -m certo.mcp_server` moves the lock
+    onto `python.exe`, which pip never replaces.
+    """
+    import sys
+
+    from certo import doctor
+
+    entry = doctor.mcp_entry()["mcpServers"]["certo"]
+    assert entry["args"] == ["-m", "certo.mcp_server"]
+    assert "certo-mcp" not in json.dumps(entry)
+
+    # PORTABLE BY DEFAULT: `.mcp.json` is a file people commit, and an
+    # absolute interpreter path carries one machine's user name into a shared
+    # config. Pinning is available and is not the default.
+    assert entry["command"] == "python"
+    assert sys.executable not in json.dumps(entry)
+    assert doctor.mcp_entry(sys.executable)["mcpServers"]["certo"]["command"] \
+        == sys.executable
+
+
+def test_the_module_the_registration_names_is_runnable():
+    """A registration pointing at something that will not start is worse than
+    the shim it replaced, so this runs the interpreter the entry names.
+
+    Pinned here on purpose: the default says `python`, and which interpreter
+    that is on a CI runner is exactly the ambiguity this test must not have.
+    """
+    import subprocess
+    import sys
+
+    from certo import doctor
+
+    entry = doctor.mcp_entry(sys.executable)["mcpServers"]["certo"]
+    probe = subprocess.run(
+        [entry["command"], "-c",
+         "import certo.mcp_server as m; assert callable(m.main); print('ok')"],
+        capture_output=True, text=True, timeout=120)
+    assert probe.returncode == 0, probe.stderr[-300:]
+    assert "ok" in probe.stdout
+
+
+def test_an_old_registration_naming_the_shim_is_rewritten():
+    """Running `--register-mcp` again is how an existing config gets fixed, so
+    an entry from an older certo must NOT count as already registered."""
+    import tempfile
+
+    from certo import doctor
+
+    d = pathlib.Path(tempfile.mkdtemp(prefix="certo_mcp_shim_"))
+    cfg = d / ".mcp.json"
+    cfg.write_text(json.dumps({"mcpServers": {
+        "certo": {"command": "certo-mcp", "env": {"CERTO_WORKSPACE": "."}},
+        "otro": {"command": "algo-mas"},
+    }}), encoding="utf-8")
+
+    out = doctor.register_mcp(cfg)
+    assert out["written"] is True
+    assert out["already"] is False          # the old form is not the new one
+
+    got = json.loads(cfg.read_text(encoding="utf-8"))["mcpServers"]
+    assert got["certo"]["args"] == ["-m", "certo.mcp_server"]
+    assert got["otro"] == {"command": "algo-mas"}    # nobody else is touched
+
+    # and running it a second time is quiet
+    assert doctor.register_mcp(cfg)["already"] is True
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

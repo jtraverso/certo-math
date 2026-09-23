@@ -1,7 +1,11 @@
 {
   "mcpServers": {
     "certo": {
-      "command": "certo-mcp",
+      "command": "python",
+      "args": [
+        "-m",
+        "certo.mcp_server"
+      ],
       "env": {
         "CERTO_WORKSPACE": "."
       }

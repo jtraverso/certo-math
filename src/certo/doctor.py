@@ -558,7 +558,11 @@ def mcp_status(workspace=None) -> dict:
         "workspace": str(ws.resolve()),
         "config_present": cfg.exists(),
         "config_path": str(cfg),
+        # Informational only since the registration stopped using it: the
+        # server starts through the interpreter, so a missing shim is no
+        # longer a reason it would fail.
         "command_on_path": bool(shutil.which("certo-mcp")),
+        "starts_via": "module",
     }
     sdk, _ = _module("mcp")
     out["sdk"] = sdk
@@ -567,6 +571,9 @@ def mcp_status(workspace=None) -> dict:
         out["detail"] = t("doctor.mcp.no_sdk")
         return out
 
+    # Import rather than run: starting the server for real would block on
+    # stdio waiting for a client. What this answers is whether the module the
+    # registration names can be loaded by the interpreter that would load it.
     probe = subprocess.run(
         [sys.executable, "-c", "import certo.mcp_server as m; print(m.__name__)"],
         capture_output=True, text=True, timeout=60,
@@ -577,11 +584,50 @@ def mcp_status(workspace=None) -> dict:
     return out
 
 
-MCP_ENTRY = {
-    "mcpServers": {
-        "certo": {"command": "certo-mcp", "env": {"CERTO_WORKSPACE": "."}}
+def mcp_entry(python=None) -> dict:
+    """How to start the MCP server, as `.mcp.json` wants it.
+
+    THE INTERPRETER, NOT THE SHIM, and the reason is a bug this cost three
+    times on one machine. `certo-mcp` is a launcher pip generates; on Windows
+    the running process holds that `.exe` open for its whole lifetime, so an
+    upgrade fails with
+
+        WinError 32: the process cannot access the file because it is being
+        used by another process
+
+    pip has already removed the old package by then, which leaves the install
+    broken -- `import certo` stops working -- and a `~certo` directory behind.
+    `doctor --repair` cleans that up afterwards; nothing was stopping it
+    happening again.
+
+    Starting the server as `<interpreter> -m certo.mcp_server` moves the lock
+    onto `python.exe`, which pip never replaces, and leaves the shim free. The
+    server is the same server: `certo.mcp_server` has had a `__main__` all
+    along and the console script only ever called its `main`.
+
+    PORTABLE BY DEFAULT, and that is a correction rather than a preference.
+    The first version wrote `sys.executable`, which pins the environment and
+    is the more accurate thing to say -- until you notice that `.mcp.json` is
+    a file people COMMIT. An absolute path carries one machine's user name
+    into a shared config and starts nothing on anyone else's. Pass an
+    interpreter to `python` when pinning is what you want and the file is
+    yours; the default names `python`, which is portable and fixes the lock
+    just as well, because whatever it resolves to is not the shim.
+    """
+    return {
+        "mcpServers": {
+            "certo": {
+                "command": python or "python",
+                "args": ["-m", "certo.mcp_server"],
+                "env": {"CERTO_WORKSPACE": "."},
+            }
+        }
     }
-}
+
+
+#: Kept as a name because it was one, and read through the function so the
+#: interpreter is the one running now rather than the one that imported this.
+MCP_ENTRY = mcp_entry()
 
 
 def register_mcp(path=None) -> dict:
@@ -601,9 +647,14 @@ def register_mcp(path=None) -> dict:
             return {"written": False, "path": str(p),
                     "detail": t("doctor.mcp.bad_json", path=str(p))}
 
+    entry = mcp_entry()["mcpServers"]["certo"]
     servers = dict(existing.get("mcpServers") or {})
-    already = servers.get("certo") == MCP_ENTRY["mcpServers"]["certo"]
-    servers["certo"] = MCP_ENTRY["mcpServers"]["certo"]
+    already = servers.get("certo") == entry
+    # An entry written by an older certo names the `certo-mcp` shim, which is
+    # the thing that cannot be replaced while the server runs. Rewriting it is
+    # the point of running this again, so `already` is False for those and the
+    # merge replaces certo's own entry while leaving every other server alone.
+    servers["certo"] = entry
     existing["mcpServers"] = servers
     p.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
     return {"written": True, "path": str(p), "already": already,

@@ -6,6 +6,44 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-09-23
+
+**The MCP server was holding the file pip needed to replace.** A patch: no
+payload changes, no new kind, one line of configuration that had been wrong
+since the server was registered at all.
+
+### Why upgrading broke the install three times on one machine
+
+`doctor --register-mcp` wrote `"command": "certo-mcp"` — the launcher pip
+generates. On Windows a running process holds its own `.exe` open for its
+whole lifetime, so `pip install --upgrade` failed with
+
+    WinError 32: the process cannot access the file because it is being
+    used by another process
+
+and by then pip had already removed the old package. The install was left
+with no `certo` to import and a `~certo` directory behind it. `doctor
+--repair` cleaned that up afterwards, every time, and nothing stopped it
+happening again.
+
+**The way out had been there all along.** `certo.mcp_server` has a
+`__main__`, and the console script only ever called its `main`. Registering
+the server as `python -m certo.mcp_server` moves the lock onto the
+interpreter, which pip never replaces, and leaves the shim free. Demonstrated
+rather than argued: with the server running the new way, `certo-mcp.exe` can
+be renamed — which is precisely the operation pip performs on an upgrade.
+
+**Portable on purpose.** The first version of this wrote `sys.executable`,
+which pins the environment and is the more accurate thing to say — until you
+notice that `.mcp.json` is a file people commit. An absolute path carries one
+machine's user name into a shared config and starts nothing on anyone else's.
+The default names `python`; pinning is available by passing an interpreter,
+for a config that is yours alone.
+
+Running `certo doctor --register-mcp` again is how an existing config is
+fixed: an entry naming the shim does not count as already registered, so it
+is rewritten, and every other server in the file is left untouched.
+
 ## [0.15.0] — 2026-09-23
 
 **A transformation that changed the problem, a search that finds what the
