@@ -404,8 +404,14 @@ def geng_args(n, fns, supported=frozenset(), connected_only=False):
             if key in ("edges", "max_edges"):
                 hi = k if hi is None else min(hi, k)
     args = ["-q", *flags, str(n)]
-    if hi is not None and hi < lo:
-        return args, pushed, True          # an empty range: nothing to run
+    # IMPOSSIBLE BOUNDS are an empty family, not a geng invocation: `geng
+    # -d2 1` exits with an error where certo's filter simply keeps nothing --
+    # found by the cross-check the first time it ran against a real geng.
+    most = n * (n - 1) // 2
+    if (mind and max(mind) > n - 1) or (maxd and min(maxd) < 0)             or lo > most or (hi is not None and hi < lo):
+        return args, pushed, True          # nothing to run
+    if hi is not None and hi > most:
+        hi = most
     if hi is not None:
         args.append("{}:{}".format(lo, hi))
         pushed.append("edges")

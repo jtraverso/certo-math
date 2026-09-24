@@ -11720,6 +11720,10 @@ def test_the_geng_command_line_carries_only_exact_equivalents():
     assert geng_args(5, compile_filters(["min_edges=3"]))[0][-1] == "3:0"
     assert geng_args(5, compile_filters(["edges=0:0"]))[0][-1] == "0:0"
     assert geng_args(5, compile_filters(["min_edges=6", "max_edges=2"]))[2]
+    # bounds geng rejects outright are an empty family, never an invocation
+    assert geng_args(1, compile_filters(["min_degree=2"]))[2]
+    assert geng_args(3, compile_filters(["min_edges=4"]))[2]
+    assert geng_args(3, compile_filters(["edges=1:99"]))[0][-1] == "1:3"
 
 
 def test_pushing_filters_into_geng_loses_no_graph():
