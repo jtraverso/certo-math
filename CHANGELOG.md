@@ -92,8 +92,11 @@ degrees and the edge range always go now, and `triangle_free`, `k4_free` and
 applied again in Python afterwards, so pushing one can only save time -- and
 because a pushed flag that excluded MORE than the filter would lose graphs
 silently, a test compares the two routes where `geng` is installed, and CI now
-installs nauty on Linux so that it runs. certo also finds `geng` under
-Debian's name, `nauty-geng`, which it never looked for.
+installs nauty on Linux so that it runs. It earned its place on its first
+run: `geng -d2 1` exits with an error where certo's filter keeps nothing, so
+an impossible degree or edge bound is now an empty family rather than a call.
+certo also finds `geng` under Debian's name, `nauty-geng`, which it never
+looked for.
 
 **`edges=A:B`, `min_edges=K`, `max_edges=K`**: `edges=K` was exact only.
 
