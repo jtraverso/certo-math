@@ -11704,6 +11704,113 @@ def test_an_old_registration_naming_the_shim_is_rewritten():
     assert doctor.register_mcp(cfg)["already"] is True
 
 
+# --- the interior-point search behind `sos` ---------------------------------
+
+
+def _random_sos(nvars, half, squares, seed):
+    import random
+
+    from certo import sos
+    from certo.polynomials import Poly
+
+    rng = random.Random(seed)
+    names = tuple("xyzw"[:nvars])
+    basis = sos.monomial_basis(nvars, half)
+    p = Poly(names, {})
+    for _ in range(squares):
+        q = Poly(names, {e: rng.randint(-3, 3) for e in basis})
+        p = p + q * q
+    return p
+
+
+def _has_clarabel():
+    try:
+        import clarabel  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def test_clarabel_certifies_what_alternating_projections_could_not():
+    """Three variables, degree four, full rank: the old search came back
+    empty on this shape every time it was measured, and the interior point
+    certifies it with denominator 1."""
+    from certo import sos
+
+    if not _has_clarabel():
+        return                       # the fallback is tested separately
+    p = _random_sos(3, 2, len(sos.monomial_basis(3, 2)) + 2, seed=1)
+    found, _why = sos.certify(p)
+    assert found is not None
+    terms, _basis, denom, backend = found
+    assert backend == "clarabel"
+    assert sos.expand(terms, p.vars) == p      # the certificate, re-checked
+
+
+def test_the_interior_point_cannot_certify_what_is_not_a_sum_of_squares():
+    """Motzkin is non-negative and NOT a sum of squares. The search may fail
+    to find; it must never find wrongly -- and it cannot, because the exact
+    pipeline after it is the same one that has always decided."""
+    from certo import sos
+    from certo.polynomials import Poly
+
+    motzkin = Poly(("x", "y"),
+                   {(4, 2): 1, (2, 4): 1, (2, 2): -3, (0, 0): 1})
+    found, _why = sos.certify(motzkin)
+    assert found is None
+
+
+def test_without_clarabel_sos_falls_back_to_the_old_search():
+    """Clarabel is in the `numerics` extra, not required. Without it the
+    alternating projections run exactly as before."""
+    import builtins
+
+    from certo import sos
+    from certo.polynomials import Poly
+
+    real_import = builtins.__import__
+
+    def no_clarabel(name, *a, **k):
+        if name == "clarabel" or name.startswith("clarabel."):
+            raise ImportError("blocked for the test")
+        return real_import(name, *a, **k)
+
+    builtins.__import__ = no_clarabel
+    try:
+        assert sos.backends() == ["projections"]
+        p = Poly(("x", "y"), {(4, 0): 1, (0, 4): 1, (2, 2): 2})   # (x^2+y^2)^2
+        found, _why = sos.certify(p)
+        assert found is not None
+        assert found[3] == "projections"
+    finally:
+        builtins.__import__ = real_import
+
+
+def test_installing_clarabel_cannot_lose_a_certificate():
+    """Both searches are tried, best first, so a case only the old search
+    finds is still found. Checked on the one shape where the old search
+    succeeded in the measured sample."""
+    from certo import sos
+
+    p = _random_sos(2, 3, len(sos.monomial_basis(2, 3)) + 2, seed=7)
+    found, _why = sos.certify(p)
+    assert found is not None
+
+
+def test_the_sos_certificate_records_which_search_found_it():
+    from certo import SOSSpec, verify
+    from certo.engines import algebra
+
+    import z3
+
+    x, y = z3.Reals("x y")
+    spec = SOSSpec(variables=["x", "y"], poly=x**4 + y**4 + 2 * x**2 * y**2)
+    r = algebra.sos(spec, LIM)
+    assert r.meta["backend"] in ("clarabel", "projections")
+    assert r.certificate.payload["backend"] == r.meta["backend"]
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

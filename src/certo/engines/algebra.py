@@ -1178,17 +1178,18 @@ def sos(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                       ENGINE_SOS, ms, None,
                       detail=t("engine.sos.none", detail=why))
 
-    terms, basis, denom = found
+    terms, basis, denom, backend = found
     cert = sos_certificate(
         variables=variables, poly=p.serialize(),
         terms=sosmod.serialize(terms), basis_size=len(basis), denom=denom,
-        title=spec.title,
+        backend=backend, title=spec.title,
     ).stamp(spec_path or None)
     return Result(
         "sos", Status.UNSAT, Verdict.PROVED, ENGINE_SOS, ms, cert,
         detail=t("engine.sos.found", n=len(terms), denom=denom),
         meta={"squares": ["{} * ({})^2".format(d, q) for d, q in terms],
-              "basis_size": len(basis), "denominator": denom},
+              "basis_size": len(basis), "denominator": denom,
+              "backend": backend},
     )
 
 

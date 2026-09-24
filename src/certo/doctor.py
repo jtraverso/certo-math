@@ -496,6 +496,7 @@ CHECKS = [
     ("flint", False, _flint),
     ("mpmath", False, lambda: _module("mpmath")),
     ("numpy", False, lambda: _module("numpy")),
+    ("clarabel", False, lambda: _module("clarabel")),
     ("nauty", False, _geng),
     ("cadical", False, lambda: _binary("cadical")),
     ("kissat", False, lambda: _binary("kissat")),

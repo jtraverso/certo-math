@@ -44,7 +44,10 @@ mcp = ["mcp>=2.0"]
 # has the special functions, so it is preferred when installed. numpy is not
 # optional within this extra: `sos` searches for the Gram matrix by
 # eigendecomposition, and without it there is nothing to search with.
-numerics = ["python-flint>=0.6", "mpmath>=1.3", "numpy>=1.24"]
+# clarabel is the interior-point SDP solve behind `sos`: measured at 26 of 30
+# random sums of squares certified against 6 for the alternating projections
+# it falls back to, which remain the path when it is absent.
+numerics = ["python-flint>=0.6", "mpmath>=1.3", "numpy>=1.24", "clarabel>=0.9"]
 
 [project.scripts]
 certo = "certo.cli:main"

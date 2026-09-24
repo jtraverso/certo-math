@@ -12,10 +12,37 @@ So the pipeline is:
   1. Write `p = z^T G z` for the monomial vector z. That is a LINEAR condition
      on G, an affine subspace; `p` is a sum of squares iff some G in it is
      positive semidefinite.
-  2. Find a numeric G by alternating projections -- project onto the affine
-     subspace, project onto the PSD cone by clipping eigenvalues, repeat.
-     Slow and dumb next to an interior-point method, and it needs no SDP
-     solver, which matters because there is not one here.
+  2. Find a numeric G. With Clarabel installed, an interior-point SDP solve
+     that MAXIMISES the smallest eigenvalue of G. Without it, alternating
+     projections -- onto the affine subspace, then onto the PSD cone by
+     clipping eigenvalues, repeat -- which needs nothing but numpy.
+
+     The difference is not only speed. Alternating projections land on the
+     BOUNDARY of the PSD cone, with eigenvalues clipped to exactly zero, and
+     rounding a boundary point to rationals breaks semidefiniteness. An
+     interior point with its smallest eigenvalue pushed up leaves room to
+     round. Measured on thirty random sums of squares, two to four variables
+     and degree four to six: projections certified 6, Clarabel 26, mostly
+     with denominator 1, and faster on every one. Neither certified Motzkin,
+     which is non-negative and not a sum of squares -- the property that
+     matters, because the search can only fail to find, never find wrongly.
+
+     What the interior point does NOT fix: a polynomial that is a sum of
+     squares only through SINGULAR Gram matrices has no interior to find, and
+     its margin comes back zero. That is the case of every inequality with an
+     equality case, and it is less bad than it sounds: the seven tight ones
+     measured -- AM-GM in two, three and four variables, Lagrange, a sextic --
+     all certify, because their Gram matrices are rational with small
+     entries and rounding lands exactly on the face.
+
+     What still fails is a sum of FEW squares with GENERIC coefficients.
+     Facial reduction was built for it and measured, and it rescued none of
+     the five: the minimal face containing every Gram matrix is spanned by
+     the polynomial's algebraic common zeros, so it is not rational, and
+     where rounding did produce a rational face it was the wrong one, with a
+     negative margin. The rational certificate exists, on a lower-rank
+     sub-face the interior point never exposes. Recovering it is rank
+     reduction toward a rational Gram matrix, and it is open.
   3. Round G to rationals and project back onto the affine subspace EXACTLY,
      in `Fraction`. The rounding usually breaks positive semidefiniteness,
      which is why the next step is not optional.
@@ -112,6 +139,105 @@ def search(p: Poly, basis, iterations=600, tol=1e-9):
             break
         G = G2
     return to_psd(G)
+
+
+def search_sdp(p: Poly, basis):
+    """Clarabel: maximise t subject to z^T G z = p, G - tI PSD, t <= 1.
+
+    Returns the numeric G, or None when Clarabel is not installed. Nothing it
+    returns is trusted: the exact rounding, projection and LDL^T below decide
+    whether there is a certificate, exactly as they do for the other search.
+    A mistake in THIS function can therefore cost certificates and cannot
+    manufacture one, which is what made it safe to swap in.
+
+    The cap `t <= 1` keeps the problem bounded and is not a claim: a margin of
+    one is already far more than rounding needs.
+    """
+    try:
+        import math
+
+        import clarabel
+        import numpy as np
+        import scipy.sparse as sparse
+    except ImportError:
+        return None
+
+    n = len(basis)
+    # Upper triangle in COLUMN-MAJOR order -- (0,0),(0,1),(1,1),(0,2),... --
+    # which is how Clarabel's PSDTriangleConeT reads its slice, with the
+    # off-diagonal entries scaled by sqrt(2).
+    tri = [(i, j) for j in range(n) for i in range(j + 1)]
+    k_of = {ij: k for k, ij in enumerate(tri)}
+    m = len(tri)
+    t_col = m
+
+    index = _pairs(basis)
+    rows, cols, vals, rhs = [], [], [], []
+    r = 0
+    for mono in sorted(index):
+        seen = {}
+        for i, j in index[mono]:
+            key = (i, j) if i <= j else (j, i)
+            seen[key] = seen.get(key, 0) + 1        # an off-diagonal cell twice
+        for key, count in seen.items():
+            rows.append(r)
+            cols.append(k_of[key])
+            vals.append(float(count))
+        rhs.append(float(p.terms.get(mono, 0)))
+        r += 1
+    n_eq = r
+
+    # s = svec(G - tI) must be PSD; Clarabel writes that as A x + s = b.
+    for k, (i, j) in enumerate(tri):
+        rows.append(r + k)
+        cols.append(k)
+        vals.append(-(1.0 if i == j else math.sqrt(2.0)))
+        if i == j:
+            rows.append(r + k)
+            cols.append(t_col)
+            vals.append(1.0)
+    r += m
+    rows.append(r)
+    cols.append(t_col)
+    vals.append(1.0)                                 # 1 - t >= 0
+    r += 1
+
+    A = sparse.csc_matrix((vals, (rows, cols)), shape=(r, m + 1))
+    b = np.array(rhs + [0.0] * m + [1.0])
+    q = np.zeros(m + 1)
+    q[t_col] = -1.0
+    P = sparse.csc_matrix((m + 1, m + 1))
+    cones = [clarabel.ZeroConeT(n_eq), clarabel.PSDTriangleConeT(n),
+             clarabel.NonnegativeConeT(1)]
+    settings = clarabel.DefaultSettings()
+    settings.verbose = False
+    try:
+        sol = clarabel.DefaultSolver(P, q, A, b, cones, settings).solve()
+    except Exception:  # noqa: BLE001
+        return None
+    x = np.array(sol.x)
+    if x.size != m + 1 or not np.all(np.isfinite(x)):
+        return None
+    G = np.zeros((n, n))
+    for k, (i, j) in enumerate(tri):
+        G[i, j] = G[j, i] = x[k]
+    return G
+
+
+def backends() -> list:
+    """The searches available here, best first."""
+    out = []
+    try:
+        import clarabel  # noqa: F401
+        out.append("clarabel")
+    except ImportError:
+        pass
+    try:
+        import numpy  # noqa: F401
+        out.append("projections")
+    except ImportError:
+        pass
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -215,15 +341,29 @@ def certify(p: Poly, half_degree=None, iterations=600):
     d = half_degree if half_degree is not None else max(p.degree // 2, 1)
     basis = monomial_basis(len(p.vars), d)
 
-    G = search(p, basis, iterations=iterations)
-    for denom in DENOMS:
-        M = project_exact(_round(G, denom), basis, p)
-        res = ldl(M)
-        if res is None:
+    available = backends()
+    if not available:
+        raise NoBackend(t("sos.no_numpy"))
+
+    # BEST FIRST, AND THE OTHER ONE TOO. Clarabel found every certificate the
+    # projections did on the measured sample and twenty more, but "every one
+    # it found" is a sample, not a theorem. Trying both means installing
+    # Clarabel can only ADD certificates -- it cannot lose one the old search
+    # would have produced -- and the second attempt costs nothing when the
+    # first succeeds.
+    for name in available:
+        G = (search_sdp(p, basis) if name == "clarabel"
+             else search(p, basis, iterations=iterations))
+        if G is None:
             continue
-        terms = decomposition(res[0], res[1], basis, p.vars)
-        if expand(terms, p.vars) == p:
-            return (terms, basis, denom), ""
+        for denom in DENOMS:
+            M = project_exact(_round(G, denom), basis, p)
+            res = ldl(M)
+            if res is None:
+                continue
+            terms = decomposition(res[0], res[1], basis, p.vars)
+            if expand(terms, p.vars) == p:
+                return (terms, basis, denom, name), ""
     return None, t("sos.no_rounding", n=len(DENOMS))
 
 

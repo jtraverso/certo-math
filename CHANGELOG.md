@@ -6,6 +6,53 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-09-23
+
+**A real SDP solver behind `sos`, and a textbook idea measured and left out.**
+A minor rather than a patch: `clarabel` joins the `numerics` extra, which is
+new capability and a new dependency. No payload changes shape; the `sos`
+certificate gains an optional `backend` field that older readers ignore.
+
+### `sos` finds four times as many certificates
+
+The numeric half of `sos` was alternating projections -- its own docstring
+called it "slow and dumb next to an interior-point method", needing no SDP
+solver "because there is not one here". There is one now: Clarabel, in the
+`numerics` extra, maximising the smallest eigenvalue of the Gram matrix.
+
+The certificate did not change and could not: rounding, exact projection,
+exact LDL^T and the expansion that decides are the same code. A mistake in the
+new search can cost certificates and cannot manufacture one.
+
+**Measured before it was built.** Thirty random sums of squares, two to four
+variables, degree four to six: projections certified 6, Clarabel 26, mostly
+with denominator 1, and faster on every one. Motzkin -- non-negative, not a sum
+of squares -- certified by neither. The margin says why: projections stop on
+the BOUNDARY of the PSD cone, where rounding breaks semidefiniteness, and every
+full-rank case came back from Clarabel with a margin of 1.
+
+The four it still misses are sums of squares only through SINGULAR Gram
+matrices, whose margin is zero: there is no interior to find. That sounded like
+every inequality with an equality case, and was measured before it was
+believed: the seven tight ones tried -- AM-GM in two, three and four variables,
+Lagrange, a sextic -- all certify, because their Gram matrices are rational with
+small entries and rounding lands exactly on the face. What fails is a sum of
+FEW squares with GENERIC coefficients.
+
+**Facial reduction was built for those and measured, and it is not shipped.**
+It rescued none of the five. The minimal face containing every Gram matrix is
+spanned by the polynomial's algebraic common zeros, so it is not rational; and
+where rounding DID produce a rational face, the margin on it came back
+negative -- the acceptance test checked that it was an exact projector of the
+right rank, which proves it is a face and not that it is THE face. The rational
+certificate exists, on a lower-rank sub-face the interior point never exposes.
+No wrong face produced a wrong certificate, because the exact expansion that
+decides is the one it always was.
+
+Both searches are tried, best first, so installing Clarabel can only add
+certificates; without it `sos` runs exactly as before, and `doctor` says what
+that costs.
+
 ## [0.15.2] — 2026-09-23
 
 **A guard that passed while measuring nothing, and the release that could

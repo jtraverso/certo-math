@@ -1318,10 +1318,30 @@ non-negative polynomials that are not sums of squares — Motzkin's is the
 standard one — and `certo sos` comes back `unknown_solver` on it, never "the
 polynomial goes negative".
 
-The pipeline: write `p = zᵀGz` (a linear condition on `G`), find a numeric `G`
-by alternating projections onto that subspace and the PSD cone, round it,
-**project back onto the subspace exactly in `Fraction`**, then do an exact
-LDLᵀ. If every pivot is non-negative the decomposition *is* the sum of squares.
+The pipeline: write `p = zᵀGz` (a linear condition on `G`), find a numeric `G`,
+round it, **project back onto the subspace exactly in `Fraction`**, then do an
+exact LDLᵀ. If every pivot is non-negative the decomposition *is* the sum of
+squares.
+
+**The numeric search is Clarabel when it is installed**, an interior-point SDP
+solve that maximises the smallest eigenvalue of `G`; without it, alternating
+projections onto the subspace and the PSD cone. The difference is where the
+point lands. Projections stop on the *boundary* of the PSD cone, eigenvalues
+clipped to exactly zero, and rounding a boundary point breaks semidefiniteness.
+An interior point leaves room to round. On thirty random sums of squares, two to
+four variables and degree four to six, projections certified **6** and Clarabel
+**26**, mostly with denominator 1. Both are tried, best first, so installing
+Clarabel can only add certificates. Clarabel ships in `certo[numerics]`.
+
+It does not help a polynomial that is a sum of squares only through *singular*
+Gram matrices: there is no interior to find. That is the case of **every
+inequality with an equality case**, and it matters less than it sounds — the
+seven tight ones measured (AM-GM in two, three and four variables, Lagrange, a
+sextic) all certify, because their Gram matrices are rational with small
+entries. What still fails is a sum of *few* squares with *generic*
+coefficients. Facial reduction was tried and measured and is **not** the cure:
+the minimal face is spanned by algebraic common zeros and is not rational. The
+rational certificate lives on a lower-rank sub-face; finding it is open.
 The floats were the search; they never reach the certificate.
 
 For degree 2, `farkas --nonlinear` is cheaper and gets there first.

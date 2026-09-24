@@ -1474,5 +1474,7 @@
   "profile.budget": "la busqueda resolvio {n} programas sin terminar; un perfil no se reporta mas corto de lo que es",
   "profile.too_deep": "el refinamiento se anido mas de lo que lo hace ningun perfil real; se para en vez de adivinar",
   "profile.no_source_found": "no se pudo reconstruir un primal en t = {t} desde el dual de ese punto",
-  "engine.profile.found": "perfil ENCONTRADO y certificado: {n} tramo(s) a partir de {s} programa(s) lineal(es)"
+  "engine.profile.found": "perfil ENCONTRADO y certificado: {n} tramo(s) a partir de {s} programa(s) lineal(es)",
+  "doctor.what.clarabel": "sos: el SDP de punto interior que encuentra la mayoria de los certificados de sumas de cuadrados",
+  "doctor.without.clarabel": "`sos` recurre a proyecciones alternadas, que certificaron 6 de 30 sumas de cuadrados aleatorias donde Clarabel certifico 26; pip install 'certo[numerics]'"
 }

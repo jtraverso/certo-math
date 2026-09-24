@@ -1341,6 +1341,28 @@ certificado.
 
 Para grado 2, `farkas --nonlinear` es más barato y llega antes.
 
+
+**La búsqueda numérica es Clarabel cuando está instalado**, un SDP de punto
+interior que maximiza el menor autovalor de `G`; sin él, proyecciones
+alternadas sobre el subespacio y el cono PSD. La diferencia es dónde cae el
+punto. Las proyecciones paran en la *frontera* del cono, con autovalores
+recortados a cero exacto, y redondear un punto de frontera rompe la
+semidefinitud. Un punto interior deja margen. Sobre treinta sumas de cuadrados
+aleatorias, de dos a cuatro variables y grado cuatro a seis, las proyecciones
+certificaron **6** y Clarabel **26**, casi siempre con denominador 1. Se prueban
+las dos, la mejor primero, así que instalar Clarabel solo puede añadir
+certificados. Clarabel viene en `certo[numerics]`.
+
+No ayuda a un polinomio que solo es suma de cuadrados a través de matrices de
+Gram *singulares*: no hay interior que encontrar. Ese es el caso de **toda
+desigualdad con caso de igualdad**, y pesa menos de lo que parece — las siete
+ajustadas que se midieron (AM-GM en dos, tres y cuatro variables, Lagrange, una
+séxtica) se certifican todas, porque sus matrices de Gram son racionales con
+entradas pequeñas. Lo que sigue fallando es una suma de *pocos* cuadrados con
+coeficientes *genéricos*. La reducción facial se probó y se midió, y **no** es
+la cura: la cara mínima la generan ceros comunes algebraicos y no es racional.
+El certificado racional vive en una sub-cara de rango menor; encontrarlo sigue
+abierto.
 ### `certo number`
 
 **Pregunta** — ¿Es primo este entero?

@@ -1474,5 +1474,7 @@
   "profile.budget": "the search solved {n} programs without finishing; a profile is not reported as shorter than it is",
   "profile.too_deep": "the refinement nested deeper than any real profile does; stopping rather than guessing",
   "profile.no_source_found": "no primal could be rebuilt at t = {t} from that point's own dual",
-  "engine.profile.found": "profile FOUND and certified: {n} segment(s) from {s} linear program(s)"
+  "engine.profile.found": "profile FOUND and certified: {n} segment(s) from {s} linear program(s)",
+  "doctor.what.clarabel": "sos: the interior-point SDP solve that finds most sum-of-squares certificates",
+  "doctor.without.clarabel": "`sos` falls back to alternating projections, which certified 6 of 30 random sums of squares where Clarabel certified 26; pip install 'certo[numerics]'"
 }

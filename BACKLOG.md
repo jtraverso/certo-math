@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-09-23, at **0.15.0** (unreleased).
+Last updated: 2026-09-23, at **0.16.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -117,6 +117,7 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P2** | Certify the MAP: which clique a row is, which edge a capacity is | **M** | med | med | a perfectly certified LP that was badly translated leaves the original problem unproven. NOT the users' physical auditor — see below |
 | **P2** | A certified integer UPPER bound for packings | **L** | **low** | med | the half `opt --gap` leaves open; `branch_frontier` may already be most of it |
 | **P2** | Chow ring and toric intersection | **L** | **low** | none | route space, but depth-shaped: an engine, not a checker. See the breadth/depth split above |
+| **P3** | Rational SOS certificates on a lower-rank sub-face (rank reduction) | **L** | **low** | med | research-grade. Facial reduction was tried and rescued 0 of 5 -- see below |
 | **P3** | A canonical form that scales, on its own | **L** | med | **high** | nothing that is currently blocked |
 | **P3** | Split `cli.py` and `spec.py` the way `certificate.py` was split | **M** | high | med | **demoted from P1**, see below |
 | **P3** | Content-addressed certificate cache for `compose` / `status` | **M** | med | med | nobody has measured these as slow; it also adds a staleness surface |
@@ -200,6 +201,28 @@ quickly. Discarding a route requires being ABLE TO STOP.
 Two shapes are worth separating: *honouring* `Limits` in the out-of-process
 backends, and *bounding* the one call that honours nothing. The second is
 small and can land alone.
+
+**Facial reduction for `sos`, built, measured, and not shipped.** Clarabel
+took `sos` from 6 to 26 of 30 random sums of squares. The four it misses are
+sums of FEW squares with GENERIC coefficients, whose Gram matrices are all
+singular. Facial reduction was the textbook answer and it rescued none of the
+five cases it was built for, for two reasons worth keeping so nobody repeats
+the attempt:
+
+  * the minimal face containing EVERY Gram matrix is spanned by the
+    polynomial's algebraic common zeros, so its projector is irrational and
+    rational reconstruction cannot recover it;
+  * where reconstruction did return an exact rational projector of the right
+    rank, the reduced problem came back with a NEGATIVE margin -- infeasible.
+    The acceptance test proved it was a face and not that it was the face.
+
+The rational certificate exists -- `q1 q1^T + q2 q2^T`, rank 2 -- on a sub-face
+of lower rank than the one the interior point sits in. Recovering it is rank
+reduction toward a rational Gram matrix, which is a research problem and not an
+engineering step. Two facts keep it at P3 rather than higher: the inequalities
+people actually bring -- the ones with equality cases -- already certify, all
+seven that were measured; and no wrong face produced a wrong certificate,
+because the exact expansion that decides never changed.
 
 **The doctor item that measuring dissolved.** This list carried "derived
 expectations for the seams `doctor` reads, not hand-built fixtures", sized M,
@@ -324,6 +347,7 @@ the cost is being paid somewhere else.
 | **`certo profile`**: a certificate whose subject is a FUNCTION | `capacity_profile`, **0.14.0** — the 50th kind. Bound + attainment + coverage is an equality on an interval |
 | The forgery battery as a tool, and ONE implementation of it | `certo verify --tamper`, **0.14.0** — the adversarial suite now imports it |
 | `verify` accepting the dict it serialises to | **0.14.0** — an adapter's `AttributeError` was certo's bug, not theirs |
+| **An interior-point SDP behind `sos`** | Clarabel, **0.16.0** -- 26 of 30 random sums of squares against 6, and every tight inequality measured |
 | **Transformation contracts**: equivalent / restriction / relaxation, and what travels | **0.15.0** — found 3 of 6 transformations losing fields silently |
 | **Finding a profile**, not only checking one | `profile.discover`, **0.15.0** — exact, no sampling; the breakpoints come from two lines meeting |
 | A guard that keeps the `doctor` tests hermetic | **0.15.0** — and the measurement that made the refactor unnecessary |

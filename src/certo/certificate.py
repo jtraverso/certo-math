@@ -1223,18 +1223,24 @@ def resultant_certificate(variables, eliminated, f, g, resultant, A, B,
 
 
 def sos_certificate(variables, poly, terms, basis_size, denom,
-                    title="") -> Certificate:
+                    title="", backend=None) -> Certificate:
     """`p = sum d_i q_i^2` in exact rationals.
 
     The Gram matrix was found in floating point and is not here: it was the
     search. What is here are rational coefficients and rational linear forms,
     and checking them is multiplying polynomials out.
+
+    `backend` says WHICH search found it -- provenance of the proposal, an
+    optional field older readers ignore. The certificate means the same thing
+    whichever it was, because the check below is the same.
     """
+    payload = {"variables": list(variables), "poly": poly, "terms": terms,
+               "squares": len(terms), "basis_size": basis_size,
+               "denominator": denom, "title": title}
+    if backend is not None:
+        payload["backend"] = backend
     return Certificate(
-        kind="sos", solver_free=True,
-        payload={"variables": list(variables), "poly": poly, "terms": terms,
-                 "squares": len(terms), "basis_size": basis_size,
-                 "denominator": denom, "title": title},
+        kind="sos", solver_free=True, payload=payload,
         note_key="cert.note.sos",
     )
 
