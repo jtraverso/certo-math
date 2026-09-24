@@ -1,4 +1,4 @@
-# The forty-eight commands
+# The fifty commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -337,6 +337,54 @@ its own `multiplicity == 1`; a Smith certificate over the same lattice
 corroborates it and does not carry it.
 
 
+### `certo report`
+
+**Question** — Something went wrong: is it certo's bug, my spec's, or my
+machine's — and how do I report it?
+**Spec** — none; give it the certo command that misbehaved
+**Answers** — a triage with the evidence for it, a local folder, and a link to a
+pre-filled issue
+**Certificate** — none; it makes no claim of its own
+**Not established** — that a triage of `nothing-found` means the result is
+right. It means nothing certo can check disagreed. If the result is
+mathematically false, say so with `--wrong`.
+
+    certo report opt spec.py --target 5
+    certo report --wrong --certificate out/claim.json
+    certo report --coverage cases spec.py
+
+**The triage is the point.** Almost every report this project received could
+not say whose fault a failure was: an adapter's error that was certo's, a
+dropped constraint no solver could have noticed, a download that failed on the
+network. `report` re-runs the command keeping the traceback the CLI throws
+away, and concludes, with the evidence for each:
+
+| Triage | Means |
+|---|---|
+| `soundness` | a certificate **verifies** and is reported false — the worst bug certo can have, reported **privately** |
+| `certo-bug` | certo produced a certificate its **own verifier rejects** — the one certain verdict |
+| `certo-bug?` | an exception came from a call **certo** made |
+| `environment` | `doctor` finds something required missing, or a module will not import |
+| `spec` | the exception came from the **spec's** own code, or `lint` reports an error |
+| `undetermined` | none of these — said as such, not guessed |
+
+"Whose call was it" is decided by the innermost frame that belongs to certo or
+to the spec, **skipping library frames**: if certo hands numpy something
+malformed and numpy raises, that is certo's; if the spec calls a library that
+raises, that is the spec's.
+
+**Nothing is sent.** The folder includes your spec, which may be unpublished
+mathematics, so what gets shared is your decision after reading it. Home paths
+are rewritten to `<user>` in everything except the spec copy. The printed link
+opens a pre-filled issue carrying only the version, the platform and the triage;
+for `soundness` it opens the private advisory form instead. `--coverage` also
+includes which kinds of question certo could not settle on this machine — counts
+and sizes only, never what was asked.
+
+**When certo is certain, it does not wait to be asked.** If a certificate fails
+its own self-check, a report is written to the data directory on the spot and
+its path printed. Locally, and still never sent.
+
 ### `certo doctor`
 
 **Question** — Can this install do what I need?
@@ -365,7 +413,8 @@ install** left behind when a file could not be replaced, and a mismatch
 between `certo --version` and the version `pip` has recorded.
 
 `certo doctor --register-mcp` registers the MCP server in `.mcp.json`, merging
-rather than replacing, and checks that it starts.
+rather than replacing, and checks that it starts. It writes the one in the
+current directory unless `--mcp-path FILE` names another.
 
 ---
 
@@ -412,6 +461,21 @@ VALID  lp_dual certificate (verified without a solver)
 
 `--no-exact` skips the reconstruction; the certificate stays in floating point
 and `verify` flags it as **not citable**.
+
+**A free variable** — `variable("x", None, None)` — is split as
+`x_pos − x_neg`, the split program is certified, and the certificate records
+the split so `verify` can check the two columns are exact negatives. A
+negative lower bound is refused: write it as a shift.
+
+**Which solver.** With `certo[numerics]` every continuous solve — an LP, and
+the relaxation of an integer program — runs on **HiGHS** in-process: 1.3 ms
+where starting CBC took 258 on the same small LP. Integer programs stay on
+CBC, which was 1.5 to 2 times faster than HiGHS on the MILPs measured. Neither
+is trusted: whichever ran, the exact route reconstructs and checks. What can
+differ is *which* optimum: on a degenerate program the two return different
+optimal vertices, so two correct certificates of the same value can differ in
+`primal` and `dual`. The certificate's `backend` says which ran, and
+`CERTO_LP_SOLVER=cbc` puts every solve back on CBC.
 
 `--target` answers the question an existence proof actually has — *is this
 bound reached* — and the target travels in the certificate, so `verify`
@@ -651,12 +715,13 @@ numbers and confusing them gives a confidently wrong answer.
 ### `certo matrix`
 
 **Question** — What is the rank, the determinant, or the Smith form of this
-integer matrix — exactly?
+integer matrix — exactly? And the inertia of a symmetric one: is it PSD?
 **Spec** — `MatrixSpec`
 **Answers** — rank, determinant, Hermite or Smith normal form, with the
-unimodular transforms **and their inverses**
+unimodular transforms **and their inverses**; or the inertia, by a congruence
 **Certificate** — `integer_matrix`, **solver-free**: integer matrix
-multiplication
+multiplication; `symmetric_inertia` for `inertia` and `psd`, two rational
+products
 **Not established** — that the matrix you wrote down is the matrix your paper
 is about. The right incidence matrix, the right basis, the right orientation:
 that is the spec's claim, and it is exactly where a computation stops being
@@ -693,6 +758,29 @@ defend.
 `certo lint` warns before Smith runs: 10,000 entries is a note, 40,000 a
 warning. A 64×64 Smith takes about 2 seconds, an 80×80 about 6.
 
+**Inertia, and whether it is PSD.** `question="inertia"` takes a *symmetric*
+matrix of exact *rationals* — integers, `Fraction`, or `"3/7"` — and answers
+with a congruence:
+
+```
+S · A · Sᵀ = D      D diagonal
+S · S_inv  = I      so S is invertible
+```
+
+By Sylvester's law of inertia the signs of `D` are the numbers of positive,
+negative and zero eigenvalues of `A`, and checking it is two rational products
+— certificate kind `symmetric_inertia`. `question="psd"` asks the yes-or-no
+version: **PROVED** with the congruence, or **REFUTED** with a vector `x` where
+`xᵀAx < 0`, which is checked on its own. A matrix with no usable pivot, like
+`[[0,1],[1,0]]`, is handled by adding one row and column to another rather than
+by giving up. `rows` selects a principal submatrix; a float is refused.
+
+For tens of thousands of matrices, `certo.inertia.signature(rows)` returns the
+same three numbers, **exact** and without the certificate: fraction-free
+elimination, about 3.5 ms at 20×20 and 11 ms at 32×32, with no size limit. It
+is exact but not independently checkable — when one of those numbers matters,
+ask `certo matrix` for it and cite that certificate.
+
 ### `certo cone`
 
 **Question** — Is this cone regular, at height one, and is subdividing it
@@ -721,6 +809,57 @@ rather than a vacuous `True`.
 A non-simplicial cone still gets an answer: the missing multiplicity is
 recorded with the reason, rather than refusing the certificate and losing the
 other three quantities.
+
+### `certo columns`
+
+**Question** — What is the optimum of an LP over *every* clique of this graph —
+without listing the cliques?
+**Spec** — `CliqueLPSpec`
+**Answers** — the exact optimum, the cliques in the support with their values,
+and the exact dual of every edge row
+**Certificate** — `clique_lp`, **solver-free**: rational arithmetic, and the
+pricing search run again
+**Not established** — anything about the integer program. This is the LP over
+the cliques; its integer counterpart is `mixed --prove-optimal` over the
+cliques as explicit columns. And that the graph is the one you meant is the
+spec's claim.
+
+    CliqueLPSpec(edges=[(0, 1), (0, 2), (1, 2), (2, 3)],
+                 problem="partition", weight={"constant": 1}, min_size=2)
+
+One column per clique `Q` with `|Q| >= min_size`, one row per edge, and a
+weight linear in the counts: `w(Q) = a|E(Q)| + b|Q| + c` from `weight`
+`{edges, vertices, constant}`.
+
+| `problem` | Program |
+|---|---|
+| `packing` | max `Σ w(Q) x_Q`, each edge's load `<= rhs` |
+| `cover` | min, each edge's load `>= rhs` |
+| `partition` | min, each edge's load `= rhs` (needs `min_size <= 2`) |
+
+**Why it needs its own certificate.** `opt` certifies an LP whose columns it
+was given. Here the columns are implicit, and the LP that gets solved holds
+only the ones that were generated. What makes its optimum the optimum over
+*all* cliques is a statement about every clique that was not generated: none
+has positive reduced cost against the exact dual `z`. With that, weak duality
+closes the argument without the certificate listing a single other column.
+
+**The oracle is rerun, not trusted.** "No clique has positive reduced cost" is
+decided by an exact search over the cliques in a fixed order, pruned by a
+bound valid for every extension of a partial clique. `verify` runs the same
+search with the certificate's `z` and must get the same answer — the same
+largest reduced cost, the same clique, the same node count — or rejects.
+
+**When to use it.** Measured on a split graph with 30 vertices and 1048
+cliques: listing them all for `opt` took 0.5 s, and `columns` 2.3 s. For a few
+hundred or a few thousand cliques `opt` is as fast; `columns` is for the graphs
+where listing is the problem. Checked against the explicit LP on 84 random
+graphs across the three problems, with no disagreement.
+
+An edge that lies in no allowed clique makes a `cover` infeasible, and is
+named. A `partition` with only larger cliques may have no feasible point;
+proving that needs a Farkas certificate over implicit columns, and is refused
+rather than guessed.
 
 ### `certo profile`
 
@@ -794,10 +933,27 @@ is what a negative answer costs, and why it means something.
 checked by `k+1` dot products, instead of a claim that some search was
 exhaustive.
 
-**Not pointed is an answer, not a failure.** With no grading no search here is
-finite, so the command says so and returns `out_of_theory` — with the
-certificate it *can* establish, since the generators, the rank and the cone
-answers are all still exact.
+**Not pointed is an answer, not a failure — and it carries its proof.** With
+no grading no search here is finite, so the command says so and returns
+`out_of_theory`, with the certificate it *can* establish. "Not pointed" comes
+with non-negative integers, not all zero, that combine the generators to zero,
+checked by one multiplication. When neither that nor a grading was found,
+`pointed` is `null`: undecided, which is not the same as no. Before 0.17 it
+said `false` whenever no grading was found, about cones that had one.
+
+**With `certo[polyhedra]` these questions are decided rather than searched.**
+pycddlib gives the facets of the cone exactly, and with them the cone is
+pointed or it is not, a point is in the cone or a facet it violates is the
+separator, and the grading is the one with the smallest largest degree, by an
+exact LP. Measured on random cones: the subset search graded 77 of 140 pointed
+cones and the facets all 140; on 26 generators in dimension 5 the subset search
+gave up on a point outside after twelve seconds, and the facets decided it in a
+hundredth. Nothing it returns is believed — each vector is checked by the same
+dot products as without it — so it can cost an answer, never make one wrong.
+pycddlib ships wheels only for Windows; on Linux and macOS it builds against
+cddlib and GMP (`apt install libcdd-dev libgmp-dev`, `brew install cddlib
+gmp`). `certo doctor` says which is in use, and so does the certificate's
+`backend`.
 
 **A proposed minimal generating set is *decided*, not merely refuted.** Give
 `hilbert` a set and certo settles whether it is the minimal generating system
@@ -989,6 +1145,26 @@ itself a packing, so a dual entry may be a polynomial; and a threshold in the
 value function *is* the dual's feasibility running out. See
 [Where parametric came from](CASES.md#where-parametric-came-from).
 
+**Equality rows, free variables, a claim, a primal.** A `"=="` row has a dual
+of either sign, so its `y ≥ 0` is not asked; a variable in `free=[...]` must
+have its column balance exactly — the residual identically zero. `claim=T`
+proves the bound against a target too (`bound ≤ T` with a dual on a
+maximisation), and when the shift test cannot show it the bound is still
+certified and the verdict is `inconclusive`. `primal={var: x(p)}` in place of
+`dual` proves the other direction: every row holds and every non-free `x ≥ 0`,
+so a minimisation is at most `c·x(p)` and a maximisation at least; any row
+sense is allowed there.
+
+**On a box, with the dual found.** `box={p: (lo, hi)}` claims the bound on a
+box and decides every non-negativity by **Bernstein coefficients** there,
+exactly — no reparametrisation of a bounded interval into a ray.
+`subdivide=d` halves the box up to `d` times where one set of coefficients is
+not enough; the certificate records the splits and `verify` recomputes every
+leaf. `dual="bernstein"` with `dual_degree=k` has certo **find** a polynomial
+dual: its Bernstein coefficients are the unknowns of one exact LP whose
+constraints are the residuals' coefficients. `box` with `region` is refused
+for now. See `examples/parametric_box.py`.
+
 ### `certo peak`
 
 **Question** — I solved it for `n = 1..40`. Which integer is best for EVERY
@@ -1126,7 +1302,10 @@ phrasing did the most damage: there is no counterexample to go and look at.
 `--witnesses` decomposes the counterexamples into orbits under a symmetry you
 declare. `--collect` measures instead of refuting, in exact rationals.
 `--n-range 3..8 --stop-on-first` gives one sub-certificate per size plus the
-claim that nothing failed below the first failure. Full treatment in
+claim that nothing failed below the first failure, and names the sizes where
+the family is **empty** — where the statement holds only by vacuity; `verify`
+recomputes that list. `lint` also looks at n = 0, 1, 2 below the swept size.
+Full treatment in
 [What a sweep establishes](CASES.md#what-a-sweep-establishes).
 
 ### `certo cases`

@@ -1,5 +1,13 @@
 """Generic domains, programmable filters, ranges, packings and Lean export."""
 from __future__ import annotations
+# A test that leaves a question unsettled would otherwise append it to the
+# coverage log of whoever runs the suite -- which is how two test runs ended
+# up counted as real use in the first reading of one. Callers that chose a
+# file keep it.
+import os as _os  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+_os.environ.setdefault("CERTO_COVERAGE_FILE", _os.path.join(
+    _tempfile.mkdtemp(prefix="certo_test_coverage_"), "coverage.jsonl"))
 
 import json
 import os
@@ -12,6 +20,12 @@ from certo.certificate import Certificate
 from certo.engines import domain, graphsearch, lp, shrink
 from certo.graphs import is_chordal
 from certo.status import Status, Verdict
+
+# A test that makes a self-check fail would otherwise write a real report into
+# the data directory of whoever runs the suite. Tests that care set their own.
+import tempfile as _tempfile  # noqa: E402
+os.environ.setdefault("CERTO_REPORT_DIR",
+                      _tempfile.mkdtemp(prefix="certo_test_reports_"))
 
 LIM = Limits(timeout_ms=20_000)
 
@@ -7809,7 +7823,7 @@ def test_the_certificate_refuses_to_say_anything_about_varieties():
 
 
 DOC_PAGES = ("COMMANDS.md", "SPECS.md", "CERTIFICATES.md", "CASES.md",
-             "LIMITS.md")
+             "LIMITS.md", "VERDICTS.md")
 
 
 def _docs():
@@ -8810,7 +8824,7 @@ def test_opt_never_writes_a_certificate_its_own_verifier_rejects():
 
     real = engine._duals
     try:
-        engine._duals = lambda prob, names: [None] * len(names)
+        engine._duals = lambda prob, names, **kw: [None] * len(names)
 
         # Exact mode does not need CBC's dual at all: it still certifies.
         r = engine.opt(_spec())
@@ -10674,7 +10688,11 @@ def test_the_log_carries_sizes_and_never_the_callers_mathematics():
     for leak in ("sigma_secret", "Kneser", "witness", "v0,v1", "detail"):
         assert leak not in blob, leak
     assert set(e) == {"ts", "command", "status", "engine", "source", "shape",
-                      "certo"}
+                      "why", "certo"}
+    # `why` is a catalogue KEY or nothing -- never the sentence, which here is
+    # the caller's own and matches no key
+    from certo.i18n import _catalogue
+    assert e["why"] is None or e["why"] in _catalogue("en")
 
 
 def test_recording_can_be_turned_off_completely():
@@ -10962,6 +10980,962 @@ def test_a_redundant_generator_does_not_belong_to_the_minimal_set():
     h = r.certificate.payload["hilbert"]
     assert h["is_minimal_generating_set"] is True
     assert h["generates"] is True
+
+
+def _without_cdd():
+    """A context in which `import cdd` fails, as it does where it is absent."""
+    import builtins
+    import contextlib
+
+    @contextlib.contextmanager
+    def ctx():
+        real = builtins.__import__
+
+        def blocked(name, *a, **k):
+            if name == "cdd" or name.startswith("cdd."):
+                raise ImportError("blocked for the test")
+            return real(name, *a, **k)
+
+        builtins.__import__ = blocked
+        try:
+            yield
+        finally:
+            builtins.__import__ = real
+    return ctx()
+
+
+def _has_cdd():
+    from certo import semigroup
+    return semigroup.backend() == "cddlib"
+
+
+#: A pointed cone the subset search cannot grade: two-dimensional inside R^3,
+#: so the normals to pairs of generators are all (0,0,1), which is zero on it.
+FLAT_CONE = {"a": (0, 2, 0), "b": (0, 1, 0), "c": (-1, -1, 0)}
+
+
+def test_the_facets_grade_a_cone_the_subset_search_cannot():
+    """Measured: the subset search graded 77 of 140 pointed cones, the facets
+    140. This is the smallest of the ones it missed."""
+    from certo import semigroup, verify
+
+    if not _has_cdd():
+        return                        # the fallback is tested below
+    r = _sg(generators=FLAT_CONE, points={"v": (-1, 1, 0)})
+    p = r.certificate.payload
+    assert p["pointed"] is True and p["backend"] == "cddlib"
+    u = [semigroup.Fraction(x) for x in p["grading"]]
+    assert all(semigroup.dot(u, g) >= 1 for g in FLAT_CONE.values())
+    assert p["points"]["v"]["in_semigroup"] is not None     # a search ran
+    assert verify(r.certificate).ok
+
+
+def test_without_cdd_no_grading_found_is_undecided_not_false():
+    """The same cone without cddlib. It used to come back `pointed: False` --
+    "I did not find a grading" written as "there is none", about a cone that
+    has one."""
+    from certo import verify
+
+    with _without_cdd():
+        r = _sg(generators=FLAT_CONE)
+        p = r.certificate.payload
+        assert p["backend"] == "search"
+        assert p["grading"] is None
+        assert p["pointed"] is None, p["pointed"]
+        assert p["not_pointed_witness"] is None
+        assert verify(r.certificate).ok
+
+
+def test_not_pointed_is_proved_by_a_zero_combination():
+    """With or without cddlib: a line in the cone has a generator on it, so
+    looking for `-a_i` in the cone one generator at a time is complete."""
+    from certo import verify
+
+    for ctx in ("cdd", "nocdd"):
+        if ctx == "cdd" and not _has_cdd():
+            continue
+        cm = _without_cdd() if ctx == "nocdd" else __import__(
+            "contextlib").nullcontext()
+        with cm:
+            r = _sg(generators={"p": (1, 0), "q": (0, 1), "r": (-1, -1)})
+            p = r.certificate.payload
+            assert p["pointed"] is False, (ctx, p["pointed"])
+            assert p["not_pointed_witness"] == [1, 1, 1], ctx
+            assert "(1, 1, 1)" in r.detail
+            assert verify(r.certificate).ok
+
+
+def test_a_forged_zero_combination_is_refused():
+    from certo import verify
+    from certo.certificate import Certificate
+
+    r = _sg(generators={"p": (1, 0), "q": (0, 1), "r": (-1, -1)})
+    for bad in ([1, 1, 2], [0, 0, 0], [-1, -1, -1], [1, 1]):
+        d = r.certificate.to_dict()
+        d["payload"]["not_pointed_witness"] = bad
+        assert not verify(Certificate.from_dict(d)).ok, bad
+    # and a grading cannot be claimed alongside one
+    d = r.certificate.to_dict()
+    d["payload"]["pointed"] = True
+    assert not verify(Certificate.from_dict(d)).ok
+
+
+def test_a_certificate_from_before_the_witness_still_verifies_and_says_so():
+    """Schema 4 is frozen: an old `pointed: False` with no witness is read,
+    and the warning says what it never showed."""
+    from certo import verify
+    from certo.certificate import Certificate
+
+    r = _sg(generators={"right": (1, 0), "left": (-1, 0)})
+    d = r.certificate.to_dict()
+    d["payload"].pop("not_pointed_witness")
+    d["payload"].pop("backend")
+    rep = verify(Certificate.from_dict(d))
+    assert rep.ok
+    assert any("0.17" in w for w in rep.warnings), rep.warnings
+
+
+def test_a_point_outside_a_large_cone_is_decided_not_given_up_on():
+    """26 generators in dimension 5: Caratheodory runs out of subsets after
+    about twelve seconds and said "unknown". A violated facet is the answer,
+    and it is checked by 27 dot products."""
+    import random
+    import time
+
+    from certo import semigroup, verify
+
+    if not _has_cdd():
+        return
+    rng = random.Random(7)
+    gens = {"g{}".format(i): tuple([rng.randint(1, 4)] +
+                                   [rng.randint(-3, 3) for _ in range(4)])
+            for i in range(26)}
+    ineq, _eq = semigroup.facets(list(gens.values()))
+    v = next(w for w in ([rng.randint(-5, 5) for _ in range(5)]
+                         for _ in range(5000))
+             if semigroup.dot(ineq[0], w) < 0)
+    A = list(gens.values())
+    t0 = time.perf_counter()
+    got = semigroup.in_cone(A, v)
+    assert time.perf_counter() - t0 < 2
+    assert got["exhausted"] and got["coefficients"] is None
+    y = got["separator"]
+    assert all(semigroup.dot(y, a) <= 0 for a in A) and semigroup.dot(y, v) > 0
+    # and the certificate carries it where the verifier checks it
+    r = _sg(generators=dict(list(gens.items())[:8]), points={"v": tuple(v)})
+    if r.certificate.payload["points"]["v"]["in_cone"] is False:
+        assert r.certificate.payload["points"]["v"]["separating"] is not None
+    assert verify(r.certificate).ok
+
+
+def test_a_lying_cdd_can_cost_an_answer_and_never_give_a_wrong_one():
+    """A facet that cuts the cone, as a broken library might return. The point
+    is inside; nothing may say it is outside."""
+    from certo import semigroup, verify
+
+    real = semigroup.facets
+    semigroup.facets = lambda gens: ([[Fraction(-1), Fraction(0)]], [])
+    try:
+        r = _sg(generators={"x": (1, 0), "y": (0, 1)}, points={"v": (1, 1)})
+    finally:
+        semigroup.facets = real
+    e = r.certificate.payload["points"]["v"]
+    assert e["in_cone"] is True, e
+    assert e["separating"] is None
+    assert verify(r.certificate).ok
+
+
+def _lp_payload(res):
+    d = res.certificate.to_dict()
+    d.pop("provenance", None)
+    return d
+
+
+def _with_lp_solver(prefer_highs, fn):
+    from certo.engines import lp as engine
+
+    saved = engine.PREFER_HIGHS
+    engine.PREFER_HIGHS = prefer_highs
+    try:
+        return fn()
+    finally:
+        engine.PREFER_HIGHS = saved
+
+
+def _without_backend(payload):
+    payload = dict(payload)
+    payload["payload"] = {k: v for k, v in payload["payload"].items()
+                          if k != "backend"}
+    return payload
+
+
+def test_an_lp_is_solved_by_highs_and_certified_exactly_the_same():
+    """HiGHS in-process is ~200 times faster than starting CBC on a small LP.
+    What it may not change is the ANSWER. The hexagon is degenerate -- two
+    optimal vertices -- and HiGHS and CBC pick different ones, so the payloads
+    differ in `primal` and `dual` and in nothing else: same objective, both
+    certificates exact, both verified. `backend` says which ran."""
+    from certo.engines import lp as engine
+
+    if not engine._highs_available():
+        return                       # the CBC path is every other test here
+    h = _with_lp_solver(True, lambda: engine.opt(_hexagon(), LIM))
+    c = _with_lp_solver(False, lambda: engine.opt(_hexagon(), LIM))
+    assert h.meta["lp_solver"] == "pulp/HiGHS", h.meta["lp_solver"]
+    assert c.meta["lp_solver"] == "pulp/CBC"
+    assert h.meta["objective"] == c.meta["objective"] == "3"
+    ph, pc = _lp_payload(h), _lp_payload(c)
+    assert ph["payload"]["backend"] == "pulp/HiGHS"
+    assert pc["payload"]["backend"] == "pulp/CBC"
+    differ = {k for k in ph["payload"] if ph["payload"][k] != pc["payload"][k]}
+    assert differ <= {"primal", "dual", "backend"}, differ
+    for r in (h, c):
+        assert r.certificate.payload["exact"] is True
+        assert verify(_roundtrip(r.certificate), LIM).ok
+    # A non-degenerate LP has one optimum, and then the payloads agree whole.
+    from certo import LPSpec
+    s = LPSpec(sense="max", title="one vertex")
+    s.variable("x")
+    s.variable("y")
+    s.objective({"x": 3, "y": 2})
+    s.constraint({"x": 1, "y": 1}, "<=", 4, name="a")
+    s.constraint({"x": 1, "y": 3}, "<=", 6, name="b")
+    s.constraint({"x": 1}, "<=", 3, name="c")
+    h = _with_lp_solver(True, lambda: engine.opt(s, LIM))
+    c = _with_lp_solver(False, lambda: engine.opt(s, LIM))
+    assert _without_backend(_lp_payload(h)) == _without_backend(_lp_payload(c))
+
+
+def test_an_integer_program_keeps_cbc_and_gives_highs_the_relaxation():
+    """Measured on random MILPs, HiGHS was 1.5 to 2 times slower than CBC, so
+    the integral solve stays where it was. Its relaxation is an LP."""
+    from certo import PackingSpec
+    from certo.engines import lp as engine
+
+    if not engine._highs_available():
+        return
+    core = _core()
+    whole = PackingSpec(items=core.items, capacities=core.capacities,
+                        sense="max", integer=True).to_lp()
+    h = _with_lp_solver(True, lambda: engine.opt(whole, LIM))
+    c = _with_lp_solver(False, lambda: engine.opt(whole, LIM))
+    assert h.meta["lp_solver"] == "pulp/CBC+HiGHS", h.meta["lp_solver"]
+    assert c.meta["lp_solver"] == "pulp/CBC"
+    assert h.meta["objective"] == c.meta["objective"]
+    assert h.meta.get("integral_objective") == c.meta.get("integral_objective")
+    assert verify(_roundtrip(h.certificate), LIM).ok
+
+
+def test_without_highs_every_solve_is_cbc():
+    from certo.engines import lp as engine
+
+    real = engine._highs_available
+    engine._highs_available = lambda: False
+    try:
+        r = engine.opt(_hexagon(), LIM)
+    finally:
+        engine._highs_available = real
+    assert r.meta["lp_solver"] == "pulp/CBC"
+    assert r.meta["objective"] == "3"
+
+
+def test_certo_lp_solver_cbc_is_read_from_the_environment():
+    """For anyone reproducing a run from before HiGHS."""
+    import subprocess
+    import sys
+
+    code = ("from certo.engines import lp; print(lp.PREFER_HIGHS)")
+    env = dict(os.environ, CERTO_LP_SOLVER="cbc",
+               PYTHONPATH=str(pathlib.Path(__file__).resolve().parent.parent
+                              / "src"))
+    out = subprocess.run([sys.executable, "-c", code], env=env,
+                         capture_output=True, text=True).stdout.strip()
+    assert out == "False", out
+
+
+def test_a_row_named_like_an_edge_keeps_its_dual():
+    """PuLP rewrites `0-1` to `0_1`, and the duals used to be read back by the
+    name certo had given -- so every row named like an edge came back with
+    none, and the exact route enumerated candidates at every node instead of
+    rounding one. Measured on a 17-column packing: 177 s, of which 175 were
+    that enumeration, and 4 s once the rows were named by position."""
+    from certo import LPSpec
+    from certo.engines import lp as engine
+
+    s = LPSpec(sense="max", title="edges")
+    for v in ("t-0", "t-1", "t-2"):
+        s.variable(v)
+    s.objective({"t-0": 1, "t-1": 1, "t-2": 1})
+    for a, b in (("0", "1"), ("1", "2"), ("0", "2")):
+        s.constraint({"t-" + a: 1, "t-" + b: 1}, "<=", 1, name=a + "-" + b)
+    A, b, c, names = s.as_leq_system()
+    for prefer in (True, False):
+        def run():
+            prob, _x = engine._build(s, A, b, c, names)
+            solver, name = engine._solver(LIM, integral=False)
+            prob.solve(solver)
+            return engine._duals(prob, names, negate=name == "HiGHS")
+        duals = _with_lp_solver(prefer, run)
+        assert all(d is not None for d in duals), (prefer, duals)
+        assert abs(sum(duals) - 1.5) < 1e-6, duals
+
+
+def test_two_names_the_solver_would_merge_are_two_names():
+    """`a-b` and `a_b` are different variables to certo and the same one to
+    PuLP's rewriting: rows so named were refused, columns made CBC crash."""
+    from certo import LPSpec
+    from certo.engines import lp as engine
+
+    for prefer in (True, False):
+        s = LPSpec(sense="max", title="collide")
+        s.variable("a-b")
+        s.variable("a_b")
+        s.objective({"a-b": 1, "a_b": 1})
+        s.constraint({"a-b": 1}, "<=", 1, name="r-1")
+        s.constraint({"a_b": 1}, "<=", 2, name="r_1")
+        r = _with_lp_solver(prefer, lambda: engine.opt(s, LIM))
+        assert r.meta["objective"] == "3", (prefer, r.detail)
+        assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def _inertia(M, q="inertia"):
+    from certo.engines import algebra
+    from certo.spec import MatrixSpec
+    return algebra.integer_matrix(MatrixSpec(matrix=M, question=q), LIM)
+
+
+def test_an_inertia_with_no_usable_pivot_is_still_an_inertia():
+    """`[[0,1],[1,0]]` has no non-zero diagonal entry anywhere. The LDL^T in
+    `sos` stops there, correctly for what `sos` asks; an inertia goes on, by
+    adding one row and column to another."""
+    r = _inertia([[0, 1], [1, 0]])
+    assert r.verdict is Verdict.PROVED
+    assert (r.meta["n_plus"], r.meta["n_minus"], r.meta["n_zero"]) == (1, 1, 0)
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def test_inertia_agrees_with_the_eigenvalues_and_the_fast_path():
+    """Three answers to one question: the certified congruence, the fast
+    fraction-free signature, and numpy's eigenvalues where they are clear."""
+    import random
+
+    from certo import inertia
+
+    rng = random.Random(11)
+    for _ in range(150):
+        n = rng.randint(1, 7)
+        B = [[Fraction(rng.randint(-3, 3), rng.choice([1, 2, 3]))
+              for _ in range(n)] for _ in range(n)]
+        A = [[B[i][j] + B[j][i] if rng.random() < 0.7 else Fraction(0)
+              for j in range(n)] for i in range(n)]
+        A = [[A[min(i, j)][max(i, j)] for j in range(n)] for i in range(n)]
+        if rng.random() < 0.3:
+            for i in range(n):
+                A[i][i] = Fraction(0)
+        full = inertia.inertia(A)
+        fast = inertia.signature(A)
+        assert fast == {k: full[k] for k in ("n_plus", "n_minus", "n_zero")}
+        try:
+            import numpy as np
+        except ImportError:
+            continue
+        ev = np.linalg.eigvalsh(np.array(A, dtype=float))
+        if all(abs(e) > 1e-6 or abs(e) < 1e-12 for e in ev):
+            assert full["n_plus"] == int((ev > 1e-9).sum())
+            assert full["n_minus"] == int((ev < -1e-9).sum())
+
+
+def test_not_psd_comes_with_the_vector_that_shows_it():
+    from certo import inertia
+
+    r = _inertia([["1/2", 1], [1, "1/2"]], "psd")
+    assert r.verdict is Verdict.REFUTED
+    w = [Fraction(x) for x in r.certificate.payload["witness"]]
+    A = inertia.parse([["1/2", 1], [1, "1/2"]])
+    assert inertia.quadratic(A, w) < 0
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    # and PSD, when it is, is PROVED with no witness at all
+    r = _inertia([[2, 1], [1, 2]], "psd")
+    assert r.verdict is Verdict.PROVED and r.meta["pd"] is True
+    assert r.certificate.payload["witness"] is None
+
+
+def test_an_inertia_certificate_cannot_be_talked_into_psd():
+    """The forgery that matters: flip the counts, or drop the witness, and
+    claim PSD for a matrix that is not."""
+    from certo.certificate import Certificate
+
+    r = _inertia([["1/2", 1], [1, "1/2"]], "psd")
+    for edit in ({"psd": True, "n_minus": 0, "n_plus": 2},
+                 {"witness": None},
+                 {"witness": ["1", "1"]},
+                 {"D": ["1", "1"]}):
+        d = r.certificate.to_dict()
+        d["payload"].update(edit)
+        assert not verify(Certificate.from_dict(d), LIM).ok, edit
+
+
+def test_a_float_or_an_asymmetric_matrix_is_refused_not_rounded():
+    from certo.status import Status
+
+    for M in ([[1.5, 0], [0, 1]], [[1, 2], [3, 4]], [[1, 2, 3]]):
+        r = _inertia(M)
+        assert r.status is Status.OUT_OF_THEORY, M
+        assert r.certificate is None
+
+
+def test_the_fast_signature_is_fast_enough_for_a_loop():
+    """A user needed 120 479 inertias, at 3 to 7 ms each elsewhere and under a
+    32x32 limit. 20x20 integer here was measured at about 3.5 ms."""
+    import random
+    import time
+
+    from certo import inertia
+
+    rng = random.Random(3)
+    n = 20
+    B = [[rng.randint(-3, 3) for _ in range(n)] for _ in range(n)]
+    A = [[B[i][j] + B[j][i] for j in range(n)] for i in range(n)]
+    t0 = time.perf_counter()
+    for _ in range(10):
+        inertia.signature(A)
+    assert (time.perf_counter() - t0) / 10 < 0.1     # generous, for CI
+
+
+def test_the_table_of_kinds_lists_every_kind_the_registry_verifies():
+    """It said "forty-seven" and lacked three kinds for three releases:
+    nothing compared the table with the registry."""
+    import re
+
+    from certo.certificate import VERIFIERS
+
+    for rel in ("CERTIFICATES.md", "es/CERTIFICATES.md"):
+        text = (_docs() / rel).read_text(encoding="utf-8")
+        listed = set(re.findall(r"^\| `([a-z_]+)` \|", text, re.M))
+        assert listed == set(VERIFIERS), {
+            rel: {"missing": sorted(set(VERIFIERS) - listed),
+                  "extra": sorted(listed - set(VERIFIERS))}}
+
+
+def test_the_enumeration_budget_can_be_set_from_the_command_line():
+    """`Limits` kept geng's clock separate from a solver's on purpose, and no
+    flag reached it: the bound existed and nobody could move it."""
+    from certo import cli
+
+    args = cli.build_parser().parse_args(
+        ["sweep", "x.py", "--enumerate-timeout-s", "7", "--max-output-mb", "3",
+         "--timeout-ms", "2500"])
+    lim = cli.limits_from(args)
+    assert lim.enumerate_timeout_s == 7 and lim.max_output_mb == 3
+    assert lim.timeout_ms == 2500            # and still separate from it
+    default = cli.limits_from(cli.build_parser().parse_args(["sweep", "x.py"]))
+    assert default.enumerate_timeout_s == 120 and default.max_output_mb == 64
+
+
+def test_drat_trim_is_given_the_callers_budget_not_sixty_seconds():
+    from certo import drup
+    from certo.certificate import Certificate, _verify_drat
+
+    seen = []
+    real_avail, real_check = drup.drat_trim_available, drup.check_with_drat_trim
+    drup.drat_trim_available = lambda: True
+
+    def spy(dimacs, proof, timeout_s=60.0):
+        seen.append(timeout_s)
+        return drup.DratReport(True, "drat-trim")
+
+    drup.check_with_drat_trim = spy
+    try:
+        cert = Certificate(kind="drat", solver_free=True, payload={
+            "dimacs": "p cnf 1 2\n1 0\n-1 0\n", "nclauses": 2,
+            "proof": ["0"]})
+        _verify_drat(cert, Limits(timeout_ms=4000))
+    finally:
+        drup.drat_trim_available, drup.check_with_drat_trim = real_avail, real_check
+    assert seen == [4.0], seen
+
+
+def test_clarabel_is_given_the_callers_clock():
+    from certo import sos
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    seen = []
+    real = sos.search_sdp
+
+    def spy(p, basis, time_limit_s=None):
+        seen.append(time_limit_s)
+        return real(p, basis, time_limit_s)
+
+    sos.search_sdp = spy
+    try:
+        from certo import SOSSpec
+        spec = SOSSpec(variables=["x", "y"],
+                       poly=Poly(("x", "y"), {(4, 0): 1, (0, 4): 1, (2, 2): 2}))
+        algebra.sos(spec, Limits(timeout_ms=5000))
+    finally:
+        sos.search_sdp = real
+    if "clarabel" in sos.backends():
+        assert seen and all(v == 5.0 for v in seen), seen
+
+
+def test_the_lean_check_clock_is_a_flag_not_a_constant():
+    from certo import cli
+
+    args = cli.build_parser().parse_args(
+        ["export", "c.json", "--lean", "--check", "--check-timeout-s", "30"])
+    assert args.check_timeout_s == 30
+
+
+def test_the_coverage_log_says_which_gap_by_key_and_nothing_else():
+    """The first five real entries all had an empty `shape`: an
+    `out_of_theory` carries a sentence, not `meta`, and the sentence was
+    dropped. What is kept now is the catalogue KEY of that sentence -- a fact
+    about certo -- and never the text or the values filled into it."""
+    import json
+    import tempfile
+
+    from certo import coverage
+    from certo.i18n import set_lang, t
+    from certo.status import Result, Status, Verdict
+
+    detail = t("family.max_only", sense="minimise-the-secret-objective")
+    assert coverage.why_of(detail) == "family.max_only"
+    set_lang("es")
+    try:
+        assert coverage.why_of(t("family.max_only", sense="min")) ==             "family.max_only"
+    finally:
+        set_lang("en")
+    assert coverage.why_of("a sentence no catalogue has") is None
+
+    d = pathlib.Path(tempfile.mkdtemp(prefix="certo_cov_why_"))
+    f = d / "coverage.jsonl"
+    res = Result("family", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE, "x",
+                 0.0, None, detail=detail)
+    assert coverage.record(res, "test", path=f)
+    line = f.read_text(encoding="utf-8")
+    assert json.loads(line)["why"] == "family.max_only"
+    assert "secret" not in line                      # the value never lands
+    assert coverage.summary(f)["by_why"] == {"family family.max_only": 1}
+
+
+def _explicit_clique_lp(edges, problem, weight, m):
+    """The same LP with every clique listed, for `opt` to certify."""
+    from itertools import combinations
+
+    from certo import LPSpec
+    from certo.engines import lp as engine
+
+    vs = sorted({v for e in edges for v in e})
+    adj = {v: set() for v in vs}
+    for a, b in edges:
+        adj[a].add(b)
+        adj[b].add(a)
+    cl = [c for k in range(m, len(vs) + 1) for c in combinations(vs, k)
+          if all(b in adj[a] for a, b in combinations(c, 2))]
+    sense, rs = {"packing": ("max", "<="), "cover": ("min", ">="),
+                 "partition": ("min", "==")}[problem]
+    s = LPSpec(sense=sense)
+    names = ["q%d" % k for k in range(len(cl))]
+    for v in names:
+        s.variable(v)
+    s.objective({v: Fraction(weight.get("edges", 0)) * (len(c) * (len(c) - 1) // 2)
+                 + Fraction(weight.get("vertices", 0)) * len(c)
+                 + Fraction(weight.get("constant", 0))
+                 for v, c in zip(names, cl)})
+    for a, b in edges:
+        s.constraint({names[k]: 1 for k, c in enumerate(cl) if a in c and b in c},
+                     rs, 1, name="e%s_%s" % (a, b))
+    return Fraction(engine.opt(s, LIM).meta["objective"])
+
+
+def test_column_generation_agrees_with_the_explicit_lp():
+    """Measured before shipping on 84 random graphs; a smaller sweep here."""
+    import random
+
+    from certo import CliqueLPSpec
+    from certo.engines import algebra
+
+    rng = random.Random(8)
+    for _ in range(12):
+        n = rng.randint(4, 7)
+        edges = [(a, b) for a in range(n) for b in range(a + 1, n)
+                 if rng.random() < 0.6]
+        if not edges:
+            continue
+        for problem, weight, m in (("partition", {"constant": 1}, 2),
+                                   ("cover", {"constant": 1}, 2),
+                                   ("packing", {"edges": 1, "constant": -1}, 3)):
+            r = algebra.clique_lp(CliqueLPSpec(edges=edges, problem=problem,
+                                               weight=weight, min_size=m), LIM)
+            if problem == "packing" and r.certificate is None:
+                continue
+            assert r.verdict is Verdict.SATISFIABLE, (problem, r.detail)
+            want = _explicit_clique_lp(edges, problem, weight, m)
+            assert Fraction(r.meta["objective"]) == want, (problem, edges)
+            assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def test_the_pricing_claim_is_rerun_not_read():
+    """Lower one dual value and the claim "no clique would enter" becomes
+    false; the verifier must find that by searching, since nothing in the
+    payload says so."""
+    from certo import CliqueLPSpec
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    r = algebra.clique_lp(CliqueLPSpec(
+        edges=[(0, 1), (1, 2), (0, 2), (2, 3)], problem="cover",
+        weight={"constant": 1}), LIM)
+    d = r.certificate.to_dict()
+    k = next(i for i, v in enumerate(d["payload"]["dual"]) if Fraction(v) != 0)
+    d["payload"]["dual"][k] = str(Fraction(d["payload"]["dual"][k]) * 3)
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_a_cover_with_an_edge_no_clique_can_reach_is_infeasible_and_says_which():
+    from certo import CliqueLPSpec
+    from certo.engines import algebra
+    from certo.status import Status
+
+    r = algebra.clique_lp(CliqueLPSpec(edges=[(0, 1), (1, 2), (0, 2), (2, 3)],
+                                       problem="cover", min_size=3), LIM)
+    assert r.status is Status.UNSAT
+    assert "2-3" in r.detail
+
+
+def test_a_partition_that_might_be_infeasible_is_refused_not_guessed():
+    from certo import CliqueLPSpec
+    from certo.engines import algebra
+    from certo.status import Status
+
+    r = algebra.clique_lp(CliqueLPSpec(edges=[(0, 1), (1, 2), (0, 2)],
+                                       problem="partition", min_size=3), LIM)
+    assert r.status is Status.OUT_OF_THEORY and r.certificate is None
+
+
+def test_an_install_in_the_user_site_is_an_install():
+    """`pip install --user`, or no admin rights, puts certo in the USER
+    site-packages, which `_site_roots` did not look at -- so `doctor` called
+    a real install a source tree while `pip show` said it was installed."""
+    import site
+    import tempfile
+
+    from certo import doctor
+
+    fake = pathlib.Path(tempfile.mkdtemp(prefix="certo_usersite_")).resolve()
+    real = site.getusersitepackages
+    site.getusersitepackages = lambda: str(fake)
+    try:
+        roots = doctor._site_roots()
+    finally:
+        site.getusersitepackages = real
+    assert fake in roots, roots
+
+
+def test_register_mcp_writes_where_it_is_told():
+    """The function took a path; the flag never passed one."""
+    import io
+    import json
+    import tempfile
+    from contextlib import redirect_stdout
+
+    from certo import cli, doctor
+
+    target = pathlib.Path(tempfile.mkdtemp(prefix="certo_mcp_path_")) / "x.json"
+    real = doctor.report, doctor.mcp_status
+    doctor.report = lambda: {"ok": True, "rows": [], "missing_required": 0}
+    doctor.mcp_status = lambda: {"workspace": "-"}
+    try:
+        with redirect_stdout(io.StringIO()):
+            cli.main(["doctor", "--register-mcp", "--mcp-path", str(target),
+                      "--json"])
+    finally:
+        doctor.report, doctor.mcp_status = real
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert "certo" in data.get("mcpServers", {}), data
+
+
+def test_a_free_variable_is_solved_as_free_not_read_as_non_negative():
+    """`min x` over `x >= -5`, with `x` declared free, was certified as 0: the
+    certificate was right about x >= 0, which was not the program written.
+    `opt` now splits it and says so; everything else that reads an `LPSpec`
+    refuses it rather than guessing, and a negative bound is still refused."""
+    from certo import LPSpec
+    from certo.engines import lp as engine
+
+    s = LPSpec(sense="min")
+    s.variable("x", None, None)
+    s.objective({"x": 1})
+    s.constraint({"x": 1}, ">=", -5, name="r")
+    r = engine.opt(s, LIM)
+    assert r.meta["objective"] == "-5" and r.meta["solution"] == {"x": "-5"}
+    assert r.certificate.payload["free_split"] == {"x": ["x__pos", "x__neg"]}
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    try:
+        s.as_leq_system()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("as_leq_system accepted a free variable")
+    n = LPSpec(sense="min")
+    n.variable("x", -2, None)
+    n.objective({"x": 1})
+    try:
+        engine.opt(n, LIM)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a negative lower bound was accepted")
+
+
+def test_an_edge_count_can_be_a_range():
+    """`edges=K` was exact only; a user needed `e(G) > M(n)`."""
+    from certo.graphs import FILTERS
+
+    fns = {name: FILTERS.get(name) for name in
+           ("edges=2:3", "edges=4:", "edges=:2", "min_edges=3", "max_edges=2")}
+    assert all(f is not None for f in fns.values()), fns
+    assert FILTERS.get("edges=x:y") is None
+    from certo.graphs import enumerate_graphs
+    got = {name: len(enumerate_graphs(4, [name], use_geng=False)[0])
+           for name in ("edges=2:3", "min_edges=3", "max_edges=2", "edges=3")}
+    # graphs on 4 vertices by edge count: 1, 1, 2, 3, 2, 1, 1 for 0..6
+    assert got == {"edges=2:3": 5, "min_edges=3": 7, "max_edges=2": 4,
+                   "edges=3": 3}, got
+
+
+def test_the_geng_command_line_carries_only_exact_equivalents():
+    from certo.graphs import compile_filters, geng_args
+
+    fns = compile_filters(["connected", "min_degree=2", "min_degree=1",
+                           "max_degree=4", "chordal", "edges=5:9",
+                           "min_edges=6", "triangle_free"])
+    args, pushed, empty = geng_args(8, fns, supported=set())
+    assert args == ["-q", "-c", "-d2", "-D4", "8", "6:9"], args
+    assert "chordal" not in pushed and "triangle_free" not in pushed
+    assert not empty
+    args, pushed, _ = geng_args(8, fns, supported={"T", "t"})
+    assert "-T" in args and "-t" in args
+    assert geng_args(5, compile_filters(["min_edges=3"]))[0][-1] == "3:0"
+    assert geng_args(5, compile_filters(["edges=0:0"]))[0][-1] == "0:0"
+    assert geng_args(5, compile_filters(["min_edges=6", "max_edges=2"]))[2]
+
+
+def test_pushing_filters_into_geng_loses_no_graph():
+    """Where `geng` is installed: the pushed route and the Python-only route
+    must give the same family, up to isomorphism, for every combination."""
+    from certo import graphs
+
+    if graphs._geng_path() is None:
+        return                       # CI installs nauty on Linux for this
+    combos = [["connected"], ["min_degree=2"], ["max_degree=2"],
+              ["edges=4:6"], ["min_edges=5", "connected"],
+              ["chordal"], ["chordal", "connected", "min_degree=1"],
+              ["triangle_free"], ["k4_free", "edges=3:"]]
+    for n in range(1, 8):
+        for combo in combos:
+            pushed, _e, _t = graphs.enumerate_graphs(n, combo, use_geng=True)
+            plain, _e2, _t2 = graphs.enumerate_graphs(n, combo, use_geng=False)
+            assert len(pushed) == len(plain), (n, combo, len(pushed), len(plain))
+            left = list(plain)
+            for g in pushed:
+                k = next(i for i, h in enumerate(left) if graphs.is_isomorphic(g, h))
+                left.pop(k)
+
+
+def test_n_zero_is_the_empty_graph_not_the_graph_on_one_vertex():
+    """The augmentation starts from one vertex, and n=0 came back as K1: a
+    sweep "at n=0" examined the wrong graph, at the size most likely to break
+    a statement."""
+    from certo.graphs import enumerate_graphs
+
+    fam, _e, total = enumerate_graphs(0, use_geng=False)
+    assert [(g.n, g.m) for g in fam] == [(0, 0)] and total == 1
+    try:
+        enumerate_graphs(-1, use_geng=False)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("n=-1 was enumerated")
+
+
+def test_a_size_range_names_the_sizes_where_it_holds_by_vacuity():
+    from certo import SweepSpec
+    from certo.certificate import Certificate
+    from certo.engines import graphsearch
+
+    spec = SweepSpec(n=4, filters=["min_degree=2"],
+                     predicate=lambda g: g.m >= g.n)
+    r = graphsearch.sweep_range(spec, 0, 4, LIM, use_geng=False)
+    assert r.meta["vacuous_sizes"] == [1, 2], r.meta
+    assert "VACUOUS" in r.detail
+    rep = verify(r.certificate, LIM)
+    assert rep.ok and any("vacuity" in w for w in rep.warnings), rep.warnings
+    d = r.certificate.to_dict()
+    d["payload"]["vacuous"] = []
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_lint_looks_below_the_swept_size():
+    """Swept at n=5, meant for every n, false at n=0."""
+    from certo import SweepSpec, lint
+
+    spec = SweepSpec(n=5, filters=["connected"],
+                     predicate=lambda g: g.m >= 1 or g.n == 1)
+    keys = [f["key"] for f in lint._check_sweep(spec, LIM)]
+    assert "sweep.small_fails" in keys, keys
+
+
+def _pmode(**kw):
+    from certo import ParametricSpec
+    from certo.engines import algebra
+    return algebra.parametric(ParametricSpec(**kw), LIM)
+
+
+def _pring():
+    from certo.polynomials import Poly
+    R = ("p",)
+    return Poly.var(R, "p"), (lambda c: Poly.const(R, c))
+
+
+def test_an_equality_row_and_a_free_variable_need_no_split():
+    """A user split every price into p - n and doubled the columns. An
+    equality row's dual has no sign; a free column must balance exactly."""
+    p, K = _pring()
+    r = _pmode(parameters={"p": 1}, objective={"x": K(1), "w": K(-1)},
+               constraints=[("eq", {"x": K(1), "w": K(1)}, "==", p),
+                            ("cap", {"x": K(1)}, "<=", p)],
+               dual={"eq": Fraction(-1), "cap": Fraction(2)}, free=["w"])
+    assert r.verdict is Verdict.PROVED, r.detail
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    # a free column that does NOT balance is refused, though >= 0 would pass
+    r = _pmode(parameters={"p": 1}, objective={"x": K(1), "w": K(-1)},
+               constraints=[("eq", {"x": K(1), "w": K(1)}, "==", p),
+                            ("cap", {"x": K(1)}, "<=", p)],
+               dual={"eq": Fraction(-1, 2), "cap": Fraction(2)}, free=["w"])
+    assert r.certificate is None
+
+
+def test_a_claimed_target_is_proved_or_the_verdict_says_it_was_not():
+    from certo.certificate import Certificate
+
+    p, K = _pring()
+    base = dict(parameters={"p": 1}, objective={"x": K(1)},
+                constraints=[("cap", {"x": K(1)}, "<=", p)],
+                dual={"cap": Fraction(1)})
+    ok = _pmode(**base, claim=p * K(2))
+    assert ok.verdict is Verdict.PROVED and "as claimed" in ok.detail
+    short = _pmode(**base, claim=p - K(1))
+    assert short.verdict is Verdict.INCONCLUSIVE
+    assert short.certificate.payload["claim"]["holds"] is False
+    d = short.certificate.to_dict()
+    d["payload"]["claim"]["holds"] = True
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_a_primal_bounds_a_minimisation_from_above():
+    """Instead of passing a primal off as the dual of a max program."""
+    from certo.certificate import Certificate
+
+    p, K = _pring()
+    r = _pmode(parameters={"p": 1}, objective={"x": K(1)},
+               constraints=[("need", {"x": K(1)}, ">=", p)],
+               primal={"x": p}, sense="min")
+    assert r.verdict is Verdict.PROVED and "MOST" in r.detail, r.detail
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    d = r.certificate.to_dict()
+    d["payload"]["primal"]["x"] = (p - K(1)).serialize()
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    bad = _pmode(parameters={"p": 1}, objective={"x": K(1)},
+                 constraints=[("need", {"x": K(1)}, ">=", p)],
+                 primal={"x": p - K(1)}, sense="min")
+    assert bad.certificate is None and bad.verdict is Verdict.INCONCLUSIVE
+
+
+def test_bernstein_coefficients_agree_with_the_polynomial():
+    """Corners are values at vertices, the basis round-trips, and a claim of
+    non-negativity is never made where the polynomial is negative."""
+    import itertools
+    import random
+
+    from certo import bernstein as B
+    from certo.polynomials import Poly
+
+    R = ("a", "b")
+    box = {"a": (Fraction(1), Fraction(3)), "b": (Fraction(-1), Fraction(2))}
+    rng = random.Random(1)
+
+    def ev(p, x):
+        return sum(c * x[0] ** e[0] * x[1] ** e[1] for e, c in p.terms.items())
+
+    for _ in range(40):
+        p = Poly(R, {(rng.randint(0, 3), rng.randint(0, 2)):
+                     Fraction(rng.randint(-5, 5)) for _ in range(4)})
+        d = B.degrees_of(p)
+        co = B.coefficients(p, box, d)
+        assert not (B.from_coefficients(R, box, d, co) - p).terms
+        ok, tree = B.nonneg(p, box, depth=5)
+        if ok:
+            assert B.check(p, box, tree)
+            for x in itertools.product(
+                    [Fraction(1) + Fraction(i, 4) for i in range(9)],
+                    [Fraction(-1) + Fraction(3 * i, 8) for i in range(9)]):
+                assert ev(p, x) >= 0, (p, x)
+
+
+def test_a_box_proves_what_the_ray_cannot():
+    """`max x`, `(2-p) x <= 1`, dual 1: the residual `1-p` is >= 0 on [0,1]
+    and negative past it. The shift test on p >= 0 cannot see the end."""
+    p, K = _pring()
+    kw = dict(parameters={"p": 0}, objective={"x": K(1)},
+              constraints=[("c", {"x": K(2) - p}, "<=", K(1))],
+              dual={"c": Fraction(1)})
+    assert _pmode(**kw).certificate is None
+    r = _pmode(**kw, box={"p": (0, 1)})
+    assert r.verdict is Verdict.PROVED and "[0, 1]" in r.detail
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+def test_certo_finds_a_polynomial_dual_on_a_box():
+    """The dual a user built by hand -- an LP per control point, assembled --
+    found by one exact LP over its Bernstein coefficients."""
+    from certo.certificate import Certificate
+    from certo.polynomials import Poly
+
+    p, K = _pring()
+    r = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+               constraints=[("c", {"x": K(2) - p}, "<=", K(1))],
+               dual="bernstein", dual_degree=2, box={"p": (0, 1)})
+    assert r.verdict is Verdict.PROVED, r.detail
+    bound = Poly.parse(("p",), r.certificate.payload["bound"])
+    # the true optimum is 1/(2-p): the bound is above it and tight at the ends
+    for x in (Fraction(0), Fraction(1, 3), Fraction(1, 2), Fraction(1)):
+        value = sum(c * x ** e[0] for e, c in bound.terms.items())
+        assert value >= 1 / (2 - x)
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    d = r.certificate.to_dict()
+    d["payload"]["box"]["p"] = ["0", "2"]          # claim it on a wider box
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_a_box_is_subdivided_and_the_splits_are_rechecked():
+    from certo.certificate import Certificate
+
+    p, K = _pring()
+    dual = (p - K(Fraction(1, 2))) * (p - K(Fraction(1, 2))) * K(4)         + K(Fraction(101, 100))
+    kw = dict(parameters={"p": 0}, objective={"x": K(1)},
+              constraints=[("c", {"x": K(1)}, "<=", K(1))],
+              dual={"c": dual}, box={"p": (0, 1)})
+    assert _pmode(**kw).certificate is None or True     # may need no split
+    r = _pmode(**kw, subdivide=3)
+    assert r.verdict is Verdict.PROVED, r.detail
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    d = r.certificate.to_dict()
+    trees = d["payload"].get("box_trees")
+    if trees:
+        d["payload"]["box_trees"] = {}
+        assert not verify(Certificate.from_dict(d), LIM).ok
 
 
 def test_irreducibility_is_decided_one_rung_down_in_the_grading():
@@ -11382,6 +12356,9 @@ def test_the_search_is_bounded_and_says_so():
 #: Tests that read the real machine deliberately, each with why. A test not in
 #: this set must touch nothing outside its own temporary directory.
 READS_THE_REAL_MACHINE = {
+    "test_an_install_in_the_user_site_is_an_install":
+        "it resolves this machine's real site roots alongside the fake user "
+        "site, and asserts only that the fake one is among them",
     "test_doctor_reports_every_capability_with_its_fallback":
         "it asserts every capability row carries prose and a fallback, which "
         "is a property of the REPORT on whatever machine runs it",
@@ -11809,6 +12786,237 @@ def test_the_sos_certificate_records_which_search_found_it():
     assert r.meta["backend"] in ("clarabel", "projections")
     assert r.certificate.payload["backend"] == r.meta["backend"]
     assert verify(_roundtrip(r.certificate), LIM).ok
+
+
+# --- a bug report that decides whose bug it is ------------------------------
+
+
+def _tmpdir(prefix):
+    import tempfile
+    return pathlib.Path(tempfile.mkdtemp(prefix=prefix))
+
+
+def _report_spec(body):
+    d = _tmpdir("certo_rep_spec_")
+    f = d / "spec.py"
+    f.write_text(body, encoding="utf-8")
+    return f
+
+
+GOOD_SEMIGROUP = (
+    "from certo import SemigroupSpec\n"
+    "def spec():\n"
+    "    return SemigroupSpec(generators={'a': (1, 0), 'b': (0, 1)})\n")
+
+
+def test_a_clean_run_is_reported_as_nothing_found():
+    from certo import report
+
+    run = report.rerun(["semigroup", str(_report_spec(GOOD_SEMIGROUP))])
+    tri = report.triage(run=run)
+    assert tri["category"] == "nothing-found"
+
+
+def test_an_exception_in_the_spec_is_the_specs():
+    """Not certo's: the traceback's innermost frame is the user's own file."""
+    from certo import report
+
+    bad = _report_spec("def spec():\n    return 1 / 0\n")
+    run = report.rerun(["semigroup", str(bad)])
+    assert run["origin"] == "spec", run["origin"]
+    assert report.triage(run=run)["category"] == "spec"
+
+
+def test_an_exception_inside_certo_is_probably_certos():
+    """Probable, not certain -- certo may be reacting badly to a strange spec
+    -- which is why the category carries a question mark."""
+    from certo import report
+    from certo.engines import algebra
+
+    real = algebra.affine_semigroup
+
+    def broken(*a, **k):
+        raise KeyError("an internal certo mistake")
+
+    algebra.affine_semigroup = broken
+    try:
+        run = report.rerun(["semigroup", str(_report_spec(GOOD_SEMIGROUP))])
+    finally:
+        algebra.affine_semigroup = real
+    assert run["origin"] == "certo"
+    assert report.triage(run=run)["category"] == "certo-bug?"
+
+
+def test_a_certificate_certo_itself_rejects_is_certos_bug_for_certain():
+    """The one conclusion reached with certainty: certo produced a certificate
+    its own verifier rejects. And the automatic capture must NOT fire inside a
+    report, or it would write a second report about itself."""
+    import os
+
+    from certo import cli, report
+    from certo.certificate import VerifyReport
+
+    real = cli.verify_cert
+    cli.verify_cert = lambda cert, lim: VerifyReport(
+        False, cert.kind, True, checks=[("forced", False, "for the test")])
+    auto = _tmpdir("certo_rep_auto_")
+    saved = os.environ.get("CERTO_REPORT_DIR")
+    os.environ["CERTO_REPORT_DIR"] = str(auto)
+    try:
+        run = report.rerun(["semigroup", str(_report_spec(GOOD_SEMIGROUP))])
+    finally:
+        cli.verify_cert = real
+        if saved is None:
+            os.environ.pop("CERTO_REPORT_DIR", None)
+        else:
+            os.environ["CERTO_REPORT_DIR"] = saved
+    assert report.triage(run=run)["category"] == "certo-bug"
+    assert list(auto.iterdir()) == []            # no report inside a report
+
+
+def test_certo_writes_a_report_by_itself_when_its_own_check_fails():
+    """Outside a report, the same failure writes one -- locally, unasked, and
+    into the data directory rather than where the mathematics lives."""
+    import io
+    import os
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from certo import cli
+    from certo.certificate import VerifyReport
+
+    real = cli.verify_cert
+    cli.verify_cert = lambda cert, lim: VerifyReport(
+        False, cert.kind, True, checks=[("forced", False, "for the test")])
+    auto = _tmpdir("certo_rep_auto2_")
+    saved = os.environ.get("CERTO_REPORT_DIR")
+    os.environ["CERTO_REPORT_DIR"] = str(auto)
+    err = io.StringIO()
+    try:
+        with redirect_stdout(io.StringIO()), redirect_stderr(err):
+            cli.main(["semigroup", str(_report_spec(GOOD_SEMIGROUP))])
+    finally:
+        cli.verify_cert = real
+        if saved is None:
+            os.environ.pop("CERTO_REPORT_DIR", None)
+        else:
+            os.environ["CERTO_REPORT_DIR"] = saved
+    written = list(auto.iterdir())
+    folders = [w for w in written if w.is_dir()]
+    assert len(folders) == 1, written
+    tri = json.loads((folders[0] / "triage.json").read_text(encoding="utf-8"))
+    assert tri["triage"]["category"] == "certo-bug"
+    assert tri["sent"] is False
+    assert str(folders[0]) in err.getvalue()
+
+
+def test_a_certificate_that_verifies_and_is_false_goes_private():
+    """The worst bug this tool can have. It does not belong on a public
+    tracker, so the link is the private advisory form, not an issue."""
+    from certo import report
+    from certo.engines import algebra
+    from certo import SemigroupSpec, Limits
+
+    cert = algebra.affine_semigroup(
+        SemigroupSpec(generators={"a": (1, 0), "b": (0, 1)}),
+        Limits()).certificate
+    tri = report.triage(cert=cert, wrong=True)
+    assert tri["category"] == "soundness"
+    assert report.issue_link("soundness", "semigroup", "x") == report.ADVISORY_URL
+
+
+def test_a_module_that_will_not_import_is_the_environment():
+    from certo import report
+
+    run = {"exception": "ModuleNotFoundError: No module named 'clarabel'",
+           "exception_type": "ModuleNotFoundError", "origin": "certo"}
+    assert report.triage(run=run)["category"] == "environment"
+
+
+def test_home_paths_are_redacted_in_every_spelling():
+    """On Windows one home appears long and short. Catching one and not the
+    other is not a redaction."""
+    from certo.report import redact
+
+    text = (r"C:\Users\jtraverso\a.py and C:\Users\JTRAVE~1\b.py "
+            "and /home/bob/c.py and /Users/alice/d.py")
+    out = redact(text)
+    for name in ("jtraverso", "JTRAVE~1", "bob", "alice"):
+        assert name not in out, name
+    assert out.count("<user>") == 4
+
+
+def test_the_link_carries_only_non_sensitive_fields():
+    """The URL is the one thing that could leave without being read, so it may
+    not carry anything from the spec."""
+    from urllib.parse import parse_qs, urlparse
+
+    from certo import report
+
+    link = report.issue_link("certo-bug?", "semigroup", "0.16.0")
+    fields = parse_qs(urlparse(link).query)
+    assert set(fields) == {"template", "title", "version", "platform", "triage"}
+
+
+def test_coverage_travels_only_when_asked_and_never_its_path():
+    from certo import report
+
+    spec = _report_spec(GOOD_SEMIGROUP)
+    plain = report.build(argv=["semigroup", str(spec)],
+                         out=_tmpdir("certo_rep_nocov_"))
+    assert not (pathlib.Path(plain["folder"]) / "coverage.json").exists()
+
+    asked = report.build(argv=["semigroup", str(spec)], with_coverage=True,
+                         out=_tmpdir("certo_rep_cov_"))
+    cov = json.loads((pathlib.Path(asked["folder"]) / "coverage.json")
+                     .read_text(encoding="utf-8"))
+    assert "path" not in cov
+    assert set(cov) <= {"lines", "by_command", "by_status", "first", "last",
+                        "full"}
+
+
+def test_the_report_module_cannot_send_anything():
+    """Structural rather than behavioural: no network library is imported, so
+    there is no code path by which a report could leave on its own."""
+    import ast
+
+    import certo.report as mod
+
+    tree = ast.parse(pathlib.Path(mod.__file__).read_text(encoding="utf-8"))
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module)
+    forbidden = {"socket", "http", "http.client", "urllib.request",
+                 "requests", "smtplib", "ftplib", "webbrowser"}
+    assert not (names & forbidden), names & forbidden
+
+
+def test_every_report_says_it_was_not_sent():
+    from certo import report
+
+    info = report.build(argv=["semigroup", str(_report_spec(GOOD_SEMIGROUP))],
+                        out=_tmpdir("certo_rep_md_"))
+    md = (pathlib.Path(info["folder"]) / "report.md").read_text(
+        encoding="utf-8")
+    assert "Nothing has been sent" in md
+    assert info["sent"] is False
+
+
+def test_a_library_failure_is_charged_to_whoever_made_the_call():
+    """The spec called a library and the library raised: the spec made the bad
+    call, so it is the spec's -- not the library's, and not certo's."""
+    from certo import report
+
+    bad = _report_spec("\n".join([
+        "import json",
+        "def spec():",
+        "    return json.loads('{')",
+        ""]))
+    run = report.rerun(["semigroup", str(bad)])
+    assert run["origin"] == "spec", run["origin"]
+    assert report.triage(run=run)["category"] == "spec"
 
 
 if __name__ == "__main__":

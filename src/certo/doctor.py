@@ -173,12 +173,27 @@ def _site_roots():
     count mean what it says.
     """
     import site
+    import sysconfig
 
     seen, out = set(), []
     try:
         roots = list(site.getsitepackages())
     except Exception:  # noqa: BLE001  -- a venv without the helper
         roots = []
+    # The USER site too, which is where pip puts a package when the system one
+    # is not writable -- `pip install --user`, or no admin rights. Leaving it
+    # out classified a real install there as a SOURCE TREE, and `doctor`
+    # warned about metadata that `pip show` correctly called installed.
+    try:
+        user = site.getusersitepackages()
+        roots += [user] if isinstance(user, str) else list(user)
+    except Exception:  # noqa: BLE001
+        pass
+    for key in ("purelib", "platlib"):
+        try:
+            roots.append(sysconfig.get_paths()[key])
+        except Exception:  # noqa: BLE001
+            pass
     for d in roots:
         for base in (Path(d), Path(d) / "Lib" / "site-packages"):
             try:
@@ -497,6 +512,8 @@ CHECKS = [
     ("mpmath", False, lambda: _module("mpmath")),
     ("numpy", False, lambda: _module("numpy")),
     ("clarabel", False, lambda: _module("clarabel")),
+    ("highs", False, lambda: _module("highspy")),
+    ("cddlib", False, lambda: _module("cdd.gmp")),
     ("nauty", False, _geng),
     ("cadical", False, lambda: _binary("cadical")),
     ("kissat", False, lambda: _binary("kissat")),

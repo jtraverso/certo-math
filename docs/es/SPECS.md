@@ -157,6 +157,20 @@ falla y sobre qué objeto* es lo que te dice si debilitarla o abandonarla.
 
 ### Filtros
 
+Los nombrados: `connected`, `chordal`, `triangle_free`, `k4_free`, `regular`,
+`has_triangle`, `min_degree=K`, `max_degree=K`, y el número de aristas como
+`edges=K`, un rango `edges=A:B` (cualquier extremo puede quedar abierto),
+`min_edges=K` o `max_edges=K`.
+
+**Con `geng` instalado, los que puede hacer de forma exacta los hace `geng`**:
+`connected`, los grados y el rango de aristas siempre, y `triangle_free`,
+`k4_free` y `chordal` cuando la propia ayuda del `geng` instalado los lista.
+Cada filtro se vuelve a aplicar después, así que bajarlo solo puede ahorrar
+tiempo: el barrido cordal de un usuario en n=9 enumeraba 274 668 grafos para
+quedarse con 125, toda la diferencia filtrada en Python. `enumerated` cuenta
+entonces lo que produjo `geng`, tras su parte del filtrado. certo encuentra `geng` con ese nombre o como `nauty-geng`
+de Debian.
+
 `filters` acepta invocables junto a los nombrados, así que una familia que el
 catálogo no conoce igual se cuenta bien:
 
@@ -325,6 +339,19 @@ Las opciones comunes van **después** del subcomando:
 | `--rlimit` | el presupuesto de trabajo de Z3 — este es el reproducible |
 | `--max-memory-mb` | techo duro |
 | `--seed` | para los motores que toman uno |
+| `--enumerate-timeout-s` | reloj de una enumeración externa (`geng`), separado del de un solver; por defecto 120 |
+| `--max-output-mb` | cuánto puede imprimir una enumeración externa antes de detenerla; por defecto 64 |
+
+**Hasta dónde llega el presupuesto.** `--timeout-ms` se le pasa a z3, a HiGHS
+y CBC, a Clarabel dentro de `sos`, a los binarios SAT, y a `drat-trim` cuando
+contrasta una prueba. Una enumeración externa tiene su propio reloj, porque
+enumerar todos los grafos de `n` vértices y decidir una fórmula son trabajos
+distintos. `export --check` compila Lean con `--check-timeout-s` (por defecto
+900), porque una compilación contra Mathlib son minutos. Dos cosas **no**
+quedan acotadas por él, a propósito o sin remedio: las sondas de `doctor` y la
+llamada a `git` de la procedencia mantienen cotas fijas cortas propias, y el
+cálculo de facetas de cddlib corre dentro del proceso, donde nada puede
+interrumpir una llamada en C salvo el propio proceso.
 
 Códigos de salida: `0` concluyente, `2` no concluyente, `1` certificado
 inválido, `3` error. `lint` difiere: `0` limpio o solo notas, `1` errores, `2`

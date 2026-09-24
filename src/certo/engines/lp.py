@@ -20,6 +20,7 @@ resultado en vez de fingir optimalidad certificada.
 """
 from __future__ import annotations
 
+import os
 import time
 from fractions import Fraction
 
@@ -32,6 +33,32 @@ from ..limits import Limits
 from ..status import Result, Status, Verdict
 
 ENGINE = "pulp/CBC"
+
+#: HiGHS, in-process through highspy, for every CONTINUOUS solve -- an LP, and
+#: the relaxation of an ILP. CBC stays for the integral ones. Both measured
+#: before choosing: on LPs HiGHS took 1.3 ms where CBC took 258, nearly all of
+#: that CBC starting as a subprocess; on random MILPs HiGHS was 1.5 to 2 times
+#: SLOWER. Nothing about the certificate depends on the choice -- the exact
+#: route reconstructs and checks whatever either returns -- so this is only
+#: about how long an answer takes. `CERTO_LP_SOLVER=cbc` puts every solve back
+#: on CBC, for anyone reproducing a run from before, and for the comparison.
+PREFER_HIGHS = os.environ.get("CERTO_LP_SOLVER", "").strip().lower() != "cbc"
+
+
+def _highs_available() -> bool:
+    try:
+        return bool(pulp.HiGHS(msg=False).available())
+    except Exception:  # noqa: BLE001 -- absent, or present and broken
+        return False
+
+
+def _solver(lim, integral: bool):
+    """`(solver, name)` for one solve: HiGHS for a continuous one when it is
+    installed, CBC otherwise."""
+    seconds = max(1, lim.timeout_ms // 1000)
+    if not integral and PREFER_HIGHS and _highs_available():
+        return pulp.HiGHS(msg=False, timeLimit=seconds), "HiGHS"
+    return pulp.PULP_CBC_CMD(msg=0, timeLimit=seconds), "CBC"
 
 
 def _load_report(spec, x, duals_by_name):
@@ -123,21 +150,39 @@ def _build(spec, A, b, c, cons_names, relax=False):
     name = "".join(ch if ch.isalnum() or ch in "._-" else "_"
                    for ch in (spec.title or "opt"))
     prob = pulp.LpProblem(name, pulp.LpMaximize)
-    x = {v: pulp.LpVariable(v, lowBound=0,
+    # THE SOLVER NEVER SEES A USER'S NAME. PuLP rewrites the characters it
+    # dislikes -- `0-1` becomes `0_1` -- and certo read the duals back by the
+    # name it had given, so every row named like an edge came back with no
+    # dual. Nothing was wrong, since the exact route derives the dual anyway,
+    # but it derived it by enumerating candidates at every node: on a user's
+    # 17-column packing 175 of 177 seconds, where pass 1 would have needed
+    # one. Two names that rewrite to the same one also made PuLP refuse the
+    # rows, and CBC crash on the columns. Positions cannot collide.
+    x = {v: pulp.LpVariable("x{}".format(j), lowBound=0,
                             upBound=(1 if _cat(v) is pulp.LpBinary else None),
                             cat=_cat(v))
-         for v in spec.var_names}
-    prob += pulp.lpSum(float(c[j]) * x[v] for j, v in enumerate(spec.var_names))
+         for j, v in enumerate(spec.var_names)}
+    names = spec.var_names
+    # Only the non-zeros. A packing's rows are almost all zeros, and adding a
+    # term for each of them was half the time of a branch-and-bound node --
+    # the solver never saw them, but PuLP built and discarded every one.
+    prob += pulp.lpSum(float(c[j]) * x[v] for j, v in enumerate(names) if c[j])
     for i, row in enumerate(A):
         prob += (
-            pulp.lpSum(float(row[j]) * x[v] for j, v in enumerate(spec.var_names))
+            pulp.lpSum(float(row[j]) * x[v] for j, v in enumerate(names)
+                       if row[j])
             <= float(b[i]),
-            cons_names[i],
+            _row(i),
         )
     return prob, x
 
 
-def _duals(prob, cons_names):
+def _row(i) -> str:
+    """The solver's name for row `i`: a position, never the user's name."""
+    return "r{}".format(i)
+
+
+def _duals(prob, cons_names, negate=False):
     """CBC's duals, with `None` where it gave none.
 
     `pi is None` means the solver reported no dual for that row. That is not
@@ -152,10 +197,14 @@ def _duals(prob, cons_names):
     exact simplex derive the dual from the problem.
     """
     out = []
-    for name in cons_names:
-        con = prob.constraints.get(name)
+    for i, _name in enumerate(cons_names):
+        con = prob.constraints.get(_row(i))
         pi = getattr(con, "pi", None) if con is not None else None
-        out.append(None if pi is None else float(pi))
+        # HiGHS reports the duals of a maximisation with the opposite sign to
+        # CBC's, on every problem measured. Every problem here is built as a
+        # maximisation, so undoing it here means the exact route starts from
+        # the same dual either way -- and writes the same certificate.
+        out.append(None if pi is None else (-float(pi) if negate else float(pi)))
     return out
 
 
@@ -179,14 +228,119 @@ def _min_or_none(values):
     return _exact.serialize(min(vals))
 
 
+def _opt_split(spec, free, lim, use_exact, target, _vectors_only):
+    """`opt` over the program with each free variable split in two."""
+    import copy
+
+    from .. import exact as _exact
+
+    names = set(spec.var_names)
+    pair = {}
+    for v in free:
+        pos, neg = v + "__pos", v + "__neg"
+        k = 1
+        while pos in names or neg in names:
+            pos, neg = "{}__pos{}".format(v, k), "{}__neg{}".format(v, k)
+            k += 1
+        names |= {pos, neg}
+        pair[v] = (pos, neg)
+
+    out = copy.copy(spec)
+    out.var_names, out.bounds, out.kinds = [], {}, {}
+    out.cons = []
+    for v in spec.var_names:
+        kind = spec.kinds.get(v, "continuous")
+        if v in pair:
+            for w in pair[v]:
+                out.var_names.append(w)
+                out.bounds[w] = (0, None)
+                out.kinds[w] = kind
+        else:
+            out.var_names.append(v)
+            out.bounds[v] = spec.bounds.get(v, (0, None))
+            out.kinds[v] = kind
+
+    def split(coeffs):
+        row = {}
+        for v, c in coeffs.items():
+            if v in pair:
+                row[pair[v][0]] = c
+                row[pair[v][1]] = -_exact.to_fraction(c)
+            else:
+                row[v] = c
+        return row
+
+    out.obj = split(spec.obj)
+    for name, coeffs, sense, rhs in spec.cons:
+        out.cons.append((name, split(coeffs), sense, rhs))
+    # An upper bound on a free variable survives as a row: x_pos - x_neg <= hi.
+    for v in free:
+        hi = spec.bounds[v][1]
+        if hi is not None:
+            out.cons.append(("bound_{}_hi".format(v),
+                             {pair[v][0]: 1, pair[v][1]: -1}, "<=", hi))
+
+    res = opt(out, lim, use_exact=use_exact, target=target,
+              _vectors_only=_vectors_only)
+    split_map = {v: list(w) for v, w in pair.items()}
+    if res.certificate is not None and not _vectors_only:
+        res.certificate.payload["free_split"] = split_map
+    sol = res.meta.get("solution")
+    if isinstance(sol, dict):
+        merged = {}
+        for v in spec.var_names:
+            if v in pair:
+                a, b = (sol.get(w, "0") for w in pair[v])
+                try:
+                    merged[v] = _exact.serialize(_exact.to_fraction(a)
+                                                 - _exact.to_fraction(b))
+                except (ValueError, ZeroDivisionError):
+                    merged[v] = "{} - {}".format(a, b)
+            else:
+                merged[v] = sol.get(v)
+        res.meta["solution"] = merged
+    res.meta["free_split"] = split_map
+    return res
+
+
+class Vectors:
+    """What a branch-and-bound node keeps of an exact LP solution: the dual
+    and the primal, exactly as a certificate would hold them, and nothing
+    else. Not a certificate -- it cannot be saved or verified on its own --
+    and named so nothing mistakes it for one."""
+
+    __slots__ = ("payload",)
+    kind = "lp_vectors"
+
+    def __init__(self, dual, primal, objective):
+        self.payload = {"dual": dual, "primal": primal,
+                        "objective": objective, "exact": True}
+
+
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
-        target=None) -> Result:
+        target=None, _vectors_only: bool = False) -> Result:
+    """`_vectors_only=True` is for callers that keep only the dual and the
+    primal -- branch and bound, which derives every node's program from the
+    root. Serialising the whole matrix into a certificate at every node was
+    most of a node's cost on 1048 columns: 97 million `serialize` calls in 71
+    nodes, for a certificate the tree then discarded. The exact check is the
+    same one; only the artefact is smaller."""
     lim = limits or Limits()
     t0 = time.perf_counter()
 
     for v, (lo, hi) in spec.bounds.items():
         if lo is not None and lo < 0:
             raise ValueError(t("engine.opt.negative_bound", var=v))
+
+    # FREE VARIABLES, natively: each is split into two non-negative ones,
+    # x = x_pos - x_neg, the program over those is solved and certified in the
+    # standard form, and the split is RECORDED so `verify` can check the two
+    # columns are exact negatives of each other -- which is what makes the
+    # certified program the image of the one written. A user split every
+    # free price by hand before this; before 0.17 `lo=None` was read as 0.
+    free = [v for v in spec.var_names if spec.bounds.get(v, (0, None))[0] is None]
+    if free:
+        return _opt_split(spec, free, lim, use_exact, target, _vectors_only)
 
     A, b, c, cons_names = spec.as_leq_system()
 
@@ -203,25 +357,31 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
             meta={"objective": "0", "variables": 0, "constraints": 0,
                   "exact": True, "min_dual": None, "vacuous": True})
 
-    solver = pulp.PULP_CBC_CMD(msg=0, timeLimit=max(1, lim.timeout_ms // 1000))
+    # "Has a discrete part" is the condition, not "the whole thing is an ILP":
+    # a mixed problem has a dual for its relaxation just the same.
+    discrete = bool(getattr(spec, "discrete", [])) or spec.integer
+
+    solver, main_name = _solver(lim, integral=discrete)
+    used = [main_name]
 
     prob, xvars = _build(spec, A, b, c, cons_names)
     code = prob.solve(solver)
     st_name = pulp.LpStatus[code]
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    engine = lambda: "pulp/" + "+".join(dict.fromkeys(used))  # noqa: E731
 
     if st_name == "Infeasible":
-        return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, ENGINE, ms(), None,
-                      detail=t("engine.opt.infeasible"))
+        return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
+                      None, detail=t("engine.opt.infeasible"),
+                      meta={"lp_solver": engine()})
     if st_name != "Optimal":
-        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, ENGINE,
-                      ms(), None, detail=t("engine.opt.cbc", status=st_name))
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      engine(), ms(), None,
+                      detail=t("engine.opt.cbc", status=st_name,
+                                    solver=main_name),
+                      meta={"lp_solver": engine()})
 
     sol_float = [float(xvars[v].value() or 0.0) for v in spec.var_names]
-
-    # "Has a discrete part" is the condition, not "the whole thing is an ILP":
-    # a mixed problem has a dual for its relaxation just the same.
-    discrete = bool(getattr(spec, "discrete", [])) or spec.integer
 
     # An ILP has two numbers and they are not the same number. CBC's integer
     # answer is one; the relaxation the dual certifies is another, and it is
@@ -248,14 +408,16 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     relax_status = "Optimal"
     if discrete:
         rprob, rx = _build(spec, A, b, c, cons_names, relax=True)
-        relax_status = pulp.LpStatus[rprob.solve(solver)]
+        rsolver, dual_name = _solver(lim, integral=False)
+        used.append(dual_name)
+        relax_status = pulp.LpStatus[rprob.solve(rsolver)]
         dual_src = rprob
         relax_x = ([float(rx[v].value() or 0.0) for v in spec.var_names]
                    if relax_status == "Optimal" else sol_float)
     else:
-        dual_src, relax_x = prob, sol_float
-    dual_raw = (_duals(dual_src, cons_names) if relax_status == "Optimal"
-                else [None] * len(cons_names))
+        dual_src, relax_x, dual_name = prob, sol_float, main_name
+    dual_raw = (_duals(dual_src, cons_names, negate=dual_name == "HiGHS")
+                if relax_status == "Optimal" else [None] * len(cons_names))
     have_duals = all(v is not None for v in dual_raw)
     dual_float = [0.0 if v is None else v for v in dual_raw]
 
@@ -272,6 +434,19 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                                                y_alts=alts)
         exact_ok = x_ex is not None
 
+    if exact_ok and _vectors_only:
+        objective_ex = rep["objective"]
+        if spec.sense == "min":
+            objective_ex = -objective_ex
+        return Result(
+            "opt", Status.SAT, Verdict.SATISFIABLE, engine(), ms(),
+            Vectors(exact.serialize_all(y_ex), exact.serialize_all(x_ex),
+                    exact.serialize(rep["objective"])),
+            t("engine.opt.exact", value=exact.serialize(objective_ex),
+              denom=denom),
+            meta={"objective": exact.serialize(objective_ex), "exact": True,
+                  "lp_solver": engine()})
+
     if exact_ok:
         objective_ex = rep["objective"]
         if spec.sense == "min":
@@ -279,7 +454,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         loads = _load_report(spec, x_ex,
                              dict(zip(cons_names, y_ex)) if y_ex else {})
         cert = lp_dual_certificate(
-            loads=loads,
+            loads=loads, backend=engine(),
             sense=spec.sense, objective=exact.serialize(rep["objective"]),
             dual=exact.serialize_all(y_ex), primal=exact.serialize_all(x_ex),
             A=[exact.serialize_all(r) for r in A], b=exact.serialize_all(b),
@@ -351,7 +526,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                 primal=relax_x, A=[[float(v) for v in r] for r in A],
                 b=[float(v) for v in b], c=[float(v) for v in c],
                 names=cons_names, var_names=list(spec.var_names),
-                is_exact=False,
+                is_exact=False, backend=engine(),
             )
             from ..certificate import verify as _verify
 
@@ -362,8 +537,9 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                 detail = t("engine.opt.unverifiable", value=repr(objective))
 
     return Result(
-        "opt", Status.SAT, Verdict.SATISFIABLE, ENGINE, ms(), cert, detail,
+        "opt", Status.SAT, Verdict.SATISFIABLE, engine(), ms(), cert, detail,
         meta={"objective": meta_obj,
+              "lp_solver": engine(),
               "objective_float": (None if meta_obj is None
                                   else float(exact.to_fraction(meta_obj))),
               # In the declared sense, like `objective` beside it. This one

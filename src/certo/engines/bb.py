@@ -229,7 +229,7 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
                                     frontier=len(frontier)))
 
         node_spec, const = _node_lp(spec, fixed)
-        res = lp.opt(node_spec, lim)
+        res = lp.opt(node_spec, lim, _vectors_only=True)
         key = _key(order, fixed)
 
         if res.status is Status.UNSAT or res.verdict is Verdict.UNSATISFIABLE:

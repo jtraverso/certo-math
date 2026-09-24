@@ -102,8 +102,61 @@ def entry(res, source: str) -> dict:
         "engine": res.engine,
         "source": source,
         "shape": shape_of(getattr(res, "meta", None)),
+        "why": why_of(getattr(res, "detail", "")),
         "certo": _version(),
     }
+
+
+_PATTERNS = None
+
+
+def _patterns():
+    """Every catalogue message as a regex, placeholders as wildcards.
+
+    Built once, and only when something non-conclusive is being recorded --
+    which is rare -- so the cost is paid where it buys something.
+    """
+    global _PATTERNS
+    if _PATTERNS is None:
+        import re
+
+        from .i18n import _catalogue, available
+
+        out = []
+        for lang in available():
+            for key, text in _catalogue(lang).items():
+                if not isinstance(text, str) or len(text) < 8:
+                    continue
+                literal = re.sub(r"\{[^{}]*\}", "", text)
+                if len(literal) < 8:
+                    continue          # all placeholder: it would match anything
+                rx = re.escape(text)
+                rx = re.sub(r"\\\{[^{}]*\\\}", "(?:.|\\n)*?", rx)
+                out.append((len(literal), key, re.compile(rx)))
+        out.sort(key=lambda x: -x[0])          # the most specific first
+        _PATTERNS = out
+    return _PATTERNS
+
+
+def why_of(detail) -> str | None:
+    """WHICH message explained the result, as its catalogue key -- never the
+    text, and never the values that were filled into it.
+
+    The first five real entries in a coverage log all had an empty `shape`:
+    an `out_of_theory` usually carries no `meta`, only a sentence, and the
+    sentence is the whole of what says which gap it was. `family.max_only` is
+    a statement about certo -- that `family` does not minimise -- and says
+    nothing about what the caller asked.
+    """
+    if not detail or not isinstance(detail, str):
+        return None
+    try:
+        for _n, key, rx in _patterns():
+            if rx.match(detail):
+                return key
+    except Exception:  # noqa: BLE001 -- a log must never fail a command
+        return None
+    return None
 
 
 def _version() -> str:
@@ -155,8 +208,8 @@ def summary(path=None) -> dict:
     """
     p = Path(path) if path else default_path()
     out = {"path": str(p), "exists": p.exists(), "lines": 0,
-           "by_command": {}, "by_status": {}, "first": None, "last": None,
-           "full": False}
+           "by_command": {}, "by_status": {}, "by_why": {}, "first": None,
+           "last": None, "full": False}
     if not p.exists():
         return out
     try:
@@ -173,6 +226,10 @@ def summary(path=None) -> dict:
                 cmd, st, ts = e.get("command"), e.get("status"), e.get("ts")
                 out["by_command"][cmd] = out["by_command"].get(cmd, 0) + 1
                 out["by_status"][st] = out["by_status"].get(st, 0) + 1
+                why = e.get("why")
+                if why:
+                    k = "{} {}".format(cmd, why)
+                    out["by_why"][k] = out["by_why"].get(k, 0) + 1
                 if ts:
                     out["first"] = ts if out["first"] is None else min(out["first"], ts)
                     out["last"] = ts if out["last"] is None else max(out["last"], ts)

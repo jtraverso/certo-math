@@ -10,6 +10,14 @@ is reported at the end rather than silently skipped, so a new example cannot
 join the repository without joining this file.
 """
 from __future__ import annotations
+# A test that leaves a question unsettled would otherwise append it to the
+# coverage log of whoever runs the suite -- which is how two test runs ended
+# up counted as real use in the first reading of one. Callers that chose a
+# file keep it.
+import os as _os  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+_os.environ.setdefault("CERTO_COVERAGE_FILE", _os.path.join(
+    _tempfile.mkdtemp(prefix="certo_test_coverage_"), "coverage.jsonl"))
 
 import json
 import os
@@ -36,6 +44,8 @@ CASES = [
     ("symmetry_reduction.py", "reduce", []),
     ("parametric_symmetry.py", "reduce", ["--parametric"]),
     ("integer_matrix.py", "matrix", []),
+    ("matrix_inertia.py", "matrix", []),
+    ("clique_columns.py", "columns", []),
     ("interchange_matrix.py", "matrix", []),
     ("toric_cone.py", "cone", []),
     ("affine_semigroup.py", "semigroup", []),
@@ -51,6 +61,7 @@ CASES = [
     ("ideal_inconsistent.py", "ideal", []),
     ("eliminate_parameter.py", "eliminate", []),
     ("parametric_bound.py", "parametric", []),
+    ("parametric_box.py", "parametric", []),
     ("parametric_cover.py", "parametric", []),
     ("parametric_orbits.py", "parametric", []),
     ("ratio_window.py", "ratio", []),

@@ -1,4 +1,4 @@
-# Los cuarenta y ocho comandos
+# Los cincuenta comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -344,6 +344,54 @@ propio `multiplicity == 1`; un Smith sobre ese retículo la corrobora y no la
 carga.
 
 
+### `certo report`
+
+**Pregunta** — Algo salió mal: ¿es un bug de certo, de mi spec o de mi máquina
+— y cómo lo reporto?
+**Spec** — ninguno; se le da el comando de certo que falló
+**Responde** — un triaje con su evidencia, una carpeta local y un enlace a un
+issue ya rellenado
+**Certificado** — ninguno; no afirma nada por sí mismo
+**No establece** — que un triaje `nothing-found` signifique que el resultado es
+correcto. Significa que nada de lo que certo puede comprobar lo contradijo. Si
+el resultado es matemáticamente falso, dilo con `--wrong`.
+
+    certo report opt spec.py --target 5
+    certo report --wrong --certificate out/claim.json
+    certo report --coverage cases spec.py
+
+**Lo importante es el triaje.** Casi todos los reportes que recibió este
+proyecto no sabían decir de quién era el fallo: un error de adaptador que era de
+certo, una restricción perdida que ningún solver podía notar, una descarga que
+falló por la red. `report` vuelve a ejecutar el comando conservando la traza
+que el CLI descarta, y concluye, con la evidencia de cada cosa:
+
+| Triaje | Significa |
+|---|---|
+| `soundness` | un certificado **verifica** y se reporta falso — el peor bug que puede tener certo, reportado **en privado** |
+| `certo-bug` | certo produjo un certificado que **su propio verificador rechaza** — el único veredicto seguro |
+| `certo-bug?` | una excepción salió de una llamada que hizo **certo** |
+| `environment` | `doctor` encuentra algo imprescindible ausente, o un módulo no se importa |
+| `spec` | la excepción salió del código **del propio spec**, o `lint` reporta un error |
+| `undetermined` | ninguno de los anteriores — se dice así, no se adivina |
+
+«De quién fue la llamada» lo decide el marco más interno que pertenece a certo o
+al spec, **saltando los marcos de librerías**: si certo le pasa a numpy algo mal
+formado y numpy falla, es de certo; si el spec llama a una librería que falla,
+es del spec.
+
+**No se envía nada.** La carpeta incluye tu spec, que puede ser matemática sin
+publicar, así que lo que se comparte lo decides tú después de leerla. Las rutas
+del directorio personal pasan a `<user>` en todo salvo en la copia del spec. El
+enlace abre un issue rellenado solo con la versión, la plataforma y el triaje;
+para `soundness` abre en cambio el formulario privado. `--coverage` incluye
+además qué tipos de pregunta no pudo resolver certo en esta máquina — solo
+cuentas y tamaños, nunca qué se preguntó.
+
+**Cuando certo está seguro, no espera a que se lo pidan.** Si un certificado
+falla su propia autocomprobación, se escribe un reporte en el directorio de
+datos en el acto y se imprime su ruta. En local, y sin enviarse nunca.
+
 ### `certo doctor`
 
 **Pregunta** — ¿Puede esta instalación hacer lo que necesito?
@@ -372,7 +420,8 @@ parcial** que quedó cuando un archivo no pudo reemplazarse, y un desajuste
 entre `certo --version` y la versión que `pip` tiene registrada.
 
 `certo doctor --register-mcp` registra el servidor MCP en `.mcp.json`,
-fusionando en vez de reemplazar, y comprueba que arranca.
+fusionando en vez de reemplazar, y comprueba que arranca. Escribe el del
+directorio actual salvo que `--mcp-path ARCHIVO` indique otro.
 
 ---
 
@@ -421,6 +470,23 @@ VÁLIDO  certificado lp_dual (verificado sin solver)
 
 `--no-exact` salta la reconstrucción; el certificado queda en punto flotante y
 `verify` lo marca como **no citable**.
+
+**Una variable libre** — `variable("x", None, None)` — se parte como
+`x_pos − x_neg`, se certifica el programa partido, y el certificado registra
+la partición para que `verify` compruebe que las dos columnas son exactamente
+opuestas. Una cota inferior negativa se rechaza: escríbela como un
+desplazamiento.
+
+**Qué solver.** Con `certo[numerics]` toda resolución continua —un LP, y la
+relajación de un programa entero— corre en **HiGHS** dentro del proceso: 1,3 ms
+donde lanzar CBC tardaba 258 en el mismo LP pequeño. Los programas enteros
+siguen en CBC, que fue entre 1,5 y 2 veces más rápido que HiGHS en los MILP
+medidos. Ninguno se cree: corra el que corra, la ruta exacta reconstruye y
+comprueba. Lo que puede cambiar es *cuál* óptimo: en un programa degenerado
+los dos devuelven vértices óptimos distintos, así que dos certificados
+correctos del mismo valor pueden diferir en `primal` y `dual`. El campo
+`backend` del certificado dice cuál corrió, y `CERTO_LP_SOLVER=cbc` devuelve
+todas las resoluciones a CBC.
 
 `--target` responde la pregunta que una demostración de existencia tiene de
 verdad —*¿se alcanza esta cota?*— y el objetivo viaja en el certificado, así
@@ -661,12 +727,12 @@ confundirlos da una respuesta equivocada con confianza.
 ### `certo matrix`
 
 **Pregunta** — ¿Cuál es el rango, el determinante o la forma de Smith de esta
-matriz entera — exactamente?
+matriz entera — exactamente? ¿Y la inercia de una simétrica: es PSD?
 **Spec** — `MatrixSpec`
 **Responde** — rango, determinante, forma normal de Hermite o de Smith, con las
-transformaciones unimodulares **y sus inversas**
+transformaciones unimodulares **y sus inversas**; o la inercia, por congruencia
 **Certificado** — `integer_matrix`, **sin solver**: multiplicación de matrices
-enteras
+enteras; `symmetric_inertia` para `inertia` y `psd`, dos productos racionales
 **No establece** — que la matriz que escribiste sea la matriz de la que habla
 tu paper. La matriz de incidencia correcta, la base correcta, la orientación
 correcta: eso lo afirma el spec, y es exactamente donde un cálculo deja de ser
@@ -703,6 +769,30 @@ elegir ni que defender.
 `certo lint` avisa antes de que Smith corra: 10 000 entradas es una nota,
 40 000 un aviso. Un Smith de 64×64 tarda unos 2 segundos; uno de 80×80, unos 6.
 
+**Inercia, y si es PSD.** `question="inertia"` toma una matriz *simétrica* de
+*racionales* exactos —enteros, `Fraction`, o `"3/7"`— y responde con una
+congruencia:
+
+```
+S · A · Sᵀ = D      D diagonal
+S · S_inv  = I      así que S es invertible
+```
+
+Por la ley de inercia de Sylvester, los signos de `D` son el número de
+autovalores positivos, negativos y nulos de `A`, y comprobarlo son dos
+productos racionales: certificado `symmetric_inertia`. `question="psd"` hace la
+pregunta de sí o no: **PROBADO** con la congruencia, o **REFUTADO** con un
+vector `x` donde `xᵀAx < 0`, que se comprueba por sí solo. Una matriz sin
+pivote útil, como `[[0,1],[1,0]]`, se resuelve sumando una fila y columna a
+otra en vez de rendirse. `rows` selecciona una submatriz principal; un
+flotante se rechaza.
+
+Para decenas de miles de matrices, `certo.inertia.signature(rows)` devuelve los
+mismos tres números, **exactos** y sin certificado: eliminación sin
+fracciones, unos 3,5 ms a 20×20 y 11 ms a 32×32, sin límite de tamaño. Es
+exacto pero no comprobable por separado: cuando uno de esos números importa,
+pídeselo a `certo matrix` y cita ese certificado.
+
 ### `certo cone`
 
 **Pregunta** — ¿Es este cono regular, de altura uno, y subdividirlo es
@@ -732,6 +822,58 @@ nombrada la respuesta es `None` y no un `True` vacuo.
 Un cono no simplicial igual recibe respuesta: la multiplicidad ausente se
 registra con su razón, en vez de rechazar el certificado y perder las otras
 tres cantidades.
+
+### `certo columns`
+
+**Pregunta** — ¿Cuál es el óptimo de un LP sobre *todas* las cliques de este
+grafo — sin listarlas?
+**Spec** — `CliqueLPSpec`
+**Responde** — el óptimo exacto, las cliques del soporte con sus valores, y el
+dual exacto de cada fila de arista
+**Certificado** — `clique_lp`, **sin solver**: aritmética racional, y la
+búsqueda de precios corrida de nuevo
+**No establece** — nada sobre el programa entero. Esto es el LP sobre las
+cliques; su contraparte entera es `mixed --prove-optimal` con las cliques como
+columnas explícitas. Y que el grafo sea el que querías es afirmación del spec.
+
+    CliqueLPSpec(edges=[(0, 1), (0, 2), (1, 2), (2, 3)],
+                 problem="partition", weight={"constant": 1}, min_size=2)
+
+Una columna por clique `Q` con `|Q| >= min_size`, una fila por arista, y un
+peso lineal en los conteos: `w(Q) = a|E(Q)| + b|Q| + c` desde `weight`
+`{edges, vertices, constant}`.
+
+| `problem` | Programa |
+|---|---|
+| `packing` | max `Σ w(Q) x_Q`, la carga de cada arista `<= rhs` |
+| `cover` | min, la carga de cada arista `>= rhs` |
+| `partition` | min, la carga de cada arista `= rhs` (requiere `min_size <= 2`) |
+
+**Por qué necesita su propio certificado.** `opt` certifica un LP cuyas
+columnas recibió. Aquí las columnas son implícitas, y el LP que se resuelve
+tiene solo las que se generaron. Lo que hace de su óptimo el óptimo sobre
+*todas* las cliques es una afirmación sobre cada clique que no se generó:
+ninguna tiene costo reducido positivo frente al dual exacto `z`. Con eso, la
+dualidad débil cierra el argumento sin que el certificado liste ninguna otra
+columna.
+
+**El oráculo se vuelve a correr, no se cree.** «Ninguna clique tiene costo
+reducido positivo» lo decide una búsqueda exacta sobre las cliques en un orden
+fijo, podada por una cota válida para toda extensión de una clique parcial.
+`verify` corre la misma búsqueda con el `z` del certificado y debe obtener la
+misma respuesta —el mismo mayor costo reducido, la misma clique, el mismo
+número de nodos— o rechaza.
+
+**Cuándo usarlo.** Medido sobre un grafo split de 30 vértices y 1048 cliques:
+listarlas todas para `opt` tardó 0,5 s, y `columns` 2,3 s. Para unos cientos o
+unos miles de cliques `opt` es igual de rápido; `columns` es para los grafos
+donde listar es el problema. Contrastado con el LP explícito en 84 grafos
+aleatorios de los tres problemas, sin ninguna diferencia.
+
+Una arista que no está en ninguna clique permitida hace infactible un `cover`,
+y se nombra. Una `partition` con solo cliques mayores puede no tener punto
+factible; probarlo requiere un certificado de Farkas sobre columnas
+implícitas, y se rechaza en vez de adivinarse.
 
 ### `certo profile`
 
@@ -806,10 +948,28 @@ significa algo.
 con `⟨y,aᵢ⟩ ≤ 0` en cada generador y `⟨y,v⟩ > 0` es un vector, comprobado con
 `k+1` productos escalares, en lugar de afirmar que una búsqueda fue exhaustiva.
 
-**No ser puntiagudo es una respuesta, no un fallo.** Sin graduación ninguna
-búsqueda aquí es finita, así que el comando lo dice y devuelve `out_of_theory`
-— con el certificado que *sí* puede establecer, porque los generadores, el
-rango y las respuestas sobre el cono siguen siendo exactos.
+**No ser puntiagudo es una respuesta, no un fallo — y lleva su prueba.** Sin
+graduación ninguna búsqueda aquí es finita, así que el comando lo dice y
+devuelve `out_of_theory`, con el certificado que *sí* puede establecer. «No es
+puntiagudo» viene con enteros no negativos, no todos nulos, que combinan los
+generadores en cero, comprobado con una multiplicación. Si no se encontró ni
+eso ni una graduación, `pointed` es `null`: sin decidir, que no es lo mismo que
+no. Antes de 0.17 decía `false` siempre que no se encontraba graduación, sobre
+conos que sí la tenían.
+
+**Con `certo[polyhedra]` estas preguntas se deciden en vez de buscarse.**
+pycddlib da las facetas del cono de forma exacta, y con ellas el cono es
+puntiagudo o no lo es, un punto está en el cono o una faceta que viola es el
+separador, y la graduación es la de menor grado máximo, por un LP exacto.
+Medido sobre conos aleatorios: la búsqueda por subconjuntos graduó 77 de 140
+conos puntiagudos y las facetas los 140; con 26 generadores en dimensión 5 la
+búsqueda se rindió ante un punto de fuera tras doce segundos, y las facetas lo
+decidieron en una centésima. Nada de lo que devuelve se cree: cada vector se
+comprueba con los mismos productos escalares que sin él, así que puede costar
+una respuesta, nunca hacerla falsa. pycddlib solo trae *wheels* para Windows;
+en Linux y macOS se compila contra cddlib y GMP (`apt install libcdd-dev
+libgmp-dev`, `brew install cddlib gmp`). `certo doctor` dice cuál se usa, y
+también el campo `backend` del certificado.
 
 **Un sistema minimal propuesto se *decide*, no solo se refuta.** Dale un
 conjunto en `hilbert` y certo resuelve si es el sistema minimal de generadores
@@ -998,6 +1158,28 @@ del dual puede ser un polinomio; y un umbral en la función de valor *es* la
 factibilidad del dual agotándose. Ver
 [De dónde salió parametric](CASES.md#de-dónde-salió-parametric).
 
+**Filas de igualdad, variables libres, una afirmación, un primal.** Una fila
+`"=="` tiene un dual de cualquier signo, así que no se pide su `y ≥ 0`; una
+variable en `free=[...]` debe tener su columna exactamente equilibrada — el
+residuo idénticamente cero. `claim=T` prueba además la cota frente a un
+objetivo (`cota ≤ T` con un dual en una maximización), y cuando el test de
+desplazamiento no lo muestra la cota sigue certificada y el veredicto es
+`inconclusive`. `primal={var: x(p)}` en lugar de `dual` prueba la otra
+dirección: toda fila se cumple y toda `x ≥ 0` no libre, así que una
+minimización es como mucho `c·x(p)` y una maximización al menos; ahí se admite
+cualquier sentido de fila.
+
+**En una caja, con el dual encontrado.** `box={p: (lo, hi)}` afirma la cota en
+una caja y decide cada no negatividad por **coeficientes de Bernstein** ahí,
+de forma exacta — sin reparametrizar un intervalo acotado en un rayo.
+`subdivide=d` parte la caja en mitades hasta `d` veces donde un solo juego de
+coeficientes no basta; el certificado registra las particiones y `verify`
+recalcula cada hoja. `dual="bernstein"` con `dual_degree=k` hace que certo
+**encuentre** un dual polinómico: sus coeficientes de Bernstein son las
+incógnitas de un único LP exacto cuyas restricciones son los coeficientes de
+los residuos. `box` con `region` se rechaza por ahora. Ver
+`examples/parametric_box.py`.
+
 ### `certo peak`
 
 **Pregunta** — Lo resolví para `n = 1..40`. ¿Qué entero es el mejor para TODO
@@ -1136,7 +1318,10 @@ antigua hacía más daño: no hay contraejemplo al que ir a mirar.
 `--witnesses` descompone los contraejemplos en órbitas bajo una simetría que
 declares. `--collect` mide en vez de refutar, en racionales exactos.
 `--n-range 3..8 --stop-on-first` da un subcertificado por tamaño más la
-afirmación de que nada falló por debajo del primer fallo. Tratamiento completo
+afirmación de que nada falló por debajo del primer fallo, y nombra los tamaños
+donde la familia está **vacía** — donde el enunciado solo se cumple por
+vacuidad; `verify` recalcula esa lista. `lint` mira además n = 0, 1, 2 por
+debajo del tamaño barrido. Tratamiento completo
 en [Qué establece un barrido](CASES.md#qué-establece-un-barrido).
 
 ### `certo cases`

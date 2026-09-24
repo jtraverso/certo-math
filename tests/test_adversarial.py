@@ -21,6 +21,14 @@ by a rule, so excusing one is a decision somebody made on purpose.
 `python tests/test_adversarial.py`, or with pytest.
 """
 from __future__ import annotations
+# A test that leaves a question unsettled would otherwise append it to the
+# coverage log of whoever runs the suite -- which is how two test runs ended
+# up counted as real use in the first reading of one. Callers that chose a
+# file keep it.
+import os as _os  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+_os.environ.setdefault("CERTO_COVERAGE_FILE", _os.path.join(
+    _tempfile.mkdtemp(prefix="certo_test_coverage_"), "coverage.jsonl"))
 
 import json
 from fractions import Fraction
@@ -369,6 +377,37 @@ def test_drat_and_cnf_model():
     b = ok.var("b")
     ok.add(b)
     _report("cnf_model", probe(sat.cases(CNFSpec(cnf=ok), LIM).certificate))
+
+
+def test_symmetric_inertia():
+    """A congruence and its inverse: the counts, the PSD summary and the
+    witness are all conclusions, so each has to be recomputed from D and the
+    matrix, not agree with itself."""
+    from certo.engines import algebra
+    from certo.spec import MatrixSpec
+
+    for q, M in (("inertia", [[0, 1, 2], [1, 0, 3], [2, 3, 5]]),
+                 ("psd", [["1/2", 1], [1, "1/2"]])):
+        cert = algebra.integer_matrix(MatrixSpec(matrix=M, question=q),
+                                      LIM).certificate
+        _report("symmetric_inertia", probe(cert))
+
+
+def test_clique_lp():
+    """The claim about the columns NOT listed is the pricing search; every
+    field it depends on -- the dual, the graph, the weight, the size -- has
+    to make the rerun disagree."""
+    from certo import CliqueLPSpec
+    from certo.engines import algebra
+
+    for problem, weight, m in (("partition", {"constant": 1}, 2),
+                               ("packing", {"edges": 1, "constant": -1}, 3)):
+        spec = CliqueLPSpec(
+            edges=[(0, 1), (1, 2), (0, 2), (0, 3), (1, 3), (1, 4), (2, 4),
+                   (0, 5), (2, 5), (3, 4)],
+            problem=problem, weight=weight, min_size=m)
+        cert = algebra.clique_lp(spec, LIM).certificate
+        _report("clique_lp", probe(cert))
 
 
 def test_affine_semigroup():

@@ -292,9 +292,17 @@ class LPSpec:
 
         A, b, names = [], [], []
         Z = to_fraction(0)
+        index = {v: j for j, v in enumerate(self.var_names)}
+        width = len(self.var_names)
 
+        # From the non-zeros: a packing row names a handful of its thousand
+        # columns, and converting every absent one to Fraction was most of
+        # building a node's system.
         def row_of(coeffs):
-            return [to_fraction(coeffs.get(v, Z)) for v in self.var_names]
+            row = [Z] * width
+            for v, c in coeffs.items():
+                row[index[v]] = to_fraction(c)
+            return row
 
         for name, coeffs, sense, rhs in self.cons:
             row = row_of(coeffs)
@@ -308,6 +316,16 @@ class LPSpec:
 
         for v in self.var_names:
             lo, hi = self.bounds.get(v, (0.0, None))
+            # Every variable here is x >= 0: the dual certificate is built for
+            # that form. `lo=None` -- "free" -- and a negative `lo` were both
+            # read as 0 without a word, so `min x` over `x >= -5` with `x`
+            # declared free came back "EXACT optimum certified: 0". The
+            # certificate was right about the program it solved, and that was
+            # not the program written. Refused, and the message says how to
+            # write it instead.
+            if lo is None or to_fraction(lo) < 0:
+                raise ValueError(t("spec.free_variable", var=v,
+                                   lo="None" if lo is None else lo))
             if hi is not None:
                 A.append(row_of({v: 1})); b.append(to_fraction(hi))
                 names.append("bound_{}_hi".format(v))
@@ -974,15 +992,53 @@ class ParametricSpec:
     search is a linear program, which is the one kind of search this project
     does on its own. Pairwise products of the declared conditions are derived
     rather than assumed.
+
+    EQUALITY ROWS AND FREE VARIABLES. A `"=="` row has a dual of either sign,
+    so its `y >= 0` is not asked. A variable named in `free` has no sign, so
+    its column must balance exactly -- the residual identically zero -- rather
+    than be non-negative. Neither needs a variable split into `p - n`.
+
+    `claim=T` states the bound you want: the certificate then proves
+    `b(p).y <= T(p)` too (`>=` for a minimisation), by the same shift test.
+
+    `primal={var: x(p)}` instead of `dual` proves the OTHER direction: every
+    row holds and every non-free `x >= 0` for all p in the region, so the
+    optimum is at least `c(p).x(p)` for a maximisation and at most it for a
+    minimisation. Any row sense is allowed there, since feasibility is all
+    that is checked.
+
+    `box={p: (lo, hi)}` claims the bound on a BOX, and decides every
+    non-negativity by Bernstein coefficients there -- no reparametrisation of
+    a bounded interval into a ray. `subdivide=d` lets a box be halved up to d
+    times where the coefficients are not all >= 0, and the certificate
+    records the splits. `dual="bernstein"` has certo find a polynomial dual of
+    degree `dual_degree` per parameter, by ONE exact LP over its Bernstein
+    coefficients; it is checked like any other dual.
     """
 
     parameters: dict                 # name -> lower bound (a number)
     objective: dict                  # variable -> coefficient polynomial
     constraints: list                # [(name, {var: coef}, "<=", rhs)]
-    dual: dict                       # constraint name -> non-negative rational
+    dual: dict = None                # constraint name -> non-negative rational
     sense: str = "max"
     region: list = None              # [(name, g)] meaning `g(p) >= 0`, SCOPE
     title: str = ""
+    # Variables with no sign: their column must BALANCE, `A^T y = c`
+    # identically, instead of `A^T y >= c`. Saves splitting each into p - n.
+    free: list = None
+    # A target `T(p)`: the certificate then also proves `bound <= T` on the
+    # region (`>=` for a minimisation), by the same shift test, instead of the
+    # target being encoded as a variable and two rows.
+    claim: object = None
+    # A PRIMAL instead of a dual: `x(p)` feasible for every p, which bounds
+    # the other way -- a minimisation from ABOVE, a maximisation from below.
+    primal: dict = None
+    # A BOX, {p: (lo, hi)}: every non-negativity is then decided by Bernstein
+    # coefficients on it instead of the shift test on p >= p0, and
+    # `dual="bernstein"` has certo FIND a polynomial dual of `dual_degree`.
+    box: dict = None
+    subdivide: int = 0               # how many times a box may be halved
+    dual_degree: int = 1
 
 
 @dataclass
@@ -1188,6 +1244,41 @@ class ConeSpec:
 
 
 @dataclass
+class CliqueLPSpec:
+    """An LP over EVERY clique of a graph, one row per edge, solved without
+    listing the cliques.
+
+        CliqueLPSpec(
+            edges=[(0, 1), (0, 2), (1, 2), (2, 3)],
+            problem="partition",           # packing | cover | partition
+            weight={"constant": 1},        # w(Q) = a|E(Q)| + b|Q| + c
+            min_size=2,
+        )
+
+    `packing` maximises `sum w(Q) x_Q` with each edge's load at most `rhs`;
+    `cover` minimises with each at least `rhs`; `partition` minimises with each
+    exactly `rhs`. `weight` takes `edges`, `vertices` and `constant`, so
+    `{"edges": 1, "constant": -1}` is "edges covered minus one per clique" and
+    `{"constant": 1}` counts cliques. `rhs` is one number for every edge, or a
+    dict keyed `"u-v"`.
+
+    The columns are generated, not listed: the cliques that enter the LP are
+    the ones an exact pricing search finds with positive reduced cost, and the
+    certificate proves no other clique has one -- by a search the verifier
+    runs again, not by a claim. `vertices` fixes their order; by default it is
+    every endpoint, integers read as integers.
+    """
+
+    edges: object
+    problem: str = "packing"
+    weight: object = None
+    min_size: int = 2
+    rhs: object = 1
+    vertices: object = None
+    title: str = ""
+
+
+@dataclass
 class ProfileSpec:
     """How an optimum responds to ONE capacity, as a certified function.
 
@@ -1374,10 +1465,18 @@ class MatrixSpec:
     Entries must be integers -- `Fraction(4, 2)` is accepted, `2.5` is
     refused rather than rounded, because a matrix quietly rounded is a
     different matrix.
+
+    `inertia` and `psd` take a SYMMETRIC matrix of exact RATIONALS --
+    integers, `Fraction`, or strings like "3/7" -- and answer by a congruence
+    `S A S^T = D` with `S`'s inverse: the signs of `D` are the inertia, by
+    Sylvester's law. `psd` is REFUTED with a vector `x` where `x^T A x < 0`.
+    `rows` selects a principal submatrix. For tens of thousands of matrices,
+    `certo.inertia.signature(rows)` gives the same three numbers exactly and
+    fast, without the certificate.
     """
 
     matrix: object                   # a list of lists of integers
-    question: str = "hermite"        # det | rank | hermite | smith
+    question: str = "hermite"        # det|rank|hermite|smith|inertia|psd
     rows: object = None              # a sub-selection, 0-based
     cols: object = None
     title: str = ""

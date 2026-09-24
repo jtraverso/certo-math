@@ -141,7 +141,7 @@ def search(p: Poly, basis, iterations=600, tol=1e-9):
     return to_psd(G)
 
 
-def search_sdp(p: Poly, basis):
+def search_sdp(p: Poly, basis, time_limit_s=None):
     """Clarabel: maximise t subject to z^T G z = p, G - tI PSD, t <= 1.
 
     Returns the numeric G, or None when Clarabel is not installed. Nothing it
@@ -211,6 +211,10 @@ def search_sdp(p: Poly, basis):
              clarabel.NonnegativeConeT(1)]
     settings = clarabel.DefaultSettings()
     settings.verbose = False
+    if time_limit_s is not None:
+        # Clarabel's own clock. A solve that runs out returns no G, which is
+        # "not found" -- never a certificate, since nothing below trusts G.
+        settings.time_limit = float(time_limit_s)
     try:
         sol = clarabel.DefaultSolver(P, q, A, b, cones, settings).solve()
     except Exception:  # noqa: BLE001
@@ -328,7 +332,7 @@ def expand(terms, variables) -> Poly:
 DENOMS = (1, 2, 6, 12, 60, 360, 2520, 10**4, 10**6, 10**8)
 
 
-def certify(p: Poly, half_degree=None, iterations=600):
+def certify(p: Poly, half_degree=None, iterations=600, time_limit_s=None):
     """Find an exact SOS decomposition of `p`, or None.
 
     The denominator ladder is the same idea as `opt`'s rational
@@ -352,7 +356,7 @@ def certify(p: Poly, half_degree=None, iterations=600):
     # would have produced -- and the second attempt costs nothing when the
     # first succeeds.
     for name in available:
-        G = (search_sdp(p, basis) if name == "clarabel"
+        G = (search_sdp(p, basis, time_limit_s) if name == "clarabel"
              else search(p, basis, iterations=iterations))
         if G is None:
             continue

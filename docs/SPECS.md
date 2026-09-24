@@ -155,6 +155,19 @@ object* is what tells you whether to weaken it or abandon it.
 
 ### Filters
 
+The named ones: `connected`, `chordal`, `triangle_free`, `k4_free`,
+`regular`, `has_triangle`, `min_degree=K`, `max_degree=K`, and the edge count
+as `edges=K`, a range `edges=A:B` (either end may be left open), `min_edges=K`
+or `max_edges=K`.
+
+**With `geng` installed, the ones it can do exactly are done by `geng`**:
+`connected`, the degrees and the edge range always, and `triangle_free`,
+`k4_free` and `chordal` when the installed `geng`'s own help lists them. Every
+filter is still applied afterwards, so pushing one down can only save time --
+a user's chordal sweep at n=9 enumerated 274 668 graphs to keep 125, all of the
+difference filtered in Python. `enumerated` then counts what `geng` produced,
+after its part of the filtering. certo finds `geng` under that name or as Debian's `nauty-geng`.
+
 `filters` accepts callables alongside the named ones, so a family the
 catalogue does not know still gets counted properly:
 
@@ -319,6 +332,18 @@ Common options go **after** the subcommand:
 | `--rlimit` | Z3's work budget — this is the reproducible one |
 | `--max-memory-mb` | hard ceiling |
 | `--seed` | for the engines that take one |
+| `--enumerate-timeout-s` | clock for an external enumeration (`geng`), separate from a solver's; default 120 |
+| `--max-output-mb` | how much an external enumeration may print before it is stopped; default 64 |
+
+**What the budget reaches.** `--timeout-ms` is handed to z3, to HiGHS and
+CBC, to Clarabel inside `sos`, to the SAT binaries, and to `drat-trim` when it
+cross-checks a proof. An external enumeration has its own clock, because
+enumerating every graph on `n` vertices and deciding a formula are different
+jobs. `export --check` compiles Lean with `--check-timeout-s` (default 900),
+since a build against Mathlib is minutes. Two things are **not** bounded by
+it, deliberately or unavoidably: `doctor`'s probes and the provenance `git`
+call keep short fixed bounds of their own, and cddlib's facet computation runs
+in-process, where nothing can interrupt a C call short of the process.
 
 Exit codes: `0` conclusive, `2` inconclusive, `1` invalid certificate, `3`
 error. `lint` differs: `0` clean or notes only, `1` errors, `2` warnings.

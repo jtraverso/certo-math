@@ -1,0 +1,64 @@
+name: Bug report
+description: Something certo did was wrong, crashed, or refused what it should accept.
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Fastest route:** run `certo report <the command that misbehaved>`. It re-runs
+        the command, decides whose fault it is -- certo's, your spec's or your
+        machine's -- and opens this form with the fields below already filled.
+
+        **Nothing is sent by `certo report`.** It writes a local folder that includes
+        your spec. Read it before pasting any of it here: this tracker is public.
+
+        **A certificate that verifies and is mathematically false is not reported
+        here.** It is the worst bug this tool can have, and it goes to the private
+        channel: https://github.com/jtraverso/certo-math/security/advisories/new
+  - type: input
+    id: triage
+    attributes:
+      label: Triage
+      description: What `certo report` concluded -- certo-bug, certo-bug?, spec, environment, undetermined, nothing-found. Leave blank if you did not run it.
+      placeholder: certo-bug?
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`certo --version`"
+      placeholder: "0.17.0"
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      placeholder: "Windows / Python 3.12.10"
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: The command you ran, and what it printed.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: report.md
+      description: Paste the report.md that `certo report` wrote, after reading it. Attach anything else from the folder you are willing to make public.
+      render: markdown
+  - type: checkboxes
+    id: reviewed
+    attributes:
+      label: Before submitting
+      options:
+        - label: I have read what I am pasting, and it contains nothing I cannot publish.
+          required: true

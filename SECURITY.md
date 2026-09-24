@@ -19,6 +19,10 @@ variable was silently dropped, turning a certified `1/3` into a certified `10`
 with `lint` reporting nothing. Both were found by someone looking, not by the
 tool.
 
+**`certo report --wrong --certificate FILE`** checks that the certificate
+really does verify, writes a local folder with everything needed to reproduce
+it, and points you to the private form below. It sends nothing.
+
 So: if you can produce a certificate that verifies and is wrong, that is the
 report worth making, and it is treated as the highest severity here regardless
 of whether it fits anyone's definition of a vulnerability.

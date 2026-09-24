@@ -37,6 +37,8 @@ from ..certificate import (cover_certificate, ideal_certificate,
                            resultant_certificate, sos_certificate)
 from ..i18n import t
 from ..limits import Limits
+
+ENGINE_COLGEN = "certo/column-generation"
 from ..polynomials import Budget, Poly, cofactors
 from ..status import Result, Status, Verdict
 
@@ -341,6 +343,49 @@ def equitable_quotient(spec, limits: Limits | None = None,
               "identities": len(out["B"])})
 
 
+def clique_lp(spec, limits: Limits | None = None,
+              spec_path: str = "") -> Result:
+    """An LP over every clique of a graph, by column generation, with the
+    pricing search that proves no other clique would enter."""
+    from .. import colgen
+    from ..certificate import clique_lp_certificate
+
+    t0 = time.perf_counter()
+    try:
+        out = colgen.solve(spec, limits)
+    except colgen.NotACliqueLP as e:
+        return Result("columns", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COLGEN, 0.0, None, detail=str(e))
+    except colgen.PricingBudget as e:
+        return Result("columns", Status.RESOURCE_EXHAUSTED,
+                      Verdict.INCONCLUSIVE, ENGINE_COLGEN,
+                      (time.perf_counter() - t0) * 1000, None,
+                      detail=t("engine.colgen.budget", where=str(e)))
+    except ArithmeticError as e:
+        return Result("columns", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      ENGINE_COLGEN, (time.perf_counter() - t0) * 1000, None,
+                      detail=str(e))
+    ms = (time.perf_counter() - t0) * 1000
+    if "infeasible_edge" in out:
+        return Result("columns", Status.UNSAT, Verdict.UNSATISFIABLE,
+                      ENGINE_COLGEN, ms, None,
+                      detail=t("engine.colgen.no_clique_covers",
+                               edge=out["infeasible_edge"],
+                               m=getattr(spec, "min_size", 2)))
+    cert = clique_lp_certificate(out, title=spec.title).stamp(spec_path or None)
+    p = cert.payload
+    return Result(
+        "columns", Status.SAT, Verdict.SATISFIABLE, ENGINE_COLGEN, ms, cert,
+        detail=t("engine.colgen.optimum", value=p["objective"],
+                 problem=p["problem"], generated=out["generated"],
+                 rounds=out["rounds"], nodes=p["pricing"]["nodes"]),
+        meta={"objective": p["objective"], "problem": p["problem"],
+              "vertices": len(p["vertices"]), "edges": len(p["edges"]),
+              "generated": out["generated"], "rounds": out["rounds"],
+              "support": len(p["columns"]),
+              "nodes": p["pricing"]["nodes"], "exact": True})
+
+
 def capacity_profile(spec, limits: Limits | None = None,
                      spec_path: str = "") -> Result:
     """A proposed profile, decided: bound, attainment and coverage."""
@@ -434,12 +479,19 @@ def affine_semigroup(spec, limits: Limits | None = None,
     if not out["pointed"]:
         cert = affine_semigroup_certificate(out, title=spec.title).stamp(
             spec_path or None)
+        # Proved not pointed, or not decided: the same verdict, because no
+        # search terminates in either case, but not the same sentence.
+        if out["pointed"] is False:
+            detail = t("engine.semigroup.not_pointed_proved",
+                       witness=", ".join(map(str, out["not_pointed_witness"])))
+        else:
+            detail = t("engine.semigroup.not_pointed")
         return Result(
             "semigroup", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
-            ENGINE_SEMIGROUP, ms, cert,
-            detail=t("engine.semigroup.not_pointed"),
+            ENGINE_SEMIGROUP, ms, cert, detail=detail,
             meta={"generators": len(out["order"]), "rank": out["rank"],
-                  "dimension": out["dimension"], "pointed": False})
+                  "dimension": out["dimension"], "pointed": out["pointed"],
+                  "backend": out["backend"]})
 
     cert = affine_semigroup_certificate(out, title=spec.title).stamp(
         spec_path or None)
@@ -455,6 +507,7 @@ def affine_semigroup(spec, limits: Limits | None = None,
 
     meta = {"generators": len(out["order"]), "rank": out["rank"],
             "dimension": out["dimension"], "pointed": True,
+            "backend": out["backend"],
             "minimal": out["minimal"],
             "not_normal": out["not_normal"],
             "witnesses": list(out["normality_witnesses"]),
@@ -607,8 +660,12 @@ def lean_binding(spec, limits: Limits | None = None,
 
 def integer_matrix(spec, limits: Limits | None = None,
                    spec_path: str = "") -> Result:
-    """rank, determinant, Hermite or Smith, exactly, with the transforms."""
+    """rank, determinant, Hermite or Smith, exactly, with the transforms --
+    or, for a symmetric rational matrix, its inertia."""
     from ..lattice import NotAnIntegerMatrix, analyse, parse, shape
+
+    if spec.question in ("inertia", "psd"):
+        return symmetric_inertia(spec, limits, spec_path)
 
     t0 = time.perf_counter()
     try:
@@ -662,6 +719,56 @@ def integer_matrix(spec, limits: Limits | None = None,
                   meta={"rank": out["rank"], "determinant": out.get("det"),
                         "rows": n, "cols": m,
                         "invariants": out.get("invariants")})
+
+
+def symmetric_inertia(spec, limits: Limits | None = None,
+                      spec_path: str = "") -> Result:
+    """The inertia of a symmetric rational matrix, by a congruence `S A S^T =
+    D` carried with `S`'s inverse. `question="psd"` asks the yes-or-no
+    version: PROVED with the congruence, REFUTED with a vector `x` where
+    `x^T A x < 0`."""
+    from .. import inertia as inr
+    from ..certificate import symmetric_inertia_certificate
+
+    t0 = time.perf_counter()
+    try:
+        rows = spec.matrix
+        if isinstance(rows, dict) and "entries" in rows:
+            rows = rows["entries"]
+        A = inr.parse(rows)
+        if spec.rows is not None or spec.cols is not None:
+            # A principal submatrix, the only kind that stays symmetric: the
+            # same indices for the rows and the columns.
+            idx = spec.rows if spec.rows is not None else spec.cols
+            if spec.cols is not None and list(spec.cols) != list(idx):
+                raise inr.NotSymmetric(t("inertia.principal_only"))
+            A = [[A[i][j] for j in idx] for i in idx]
+        out = inr.inertia(A)
+    except (inr.NotSymmetric, IndexError) as e:
+        return Result("matrix", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_LATTICE, 0.0, None, detail=str(e))
+    ms = (time.perf_counter() - t0) * 1000
+
+    cert = symmetric_inertia_certificate(
+        question=spec.question, matrix=out["matrix"], S=out["S"],
+        S_inv=out["S_inv"], D=out["D"], witness=out["witness"],
+        title=spec.title).stamp(spec_path or None)
+    n = len(out["D"])
+    meta = {"n_plus": out["n_plus"], "n_minus": out["n_minus"],
+            "n_zero": out["n_zero"], "rank": out["rank"], "psd": out["psd"],
+            "pd": out["pd"], "rows": n, "cols": n}
+    if spec.question == "psd" and not out["psd"]:
+        value = str(inr.quadratic(out["matrix"], out["witness"]))
+        return Result("matrix", Status.SAT, Verdict.REFUTED, ENGINE_LATTICE,
+                      ms, cert, detail=t("engine.inertia.not_psd", value=value),
+                      meta=meta)
+    key = ("engine.inertia.psd" if spec.question == "psd"
+           else "engine.inertia.counts")
+    return Result("matrix", Status.UNSAT, Verdict.PROVED, ENGINE_LATTICE, ms,
+                  cert, detail=t(key, plus=out["n_plus"], minus=out["n_minus"],
+                                 zero=out["n_zero"], n=n,
+                                 pd=t("engine.inertia.pd") if out["pd"] else ""),
+                  meta=meta)
 
 
 def reduce_symmetry(spec, limits: Limits | None = None,
@@ -941,7 +1048,12 @@ def parametric(spec, limits: Limits | None = None,
                       ENGINE_PARAM, 0.0, None,
                       detail=t("engine.param.max_only", sense=spec.sense))
     want = "<=" if spec.sense == "max" else ">="
-    bad_sense = [n for n, _, sense, _ in spec.constraints if sense != want]
+    # A primal only has to be FEASIBLE, so any sense is fine there; with a
+    # dual, an equality row is fine too -- its dual simply has no sign.
+    allowed = ({"<=", ">=", "=="} if getattr(spec, "primal", None) is not None
+               else {want, "=="})
+    bad_sense = [n for n, _, sense, _ in spec.constraints
+                 if sense not in allowed]
     if bad_sense:
         return Result("parametric", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_PARAM, 0.0, None,
@@ -957,17 +1069,27 @@ def parametric(spec, limits: Limits | None = None,
     ms = (time.perf_counter() - t0) * 1000
     floor = ", ".join("{} >= {}".format(k, v)
                       for k, v in spec.parameters.items())
+    if out.get("box"):
+        floor = ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                          for n, (lo, hi) in out["box"].items())
 
     if not out["ok"]:
         # No certificate. The shift is sufficient and not necessary, so a
         # failure is "not established by this route" and never "false" -- and
         # emitting a certificate for it would be the overclaim this whole
         # project exists to avoid.
-        if out["negative_dual"]:
+        if out["negative_dual"] and out.get("witness") == "primal":
+            detail = t("engine.param.primal_negative",
+                       names=", ".join(map(str, out["negative_dual"][:4])))
+        elif out.get("witness") == "primal":
+            detail = t("engine.param.primal_infeasible",
+                       names=", ".join(out["failed"][:4]), floor=floor)
+        elif out["negative_dual"]:
             detail = t("engine.param.negative",
                        names=", ".join(map(str, out["negative_dual"][:4])))
         else:
-            detail = t("engine.param.not_shown",
+            detail = t("engine.param.not_shown_box" if out.get("box")
+                       else "engine.param.not_shown",
                        names=", ".join(out["failed"][:4]), floor=floor)
         return Result("parametric", Status.UNKNOWN_SOLVER,
                       Verdict.INCONCLUSIVE, ENGINE_PARAM, ms, None,
@@ -981,12 +1103,16 @@ def parametric(spec, limits: Limits | None = None,
         constraints=[[str(n), {v: _ser(spec, c) for v, c in row.items()},
                       sense, _ser(spec, rhs)]
                      for n, row, sense, rhs in spec.constraints],
-        dual={str(n): _dual_str(spec, v) for n, v in spec.dual.items()},
+        dual=_dual_texts(spec, out),
         # Only when it says something the readable form cannot: a dual of pure
         # rationals is exactly what `dual` already holds, and a second copy of
         # it would be a field nothing checks.
-        dual_poly=({str(n): _ser(spec, v) for n, v in spec.dual.items()}
-                   if out["polynomial_dual"] else None),
+        dual_poly=_dual_polys(spec, out),
+        box=out.get("box"),
+        box_trees=out.get("box_trees"),
+        free=out.get("free") or None,
+        claim=out.get("claim"),
+        primal=out.get("primal"),
         sense=out["sense"],
         region=out["region"] or None,
         bound=out["bound"].serialize(),
@@ -994,14 +1120,60 @@ def parametric(spec, limits: Limits | None = None,
         title=spec.title,
     ).stamp(spec_path or None)
 
-    key = "engine.param.proved_min" if out["sense"] == "min" \
-        else "engine.param.proved"
-    return Result("parametric", Status.UNSAT, Verdict.PROVED, ENGINE_PARAM,
+    if out.get("witness") == "primal":
+        key = ("engine.param.primal_min" if out["sense"] == "min"
+               else "engine.param.primal_max")
+    else:
+        key = "engine.param.proved_min" if out["sense"] == "min" \
+            else "engine.param.proved"
+    detail = t(key, bound=str(out["bound"]) or "0", floor=floor)
+    status, verdict = Status.UNSAT, Verdict.PROVED
+    if out.get("claim") is not None:
+        c = out["claim"]
+        if c["holds"]:
+            detail += " -- " + t("engine.param.claim_holds",
+                                 relation=c["relation"], target=str(
+                                     _poly_text(spec, c["target"])))
+        else:
+            # The bound is certified; the CLAIM is not shown, and a bound that
+            # falls short of what was asked is not the thing that was asked.
+            status, verdict = Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE
+            detail += " -- " + t("engine.param.claim_not_shown",
+                                 relation=c["relation"], target=str(
+                                     _poly_text(spec, c["target"])))
+    return Result("parametric", status, verdict, ENGINE_PARAM,
                   ms, cert,
-                  detail=t(key, bound=str(out["bound"]), floor=floor),
+                  detail=detail,
                   meta={"bound": str(out["bound"]), "floor": floor,
                         "sense": out["sense"],
                         "columns": len(out["variables"])})
+
+
+def _dual_texts(spec, out):
+    from ..parametric import dual_text
+    from ..polynomials import Poly
+
+    if out.get("found_dual") is not None:
+        ring = tuple(spec.parameters)
+        return {n: dual_text(Poly.parse(ring, v))
+                for n, v in out["found_dual"].items()}
+    if not isinstance(spec.dual, dict):
+        return {}
+    return {str(n): _dual_str(spec, v) for n, v in spec.dual.items()}
+
+
+def _dual_polys(spec, out):
+    if out.get("found_dual") is not None:
+        return dict(out["found_dual"])
+    if isinstance(spec.dual, dict) and out["polynomial_dual"]:
+        return {str(n): _ser(spec, v) for n, v in spec.dual.items()}
+    return None
+
+
+def _poly_text(spec, serialized):
+    from ..polynomials import Poly
+
+    return Poly.parse(tuple(spec.parameters), serialized)
 
 
 def _dual_str(spec, v):
@@ -1165,7 +1337,9 @@ def sos(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                       detail=t("engine.ideal.not_polynomial", detail=str(e)))
 
     try:
-        found, why = sosmod.certify(p, spec.half_degree, spec.iterations)
+        found, why = sosmod.certify(
+            p, spec.half_degree, spec.iterations,
+            time_limit_s=max(1.0, (limits or Limits()).timeout_ms / 1000))
     except sosmod.NoBackend as e:
         return Result("sos", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_SOS, 0.0, None,

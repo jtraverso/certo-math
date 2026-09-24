@@ -379,6 +379,40 @@ def _check_sweep(spec, limits):
         yield _f(WARN, "sweep.big_no_canon", n=len(family))
     for f in _predicate_findings(spec, family[0]):
         yield f
+    for f in _small_sizes(spec):
+        yield f
+
+
+def _small_sizes(spec):
+    """The degenerate sizes below the one swept: 0, 1 and 2 vertices.
+
+    A statement proved by a sweep at n=7 and meant for every n is still a
+    statement about n=0, where the only graph has no vertices and every
+    "for all vertices" holds for free. A user's statement was false there, and
+    it went to a proof assistant that way: the sweep had never been asked. At
+    most four graphs per size, so this costs nothing to check.
+    """
+    if spec.predicate is None:
+        return
+    from .engines.graphsearch import _evaluate
+    from .graphs import enumerate_graphs
+
+    for k in range(0, min(spec.n, 3)):
+        try:
+            fam, _e, _t = enumerate_graphs(k, spec.filters, use_geng=False)
+        except Exception:  # noqa: BLE001
+            continue
+        if not fam:
+            yield _f(NOTE, "sweep.small_empty", k=k)
+            continue
+        bad = []
+        for g in fam:
+            out = _evaluate(spec, g)
+            if out.ok is not True:
+                bad.append(g.to_graph6())
+        if bad:
+            yield _f(WARN, "sweep.small_fails", k=k, n=spec.n,
+                     graphs=", ".join(bad[:3]))
 
 
 def _peek(spec):

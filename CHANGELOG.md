@@ -6,6 +6,377 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.17.0] — 2026-09-24
+
+**Six user reports, a command, three certificate kinds, and two silent
+substitutions found and closed.** A minor: `columns` is the 50th command and
+`clique_lp`, `symmetric_inertia` join the kinds -- 52 now -- and `numerics`
+gains highspy, `polyhedra` is a new extra for pycddlib. No existing payload
+changes shape; every new field is optional, and certificates from before
+still verify, with a warning where they say less than a new one would.
+
+The two that mattered most were answers certo gave for a DIFFERENT problem
+than the one written, without a word: a free variable read as `x >= 0`, which
+certified 0 for an optimum of -5, and `n = 0` enumerated as the graph on one
+vertex. Both are fixed, and the rest of this entry is what the reports asked
+for, measured.
+
+### `parametric` on a box, by Bernstein coefficients -- and the dual found
+
+Ranked first, twice, by the user who writes parametric certificates for a
+living: the shift test proves non-negativity on a RAY `p >= p0`, so every
+bounded box was reparametrised by hand as `p = lo + h t/(1+t)`, the Bernstein
+coefficients computed in Python -- 20 seconds a box -- an exact LP solved at
+every control point, and the polynomial dual assembled from the pieces.
+
+**`box={p: (lo, hi)}`** decides every non-negativity in the certificate -- the
+dual, every column, the claim, a primal -- by Bernstein coefficients on the
+box, exactly: they are non-negative, so the polynomial is a convex combination
+of non-negative numbers at every point. Sufficient and not necessary, like the
+shift test it replaces there. **`subdivide=d`** halves the box up to `d` times
+where one set of coefficients is not enough, and the certificate records the
+splits -- `verify` recomputes the coefficients of every leaf, and a negative
+CORNER coefficient, which is a value at a vertex, ends the search at once.
+
+**`dual="bernstein"`, `dual_degree=k`** finds the polynomial dual: its
+Bernstein coefficients are the unknowns of ONE exact LP, since the residuals'
+coefficients are linear in them by the product formula, and `opt` certifies
+it. On `max x, (2-p) x <= 1` over `[0, 1]`, whose optimum 1/(2-p) is not a
+polynomial, it finds `p^2/4 + p/4 + 1/2`: tight at both ends, above the
+optimum between them. What it finds is checked like any dual somebody brought.
+
+Measured before shipping: the coefficients agree with the polynomial at every
+vertex, the basis round-trips exactly, and on 60 random polynomials no box was
+ever called non-negative where a grid found the polynomial negative. The
+certificate now also records, per polynomial, the degree it is checked at --
+a dual found at degree `k` is non-negative there, and its residual's
+coefficients at the residual's own, lower, degree can be looser. `box` with
+`region` is refused for now; the region's multipliers are found for the ray.
+
+### Free variables, equality rows, a claimed target, and a primal witness
+
+Four things one user did by hand for every parametric box, and one they did
+for every price in `LPSpec`.
+
+**`LPSpec` free variables, natively.** `opt` splits each `lo=None` variable
+into `x_pos - x_neg`, certifies the split program in the standard form, and
+records the split; `verify` checks the two columns are exact negatives in
+every row and in the objective, which is what makes the certified program the
+image of the one written. `min x` over `x >= -5` now certifies -5 -- the
+program that, before this release, was certified as 0. Other engines that
+read an `LPSpec` still refuse a free variable rather than guess.
+
+**`ParametricSpec`: `"=="` rows and `free=[...]`.** An equality row's dual has
+no sign, so its `y >= 0` is not asked; a free variable's column must balance
+exactly -- the residual identically zero -- instead of being non-negative.
+Neither splits anything.
+
+**`claim=T(p)`.** The certificate also proves `bound <= T` on the region
+(`>=` for a minimisation) by the same shift test, instead of the target being
+encoded as a variable and two rows. When the shift test does not show it the
+bound is still certified and the verdict is INCONCLUSIVE: a bound that falls
+short of the claim is not the claim.
+
+**`primal={var: x(p)}`** instead of a dual proves the other direction: every
+row holds and every non-free `x >= 0` for all `p`, so a minimisation is at
+most `c.x(p)` and a maximisation at least. Any row sense is allowed, since
+only feasibility is checked. It replaces passing a primal off as the dual of
+a max program, sign by sign.
+
+### `sweep`: filters pushed into `geng`, edge ranges, and the sizes where a statement is empty
+
+**The filters reach `geng`.** A user's chordal sweep at n=9 enumerated 274 668
+graphs to keep 125, because only `connected` was passed on. `-d`/`-D` for the
+degrees and the edge range always go now, and `triangle_free`, `k4_free` and
+`chordal` when the installed `geng`'s own help lists them. Every filter is
+applied again in Python afterwards, so pushing one can only save time -- and
+because a pushed flag that excluded MORE than the filter would lose graphs
+silently, a test compares the two routes where `geng` is installed, and CI now
+installs nauty on Linux so that it runs. certo also finds `geng` under
+Debian's name, `nauty-geng`, which it never looked for.
+
+**`edges=A:B`, `min_edges=K`, `max_edges=K`**: `edges=K` was exact only.
+
+**n = 0 was the graph on one vertex.** The Python enumeration starts from one
+vertex, so a sweep "at n=0" examined K1 and reported it as the case n=0 -- at
+the size most likely to break a statement, which is where a user's did. It is
+the empty graph now, and a negative n is refused.
+
+**Vacuity, named.** `sweep --n-range` already existed -- the user who asked
+for it had not found it -- and now says, per size and in the certificate,
+where the family is EMPTY and the statement holds only because it has no
+instances; `verify` recomputes the list. `lint` looks below the swept size:
+a predicate that fails at n = 0, 1 or 2, or a family empty there, is reported
+with the graph, since a statement swept at n=7 and meant for every n is still
+a statement about n=0.
+
+### Branch and bound: no certificate at every node
+
+A node of `mixed --prove-optimal` kept only the dual and the primal of its LP,
+and `opt` built a whole `lp_dual` certificate for it anyway -- on 1048 columns,
+97 million `serialize` calls in 71 nodes. Nodes now take the two vectors, from
+the same exact check, and `as_leq_system` builds rows from their non-zeros.
+Honestly: the 1048-column instance still does not finish in 20 minutes (90
+nodes, from 71); the matrix is still materialised densely per node, and making
+it sparse end to end is the next step, recorded in the backlog.
+
+### Three bugs from two more reports, one of them a silent substitution
+
+**A free variable was read as non-negative.** `LPSpec.variable("x", None,
+None)` -- "free" -- and a negative lower bound were both taken as `x >= 0`
+without a word, so `min x` over `x >= -5` came back "EXACT optimum certified:
+0". The certificate was right about the program certo solved, and that was not
+the program written -- the failure this tool exists to refuse. `opt` already
+rejected a negative bound; nothing rejected `None`, and every other engine
+that reads an `LPSpec` accepted both. The check now sits in `as_leq_system`,
+which all of them go through, and the message says how to write it: a free
+variable as the difference of two, a negative bound as a shift. Supporting free
+variables natively is in the backlog.
+
+**`doctor` called a user-site install a source tree.** `pip install --user`,
+or pip on a machine without admin rights, installs into the USER
+site-packages, and `doctor` only looked at the system ones -- so it warned
+about metadata that `pip show` correctly called installed.
+
+**`doctor --register-mcp` could only write to the current directory**, though
+the function underneath always took a path. `--mcp-path FILE` passes one.
+
+### `certo columns`: an LP over every clique of a graph, without listing them
+
+A user wrote their own column generation because `opt` needs every column up
+front, and the columns they needed were "every clique of this graph". The
+50th command, and the 52nd certificate kind, `clique_lp`: `packing`, `cover`
+or `partition` over the cliques of size at least `min_size`, one row per edge,
+with a weight linear in the clique's counts.
+
+The restricted LP is solved and certified exactly by `opt`, as before. What is
+new is the claim about the columns NOT generated -- that none has positive
+reduced cost against the exact dual -- and that claim is not a promise from an
+oracle: it is an exact search over the cliques, pruned by a bound valid for
+every extension of a partial clique, and `verify` runs the same search again
+and must reach the same largest reduced cost, the same clique and the same
+node count. Weak duality then makes the optimum the optimum over all cliques.
+
+Measured honestly, including against itself: on the user's 30-vertex split
+graph with 1048 cliques, listing them for `opt` took 0.5 s after this
+release's LP fixes, and `columns` 2.3 s. It is for the graphs where listing is
+the problem, and the page says so. Checked against the explicit LP on 84
+random graphs across the three problems, with no disagreement. A `cover` edge
+in no allowed clique is reported infeasible with the edge named; a
+`partition` with only larger cliques is refused, because proving it
+infeasible needs a Farkas certificate over implicit columns.
+
+### The coverage log, read for the first time -- and what it could not say
+
+The first reading of the log on a machine that had used certo for three days
+said five entries -- and two of them were not use at all: they were the MCP
+test suite, run by hand, appending its deliberately unsettled questions to the
+log of whoever ran it. No test file pointed the log anywhere else, and neither
+did the examples runner, several of whose examples are inconclusive on
+purpose. Every one of them now sends the log to a temporary file unless its
+caller chose one, and the entries the tests had written were removed.
+
+What was left is three: `family` twice and `semigroup` once, all
+`out_of_theory`. Too few to rank anything, which was expected. What was not
+expected is that **every `shape` was empty**:
+an `out_of_theory` usually carries a sentence and no `meta`, and the sentence
+-- the only thing saying WHICH gap it was -- was not kept. At that rate the
+log would have filled without ever being able to become a map.
+
+Each entry now records `why`: the catalogue key of the message that explained
+the result, matched against the catalogue in either language. `family.max_only`
+is a fact about certo -- `family` does not minimise -- and carries nothing of
+what was asked; the values filled into the sentence are never written, and a
+test puts a marker in them to check. `summary` counts by it.
+
+### The budget reaches every backend a question runs
+
+0.13.0 bounded the one call that had no bound at all. The rest were bounded by
+constants nobody could move: `drat-trim` got 60 seconds whatever
+`--timeout-ms` said, Clarabel inside `sos` had no clock, `export --check`
+compiled Lean for up to 900 seconds, and `geng`'s clock existed in `Limits` but
+no flag reached it. Now `--timeout-ms` reaches z3, HiGHS and CBC, Clarabel,
+the SAT binaries and `drat-trim`; `--enumerate-timeout-s` and
+`--max-output-mb` reach `geng`, separate from a solver's clock as `Limits`
+always intended; and `export --check-timeout-s` bounds the Lean build. Two
+things stay outside it, and the options page says so: `doctor`'s probes and
+the provenance `git` call, with short bounds of their own, and cddlib's facet
+computation, which runs in-process where a C call cannot be interrupted.
+
+### What a result means, on one page -- and `opt` saying how to close a gap
+
+A user read `conditional_optimum` as close to a proof, was confused by an
+`unsat` status on a proved optimum, and found certified branch and bound by
+reading the code -- although `mixed --prove-optimal` has existed since 0.4.0.
+All three were findable only by someone who already knew. **`docs/VERDICTS.md`**
+is now the one place that says what each status and verdict means, why they
+differ, the four optimisation results that look alike on screen and establish
+different things, and `false` against `null` in a certificate. And every
+message that leaves an integer optimum open -- `opt` with a gap, `mixed` at
+`feasible` or `conditional_optimum` -- now ends by naming
+`certo mixed SPEC --prove-optimal`.
+
+### `matrix` answers the inertia of a symmetric rational matrix
+
+The same user computed 120 479 inertias elsewhere, under a 32 by 32 limit,
+because `matrix` did integers only. `question="inertia"` takes a symmetric
+matrix of exact rationals and answers with a congruence -- `S A S^T = D` and
+`S S_inv = I` -- so by Sylvester's law the signs of `D` are the inertia and a
+verifier multiplies twice. `question="psd"` is PROVED by the same congruence
+or REFUTED by a vector `x` with `x^T A x < 0`. The 51st certificate kind,
+`symmetric_inertia`.
+
+`sos` already had an exact LDL^T, and it stops at a zero pivot whose column is
+not zero -- right for `sos`, fatal for an inertia: `[[0,1],[1,0]]` has no usable
+pivot and inertia (1, 1, 0). Adding one row and column to another makes the
+pivot `2 a_kj`, and that is a congruence too, so it goes into `S` with its
+inverse.
+
+A certificate is not what a loop over a hundred thousand matrices wants, and
+the certified path measured 150 ms at 20 by 20. So `certo.inertia.signature`
+gives the three numbers exactly by fraction-free elimination, 3.5 ms at 20 by
+20 and 11 at 32 by 32, and says in its name and its docstring that it is not a
+certificate. Checked against the certified path on 2000 random matrices and
+against numpy's eigenvalues wherever they are unambiguous.
+
+**Found on the way:** the table of certificate kinds said "forty-seven" and
+was missing `branch_frontier`, `affine_semigroup` and `capacity_profile`,
+three releases after the first of them. A test now compares that table with
+the verifier registry, in both languages.
+
+### `semigroup` decides with the facets, and "not pointed" needs a proof
+
+**A claim with nothing behind it, found while measuring something else.** When
+no grading was found, the certificate said `pointed: false` -- "I did not find
+one" written as "there is none". The subset search that looks for gradings
+missed 63 of 140 random pointed cones, so this was not rare. `pointed` is now
+`true` with the grading, `false` with **non-negative integers, not all zero,
+that combine the generators to zero**, and `null` when neither was found.
+Looking for that combination one generator at a time is complete: a line in
+the cone has a generator on it, so `-a_i` is in the cone for that `i`. A
+certificate from before this still verifies, and its warning says what it never
+showed.
+
+**pycddlib, as `certo[polyhedra]`.** The double description gives the facets of
+the cone exactly, and with them pointedness, cone membership and the separator
+are decided instead of searched, and the grading is the one with the smallest
+largest degree, by an exact LP. Measured before integrating: gradings for 140
+of 140 pointed cones against 77; on 26 generators in dimension 5, a point
+outside the cone decided in a hundredth of a second where Caratheodory gave up
+after twelve. The separators, which were the reason for trying it, turned out
+not to need it -- the subset search found 633 of 633 -- which is why this was
+measured first.
+
+Nothing cddlib returns is believed: a facet is a candidate vector, checked by
+the same dot products as without it, and "outside the cone" is only said with
+the separator that shows it. A test hands the code a facet that cuts the cone
+and checks the point inside is still inside. Its own extra rather than part of
+`numerics`, because pycddlib ships wheels only for Windows and elsewhere builds
+against cddlib and GMP; CI tries to install it on all three systems and
+warns, rather than fails, where it cannot. `doctor` has a row for it, and the
+certificate says which backend answered.
+
+**Also found:** a point Caratheodory gave up on was never offered to the
+separator search, so it stayed "unknown" when the answer was a dot product
+away. It is now tried, with or without cddlib.
+
+### The semigroup search, 60 times faster, and gmpy2 measured and left out
+
+gmpy2 was next on the list, on the promise that its rationals are 10 to 100
+times faster than `Fraction`. Measured here they are 2 to 4.6 times faster,
+most of the cost being the Python loop rather than the arithmetic -- and across
+all 69 examples `Fraction` is **2%** of the profiled time, 2.5 seconds of 136.
+A dependency for that is not worth having.
+
+The one place it was not 2% was `semigroup` on 26 generators, at 17 seconds, 85%
+of it in `dot`. The fix was not faster rationals but none: the graded search
+recomputed `<u, cand>` at every node, and the degree is linear, so a step adds
+the generator's degree -- an integer addition. 17.2 s became 0.29 s, and a
+comparison against the previous version on 1104 random searches returned the
+same answer, the same bound and the same node count in every one, which matters
+because the node count is the budget.
+
+### Rows named like edges lost their duals, and branch and bound paid for it
+
+A user's certified branch and bound took 47 seconds on a 17-column packing
+that their own took 0.2 on. Profiled, 175 of 177 seconds were the exact
+route ENUMERATING duals at every node -- because the solver's dual had come
+back empty. PuLP rewrites the characters it dislikes, `0-1` becoming `0_1`,
+and certo read the duals back by the name it had given; every row named like
+an edge, which is how anyone names a packing's rows, had none. Nothing was
+wrong -- the exact route derives the dual from the problem when it has to,
+which is why this cost time and never a certificate -- but deriving it meant
+trying some 300 candidates a node where rounding one would have done.
+
+The solver now sees positions, never names. On the user's four instances,
+same optima, all `PROVED`: 47.0 s to 4.0, 132.8 to 6.7, 94.9 to 8.2, 21.2 to
+4.4. The same rewriting made two names that differ only in such a character
+the same name to PuLP -- refused as rows, and crashing CBC as columns -- and
+positions cannot collide.
+
+### HiGHS for every continuous solve, CBC kept for the integral ones
+
+`opt` solved every LP by starting CBC as a subprocess and passing it files.
+On a six-variable LP that took 258 ms, and HiGHS in-process, through highspy,
+took 1.3. HiGHS was expected to be faster on integer programs too, and was
+measured before it was trusted with them: on random MILPs it was 1.5 to 2
+times SLOWER than CBC. So the split follows the measurement -- HiGHS for LPs
+and for the relaxation of an integer program, CBC for the integral solve.
+highspy joins `numerics`, since it needs numpy; without it every solve is CBC,
+as before.
+
+Every example was run both ways. Where LPs are many it shows: `family` 22.9 s
+to 3.7, a sweep that certifies an LP per case 9.6 s to 3.5, `bisect` over a
+bound 8.4 s to 3.9. Over all 68 that write a certificate the answers were
+identical. Seventeen payloads differed; in every one both certificates
+verified, twelve differed only in timestamps and the new `backend`, and five
+in which optimal vertex a degenerate program returned.
+
+Nothing about correctness moved: the exact route reconstructs and checks
+whatever either solver returns. Two things were found on the way. HiGHS
+reports the duals of a maximisation with the opposite sign to CBC's, on every
+problem measured, so they are turned round on the way in and the exact route
+starts from the same dual. And on a DEGENERATE program the two return
+different optimal vertices, so two correct certificates of the same optimum
+can now differ in `primal` and `dual` -- a first test said "identical" and was
+wrong about the hexagon. The certificate records its `backend`, and
+`CERTO_LP_SOLVER=cbc` puts every solve back on CBC for anyone reproducing an
+earlier run.
+
+### `certo report`: whose bug is it, and a folder to file it with
+
+Almost every report this project received could not say whose fault the
+failure was. An adapter's `AttributeError` filed as the user's own mistake was
+certo's; a constraint `restricted()` dropped was found by hand, because no
+solver could see it; a download that failed was the network. So the part worth
+automating was never the form -- it was the TRIAGE, and certo already had the
+pieces: `doctor` for the machine, `lint` for the spec, its own verifier for its
+own certificates.
+
+What it did not have was the traceback. `cli.main` turns every exception into
+one line, which is right at a terminal and useless for deciding anything.
+`report` re-runs the command keeping it, and names whose CALL failed by the
+innermost frame belonging to certo or to the spec -- skipping library frames,
+which is the version that survived its own test: the first rule took the
+innermost frame outright, and would have filed certo handing numpy garbage as
+nobody's.
+
+**Nothing is sent**, and a test checks the module imports nothing that could.
+The folder holds the spec, which may be unpublished; the printed link opens a
+pre-filled issue carrying only version, platform and triage, or the private
+advisory form for a certificate that verifies and is false. Home paths become
+`<user>` in every spelling Windows produces. `--coverage` adds which kinds of
+question certo could not settle here -- counts only -- which is the first route
+by which that data can reach anybody but the machine it was recorded on.
+
+When certo's own certificate fails its own self-check, it knows the bug is its
+own, and writes the report without being asked: into the data directory, never
+the working one, and never sent.
+
+**The inbox.** Issue forms with the triage as a field `certo report` fills, a
+workflow that labels from it, and private vulnerability reporting switched on
+for what must not be public.
+
 ## [0.16.0] — 2026-09-23
 
 **A real SDP solver behind `sos`, and a textbook idea measured and left out.**
@@ -300,6 +671,10 @@ anything. An M-sized refactor of the file with the subtlest bugs in the
 repository, avoided by an afternoon of measurement.
 
 ## [0.14.0] — 2026-09-23
+
+> **Never published on its own.** There is no `v0.14.0` tag and no 0.14.0 on
+> PyPI: this work reached the index inside **0.15.0**, which is the version to
+> install for it. The section is kept because it says what changed and why.
 
 **Three asks from a research group using 0.13.0 against a chordal-graph
 problem.** A minor rather than a patch: `capacity_profile` is a NEW kind --

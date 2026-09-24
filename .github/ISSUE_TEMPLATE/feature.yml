@@ -1,0 +1,36 @@
+name: Feature request
+description: A mathematical question certo cannot answer yet, or a way it could answer better.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The requests that have shaped certo most came with a real instance: the
+        object, the question, and what an answer would let you do next. A request
+        that arrives with one is much easier to size honestly.
+
+        If certo came back `out_of_theory` or `unknown_solver` on your question,
+        `certo report --coverage <the command>` shows which kinds of question it
+        could not settle on your machine, without saying what they were.
+  - type: textarea
+    id: question
+    attributes:
+      label: The question
+      description: What you want to establish, in mathematical terms.
+    validations:
+      required: true
+  - type: textarea
+    id: instance
+    attributes:
+      label: An instance
+      description: A concrete case, however small. Only what you are willing to make public.
+  - type: textarea
+    id: certificate
+    attributes:
+      label: What would convince you
+      description: What a certificate for this should contain -- what a reader would check, and how.
+  - type: textarea
+    id: today
+    attributes:
+      label: What you do today instead
+      description: The workaround, if any. It usually says where the gap really is.

@@ -1,0 +1,44 @@
+name: triage
+
+# A report filed through `certo report` arrives with its triage already in the
+# `Triage` field. This reads it and labels the issue, so the severity is visible
+# in the list before anybody opens it -- `certo-bug` is certain and gets seen
+# first. It only ever ADDS labels: a person's judgement, once made, is not
+# overwritten by a field somebody typed.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: read the triage field and label accordingly
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BODY: ${{ github.event.issue.body }}
+          NUMBER: ${{ github.event.issue.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          # Issue forms render an answer as "### Triage", a blank line, the value.
+          # BODY comes in through the environment, never interpolated into the
+          # script, so nothing a reporter types can run as a command.
+          VALUE=$(printf '%s\n' "$BODY" | awk '
+            /^### Triage[[:space:]]*$/ {grab=1; next}
+            grab && NF {print $1; exit}
+          ')
+          case "$VALUE" in
+            certo-bug)      LABEL=certo-bug ;;
+            "certo-bug?")   LABEL=certo-bug-probable ;;
+            soundness)      LABEL=soundness ;;
+            spec)           LABEL=spec ;;
+            environment)    LABEL=environment ;;
+            *)              LABEL="" ;;
+          esac
+          if [ -n "$LABEL" ]; then
+            gh issue edit "$NUMBER" --repo "$REPO" --add-label "$LABEL"
+          fi

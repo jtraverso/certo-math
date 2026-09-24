@@ -1,5 +1,13 @@
 """Language layer. `python tests/test_i18n.py`, or with pytest."""
 from __future__ import annotations
+# A test that leaves a question unsettled would otherwise append it to the
+# coverage log of whoever runs the suite -- which is how two test runs ended
+# up counted as real use in the first reading of one. Callers that chose a
+# file keep it.
+import os as _os  # noqa: E402
+import tempfile as _tempfile  # noqa: E402
+_os.environ.setdefault("CERTO_COVERAGE_FILE", _os.path.join(
+    _tempfile.mkdtemp(prefix="certo_test_coverage_"), "coverage.jsonl"))
 
 import json
 import pathlib

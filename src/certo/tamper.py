@@ -57,6 +57,9 @@ DESCRIPTIVE = {
     # `sos` keeps three counters beside the content: the squares themselves
     # are `terms`, and `poly` is what they have to sum to. Both are checked.
     "squares", "basis_size", "basis",
+    # `columns`: how many rounds and columns the generation took. The claims
+    # are the support, the dual and the pricing search; these say how long.
+    "rounds", "generated",
     # A sweep whose predicate cannot be re-run says so in a warning, loudly,
     # and then nothing checks the outcomes -- which is the honest behaviour
     # and is why mutating them changes no check.
@@ -110,6 +113,10 @@ WEAKENING = {
     "terms", "collected", "var",   # asymptotic: the Laurent data it reports
     "base_rows",        # farkas: the pre-product rows, kept for reading
     "rows",             # unsat_core: now tied to core_smt2, checked there
+    # parametric: dropping a variable from `free` claims the bound for the
+    # program where it is >= 0 -- a restriction, so a weaker statement, and a
+    # balanced column is non-negative anyway.
+    "free",
 }
 
 

@@ -29,7 +29,10 @@ bound travels with the answer and a verifier recomputes it.
 
 If no such functional exists the semigroup is not pointed, the search is not
 finite, and this says so rather than looking for a while and reporting
-nothing. Not pointed is a real answer about the object, not a failure.
+nothing. Not pointed is a real answer about the object, not a failure -- and
+like every answer here it carries its proof: non-negative integers, not all
+zero, whose combination of the generators is zero. When neither the grading
+nor that combination was found, `pointed` is None, undecided, and not False.
 
 WHAT IS CERTIFIED, and each of these is arithmetic to check:
 
@@ -37,7 +40,8 @@ WHAT IS CERTIFIED, and each of these is arithmetic to check:
                     existence is the statement; the vector is the proof.
 
   IN THE CONE       non-negative RATIONAL coefficients, by Caratheodory over
-                    subsets of independent generators. When the point is
+                    subsets of independent generators -- or, with cddlib, by
+                    the facets and one exact LP. When the point is
                     outside, a separating functional `y` with `<y, a_i> <= 0`
                     and `<y, v> > 0` -- one vector, checked by k+1 dot
                     products, instead of "I tried everything".
@@ -138,6 +142,138 @@ def dot(u, v) -> Fraction:
     return sum((Fraction(a) * Fraction(b) for a, b in zip(u, v)), Fraction(0))
 
 
+# --- cddlib, when installed: the facets, which make the searches complete ---
+#
+# Every search below that looks at subsets of generators is complete only up
+# to MAX_SUBSETS, and the grading search is not complete at all. cddlib's
+# double description gives the FACETS of the cone exactly, in rationals, and
+# with the facets each of those questions is decided: a point is outside iff
+# it violates one (and that facet is the separator), the cone is pointed iff
+# the facets span, and their sum is then a grading. Measured on 150 random
+# pointed cones: the subset search found a grading for 77, the facets for 140
+# of 140 -- the other ten were not pointed, which the facets also said.
+#
+# Nothing cddlib returns is believed. A facet is used only as a candidate
+# vector, and every vector that reaches a certificate is checked here by the
+# same dot products it is checked by without cddlib. A bug in the library, or
+# in how it is read, can cost an answer and cannot produce a wrong one.
+
+
+def _cdd():
+    try:
+        import cdd.gmp as cdd          # exact: gmp rationals, never floats
+        return cdd
+    except Exception:  # noqa: BLE001 -- absent, or present and broken
+        return None
+
+
+def backend() -> str:
+    """`cddlib` when its facets are available, `search` otherwise."""
+    return "cddlib" if _cdd() is not None else "search"
+
+
+_FACETS = {}
+
+
+def facets(gens):
+    """`(inequalities, equations)` of the cone over `gens`, or None.
+
+    `<y, x> >= 0` for each inequality and `== 0` for each equation, on every
+    point of the cone and nowhere else. None when cddlib is not installed or
+    fails; callers fall back to the subset searches.
+    """
+    cdd = _cdd()
+    if cdd is None:
+        return None
+    key = tuple(tuple(int(x) for x in a) for a in gens)
+    if key in _FACETS:
+        return _FACETS[key]
+    out = None
+    if key:
+        try:
+            mat = cdd.matrix_from_array([[0] + list(a) for a in key],
+                                        rep_type=cdd.RepType.GENERATOR)
+            H = cdd.copy_inequalities(cdd.polyhedron_from_matrix(mat))
+            ineq, eq = [], []
+            for i, row in enumerate(H.array):
+                if Fraction(row[0]) != 0:
+                    continue           # an affine row; a cone has none
+                y = [Fraction(x) for x in row[1:]]
+                if not any(y):
+                    continue
+                (eq if i in H.lin_set else ineq).append(y)
+            # Checked before use: every generator satisfies every row. A
+            # library that disagrees with arithmetic is not consulted.
+            if all(dot(y, a) >= 0 for y in ineq for a in key) and all(
+                    dot(y, a) == 0 for y in eq for a in key):
+                out = (ineq, eq)
+        except Exception:  # noqa: BLE001
+            out = None
+    if len(_FACETS) > 256:
+        _FACETS.clear()
+    _FACETS[key] = out
+    return out
+
+
+def _cdd_coefficients(gens, v):
+    """Non-negative rationals `lam` with `sum lam_i a_i = v`, by an exact LP.
+
+    Returns the vector (checked), False when the LP says infeasible, or None
+    when cddlib is absent or its answer did not survive the check.
+    """
+    cdd = _cdd()
+    if cdd is None:
+        return None
+    A, k, d = list(gens), len(gens), len(v)
+    rows = []
+    for i in range(d):             # an equation as two inequalities
+        rows.append([-Fraction(v[i])] + [Fraction(A[j][i]) for j in range(k)])
+        rows.append([Fraction(v[i])] + [-Fraction(A[j][i]) for j in range(k)])
+    for j in range(k):
+        rows.append([0] + [1 if i == j else 0 for i in range(k)])
+    rows.append([0] + [-1] * k)    # objective: the smallest total weight
+    try:
+        lp = cdd.linprog_from_array(rows, obj_type=cdd.LPObjType.MAX)
+        cdd.linprog_solve(lp)
+        if lp.status == cdd.LPStatusType.INCONSISTENT:
+            return False
+        if lp.status != cdd.LPStatusType.OPTIMAL:
+            return None
+        lam = [Fraction(x) for x in lp.primal_solution]
+    except Exception:  # noqa: BLE001
+        return None
+    if len(lam) != k or any(c < 0 for c in lam) or any(
+            sum((lam[j] * A[j][i] for j in range(k)), Fraction(0)) != v[i]
+            for i in range(d)):
+        return None
+    return lam
+
+
+def _cdd_grading(gens):
+    """The grading minimising the largest degree of a generator, by an exact LP
+    over `(u, t)`: `<u, a_i> >= 1`, `<u, a_i> <= t`, minimise `t`. None when
+    cddlib is absent, or when no grading exists."""
+    cdd = _cdd()
+    if cdd is None:
+        return None
+    A = list(gens)
+    d = len(A[0])
+    rows = []
+    for a in A:
+        rows.append([-1] + [Fraction(x) for x in a] + [0])     # <u,a> - 1 >= 0
+        rows.append([0] + [-Fraction(x) for x in a] + [1])     # t - <u,a> >= 0
+    rows.append([0] + [0] * d + [-1])                          # max -t
+    try:
+        lp = cdd.linprog_from_array(rows, obj_type=cdd.LPObjType.MAX)
+        cdd.linprog_solve(lp)
+        if lp.status != cdd.LPStatusType.OPTIMAL:
+            return None
+        sol = [Fraction(x) for x in lp.primal_solution]
+    except Exception:  # noqa: BLE001
+        return None
+    return sol[:d] if len(sol) == d + 1 else None
+
+
 # --- pointedness: the functional that makes everything else finite ---------
 
 
@@ -167,17 +303,27 @@ def positive_functional(gens):
         cands.append([-x for x in e])
     cands.append([1] * d)
 
-    # And the normals to spanning subsets, which is what a facet-defining
-    # functional looks like when the cone is not full-dimensional.
-    seen = 0
-    for combo in itertools.combinations(range(len(A)), min(d - 1, len(A))):
-        seen += 1
-        if seen > MAX_SUBSETS:
-            break
-        n = _normal_to([A[i] for i in combo], d)
-        if n is not None:
-            cands.append(n)
-            cands.append([-x for x in n])
+    # With cddlib, the grading whose largest degree is smallest, by an exact
+    # LP. It is only a candidate like the others: it is checked below by the
+    # same dot products, and kept only if it is cheaper.
+    best_lp = _cdd_grading(A)
+    if best_lp is not None:
+        cands.append(best_lp)
+    elif facets(A) is None:
+        # And the normals to spanning subsets, which is what a facet-defining
+        # functional looks like when the cone is not full-dimensional. Only
+        # without cddlib: with it, an LP that finds no grading has decided
+        # there is none, and this loop would only spend the time to agree.
+        seen = 0
+        for combo in itertools.combinations(range(len(A)),
+                                            min(d - 1, len(A))):
+            seen += 1
+            if seen > MAX_SUBSETS:
+                break
+            n = _normal_to([A[i] for i in combo], d)
+            if n is not None:
+                cands.append(n)
+                cands.append([-x for x in n])
 
     # THE GRADING IS CHOSEN, NOT TAKEN. Every valid functional proves the
     # semigroup pointed equally well, but `<u, v>` is the bound on the search
@@ -266,6 +412,30 @@ def in_cone(gens, v):
     """
     A = list(gens)
     d = len(v)
+    # With the facets the question is decided outright: outside iff some facet
+    # is violated, and inside the coefficients come from one exact LP.
+    # Measured on 26 generators in dimension 5: Caratheodory gave up after 12
+    # seconds on points outside, and took 1 to 11 on points inside; the facets
+    # decided both in a hundredth.
+    fs = facets(A) if A else None
+    if fs is not None:
+        y = _violated(fs, v)
+        # OUTSIDE ONLY WITH THE SEPARATOR THAT SHOWS IT, checked here. The
+        # facets were checked against the generators when they were read;
+        # this does not lean on that, because "not in the cone" with nothing
+        # attached is a claim no verifier recomputes.
+        if y is not None:
+            y = _integral(y)
+            if all(dot(y, a) <= 0 for a in A) and dot(y, v) > 0:
+                return {"coefficients": None, "exhausted": True,
+                        "looked_at": 0, "separator": y, "backend": "cddlib"}
+        lam = _cdd_coefficients(A, v)
+        if lam:
+            return {"coefficients": lam,
+                    "support": [i for i, c in enumerate(lam) if c],
+                    "exhausted": True, "looked_at": 0, "backend": "cddlib"}
+        # inside by the facets and no checked coefficients: say nothing from
+        # cddlib, and let the search below decide as it always has
     rank = _rank(A) if A else 0
     seen = 0
     for size in range(1, min(rank, len(A)) + 1):
@@ -306,6 +476,13 @@ def separating(gens, v):
     if not A:
         return None
     d = len(v)
+    fs = facets(A)
+    if fs is not None:
+        y = _violated(fs, v)
+        if y is not None:
+            y = _integral(y)
+            if all(dot(y, a) <= 0 for a in A) and dot(y, v) > 0:
+                return y
     cands = []
     for j in range(d):
         e = [0] * d
@@ -327,6 +504,62 @@ def separating(gens, v):
             continue
         if all(dot(y, a) <= 0 for a in A) and dot(y, v) > 0:
             return [int(x) for x in y]
+    return None
+
+
+def _violated(fs, v):
+    """A separator from the facets: `y` with `<y, cone> <= 0 < <y, v>`, or
+    None when `v` satisfies every row."""
+    ineq, eq = fs
+    for y in ineq:
+        if dot(y, v) < 0:
+            return [-x for x in y]
+    for y in eq:
+        s = dot(y, v)
+        if s != 0:
+            return [(x if s > 0 else -x) for x in y]
+    return None
+
+
+def _integral(y):
+    """The same direction with coprime integer entries."""
+    den = 1
+    for x in y:
+        den = den * Fraction(x).denominator // _gcd(den, Fraction(x).denominator)
+    out = [int(Fraction(x) * den) for x in y]
+    g = 0
+    for x in out:
+        g = _gcd(g, x)
+    return [x // g for x in out] if g else out
+
+
+def not_pointed_witness(gens):
+    """Non-negative integers `c`, not all zero, with `sum c_i a_i = 0`.
+
+    That is what NOT POINTED means, and it is checked by one multiplication.
+    It is also complete to look for it one generator at a time: if the cone
+    contains a line, some generator lies on it, so `-a_i` is in the cone for
+    that `i`, and `a_i + sum lam_j a_j = 0` is the witness. Each look is one
+    `in_cone`, so with cddlib the answer is decided and without it it is as
+    complete as Caratheodory's budget. None when nothing was found.
+    """
+    A = list(gens)
+    for i, a in enumerate(A):
+        if not any(a):
+            c = [0] * len(A)
+            c[i] = 1
+            return c
+        got = in_cone(A, [-x for x in a])
+        lam = got.get("coefficients")
+        if lam is None:
+            continue
+        c = [Fraction(x) for x in lam]
+        c[i] += 1
+        c = _integral(c)
+        if (all(x >= 0 for x in c) and any(c)
+                and all(sum(c[j] * A[j][r] for j in range(len(A))) == 0
+                        for r in range(len(a)))):
+            return c
     return None
 
 
@@ -425,21 +658,29 @@ def in_semigroup(gens, v, u, max_nodes=MAX_NODES):
         return {"coefficients": [0] * len(A), "degree": str(deg_v),
                 "nodes": 0}
 
+    # THE DEGREE IS CARRIED, NOT RECOMPUTED. It is linear, so a step along
+    # `a_j` adds `degs[j]` -- and with integral degrees that is one integer
+    # addition where `dot(u, cand)` was d Fraction products. Profiled on 26
+    # generators in dimension 5 it was 85% of a 17-second run. The node count,
+    # which is the budget, is unchanged: the same nodes, in the same order.
+    step = [int(dd) for dd in degs] if integral else degs
+    limit = int(deg_v) if integral else deg_v
     seen = {start: []}
-    frontier = [start]
+    frontier = [(start, 0)]
     nodes = 0
     while frontier:
         nxt = []
-        for point in frontier:
+        for point, deg in frontier:
             for j, a in enumerate(A):
                 nodes += 1
                 if nodes > max_nodes:
                     return {"coefficients": None, "gave_up": True,
                             "why": "budget", "nodes": nodes,
                             "bound": bound}
-                cand = tuple(p + x for p, x in zip(point, a))
-                if dot(u, cand) > deg_v:
+                cdeg = deg + step[j]
+                if cdeg > limit:
                     continue
+                cand = tuple(p + x for p, x in zip(point, a))
                 if cand in seen:
                     continue
                 path = seen[point] + [j]
@@ -450,7 +691,7 @@ def in_semigroup(gens, v, u, max_nodes=MAX_NODES):
                         coeffs[j2] += 1
                     return {"coefficients": coeffs, "degree": str(deg_v),
                             "nodes": nodes}
-                nxt.append(cand)
+                nxt.append((cand, cdeg))
         frontier = nxt
     return {"coefficients": None, "bound": bound, "degree": str(deg_v),
             "exhausted": True, "nodes": nodes}
@@ -599,6 +840,13 @@ def certify(spec, max_nodes=MAX_NODES) -> dict:
 
     u = positive_functional(A)
     graded = u is not None
+    # POINTED IS A CLAIM EITHER WAY, so either way it carries its proof: the
+    # grading when it is pointed, a zero combination when it is not, and
+    # neither -- `None`, undecided -- when both searches ran out. It used to
+    # say False whenever no grading was found, which was "I did not find one"
+    # written as "there is none".
+    witness = None if graded else not_pointed_witness(A)
+    pointed = True if graded else (False if witness is not None else None)
 
     # Is any generator redundant? A generator in the semigroup generated by
     # the others is not part of the minimal system, which is the first thing
@@ -643,8 +891,14 @@ def certify(spec, max_nodes=MAX_NODES) -> dict:
             "search_bound": sg.get("bound"),
             "why_unknown": sg.get("why"),
         }
-        if entry["in_cone"] is False:
-            entry["separating"] = separating(A, v)
+        # Also when Caratheodory ran out of subsets: a separator settles the
+        # cone question on its own, and not looking for one left "unknown"
+        # where the answer was a dot product away.
+        if entry["in_cone"] is not True:
+            y = cone.get("separator") or separating(A, v)
+            if y is not None:
+                entry["separating"] = y
+                entry["in_cone"] = False
         # The three-part refutation of normality, only when all three parts
         # are actually established.
         entry["refutes_normality"] = bool(
@@ -679,7 +933,9 @@ def certify(spec, max_nodes=MAX_NODES) -> dict:
         "dimension": d,
         "rank": _rank(A),
         "lattice": None,
-        "pointed": graded,
+        "pointed": pointed,
+        "not_pointed_witness": witness,
+        "backend": backend(),
         "grading": None if u is None else [str(Fraction(x)) for x in u],
         "degrees": (None if u is None else
                     {n: str(dot(u, gens[n])) for n in order}),

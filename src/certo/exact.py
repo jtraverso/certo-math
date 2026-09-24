@@ -66,27 +66,67 @@ def parse_all(xs):
 # ---------------------------------------------------------------------------
 
 
+class Prepared:
+    """`A`, `b`, `c` converted to Fractions ONCE, with `A` kept by its
+    non-zeros in both directions.
+
+    `check_lp` used to convert the whole matrix and multiply it densely on
+    every call. On a 1048-column packing that was 21 seconds a call and 1097
+    seconds of a run, for a matrix that is almost all zeros -- and `certify`
+    calls it once per candidate. The arithmetic is the same arithmetic; what
+    goes is multiplying by zero two million times.
+    """
+
+    __slots__ = ("rows", "cols", "b", "c")
+
+    def __init__(self, A, b, c):
+        self.b = [to_fraction(v) for v in b]
+        self.c = [to_fraction(v) for v in c]
+        self.rows = []
+        for row in A:
+            r = []
+            for j, v in enumerate(row):
+                if not v:
+                    continue          # a zero, of whatever type, costs nothing
+                f = to_fraction(v)
+                if f:
+                    r.append((j, f))
+            self.rows.append(r)
+        self.cols = [[] for _ in self.c]
+        for i, r in enumerate(self.rows):
+            for j, f in r:
+                self.cols[j].append((i, f))
+
+    def row_dot(self, i, x) -> Fraction:
+        return sum((f * x[j] for j, f in self.rows[i]), Fraction(0))
+
+    def col_dot(self, j, y) -> Fraction:
+        return sum((f * y[i] for i, f in self.cols[j]), Fraction(0))
+
+
+def _sparse_dot(u, v) -> Fraction:
+    return sum((a * b for a, b in zip(u, v) if a and b), Fraction(0))
+
+
 def check_lp(A, b, c, x, y, tol_free: bool = True) -> dict:
     """Comprueba optimalidad en Fraction. Sin tolerancias, sin epsilon.
 
     Devuelve los cuatro veredictos por separado para poder decir QUE falla.
     Si los cuatro son ciertos, x e y son optimos y el objetivo es exacto:
     dualidad debil da c.x <= b.y siempre, y la igualdad cierra el sandwich.
+
+    `A` may be a `Prepared` already, which is how `certify` calls it.
     """
-    A = [[to_fraction(v) for v in row] for row in A]
-    b = [to_fraction(v) for v in b]
-    c = [to_fraction(v) for v in c]
+    P = A if isinstance(A, Prepared) else Prepared(A, b, c)
     x = [to_fraction(v) for v in x]
     y = [to_fraction(v) for v in y]
 
     primal_nonneg = all(v >= 0 for v in x)
-    primal_feasible = all(dot(A[i], x) <= b[i] for i in range(len(A)))
+    primal_feasible = all(P.row_dot(i, x) <= P.b[i]
+                          for i in range(len(P.rows)))
     dual_nonneg = all(v >= 0 for v in y)
-    dual_feasible = all(
-        sum((A[i][j] * y[i] for i in range(len(A))), Fraction(0)) >= c[j]
-        for j in range(len(c))
-    )
-    cx, by = dot(c, x), dot(b, y)
+    dual_feasible = all(P.col_dot(j, y) >= P.c[j] for j in range(len(P.c)))
+    cx, by = _sparse_dot(P.c, x), _sparse_dot(P.b, y)
     strong = cx == by
 
     return {
@@ -212,27 +252,29 @@ def dual_candidates(A, b, c, x, cap=MAX_BASES):
     """
     import itertools
 
-    A = [[to_fraction(v) for v in row] for row in A]
-    b = [to_fraction(v) for v in b]
-    c = [to_fraction(v) for v in c]
+    P = A if isinstance(A, Prepared) else Prepared(A, b, c)
+    c = P.c
     x = [to_fraction(v) for v in x]
+    m = len(P.rows)
+    entry = [dict(r) for r in P.rows]
 
-    tight = [i for i in range(len(A)) if dot(A[i], x) == b[i]]
+    tight = [i for i in range(m) if P.row_dot(i, x) == P.b[i]]
     active = [j for j in range(len(c)) if x[j] > 0]
     if not tight:
         # Nothing binds. The dual is zero, which is right when the optimum is
         # interior and rejected by check_lp when it is not.
-        yield [Fraction(0)] * len(A)
+        yield [Fraction(0)] * m
         return
 
     def solve_over(rows_used):
-        eqs = [[A[i][j] for i in rows_used] for j in active]
+        eqs = [[entry[i].get(j, Fraction(0)) for i in rows_used]
+               for j in active]
         rhs = [c[j] for j in active]
         sol = (solve_exact(eqs, rhs) if eqs
                else [Fraction(0)] * len(rows_used))
         if sol is None:
             return None
-        y = [Fraction(0)] * len(A)
+        y = [Fraction(0)] * m
         for pos, i in enumerate(rows_used):
             y[i] = sol[pos]
         return y
@@ -307,11 +349,12 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     1/2 and 3/11: every pair was exact at one shared rung.
     """
     last = None
+    P = Prepared(A, b, c)
     for denom in ladder:
         x = reconstruct(x_float, denom)
         for y_try in (y_float, *y_alts):
             y = reconstruct(y_try, denom)
-            rep = check_lp(A, b, c, x, y)
+            rep = check_lp(P, b, c, x, y)
             last = rep
             if rep["ok"]:
                 return x, y, rep, denom
@@ -322,15 +365,16 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     primals = []
     for dx in ladder:
         x = reconstruct(x_float, dx)
-        if all(v >= 0 for v in x) and            all(dot(A[i], x) <= to_fraction(b[i]) for i in range(len(A))):
+        if all(v >= 0 for v in x) and all(
+                P.row_dot(i, x) <= P.b[i] for i in range(len(P.rows))):
             primals.append((dx, x))
 
     # 2. Stop asking CBC what the dual is, and work it out. On a degenerate
     # vertex there are several optimal duals and CBC returns an arbitrary one;
     # here they are enumerated, and the exact check picks.
     for dx, x in primals:
-        for y in dual_candidates(A, b, c, x):
-            rep = check_lp(A, b, c, x, y)
+        for y in dual_candidates(P, b, c, x):
+            rep = check_lp(P, b, c, x, y)
             if rep["ok"]:
                 return x, y, rep, dx
             last = rep
@@ -356,7 +400,7 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
         return None, None, last, None
 
     for dx, x in primals:
-        rep = check_lp(A, b, c, x, y)
+        rep = check_lp(P, b, c, x, y)
         if rep["ok"]:
             return x, y, rep, dx
         last = rep
@@ -366,7 +410,7 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     # solution rounding onto a vertex.
     x = primal_from_dual(A, b, c, y)
     if x is not None:
-        rep = check_lp(A, b, c, x, y)
+        rep = check_lp(P, b, c, x, y)
         if rep["ok"]:
             denom = max((v.denominator for v in list(x) + list(y)), default=1)
             return x, y, rep, denom

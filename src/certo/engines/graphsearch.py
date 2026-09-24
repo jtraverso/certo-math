@@ -317,7 +317,11 @@ def sweep_range(spec, lo: int, hi: int, limits: Limits | None = None,
             if res.certificate is not None and spec_path:
                 res.certificate.stamp(spec_path)
             row = {"n": n, "verdict": res.verdict.value, "detail": res.detail,
-                   "cert": res.certificate.to_dict() if res.certificate else None}
+                   "cert": res.certificate.to_dict() if res.certificate else None,
+                   # An EMPTY family proves the statement at this n by
+                   # vacuity, which is true and is almost never what was
+                   # meant. It is said per size, not buried in a count.
+                   "vacuous": (res.meta or {}).get("in_family") == 0}
             entries.append(row)
             if on_size is not None:
                 on_size(row)
@@ -329,14 +333,19 @@ def sweep_range(spec, lo: int, hi: int, limits: Limits | None = None,
     finally:
         spec.n = original_n
 
-    cert = sweep_range_certificate(entries, first, stopped)
+    vacuous = [e["n"] for e in entries if e.get("vacuous")]
+    cert = sweep_range_certificate(entries, first, stopped, vacuous=vacuous)
     ms = (time.perf_counter() - t0) * 1000
     meta = {"sizes": [e["n"] for e in entries], "first_failure": first,
-            "stopped_early": stopped,
+            "stopped_early": stopped, "vacuous_sizes": vacuous,
             "verdicts": {e["n"]: e["verdict"] for e in entries}}
     if first is not None:
         return Result("sweep", Status.SAT, Verdict.REFUTED, "certo/range", ms,
                       cert, detail=t("engine.range.first", lo=lo, hi=hi,
                                      first=first), meta=meta)
+    detail = t("engine.range.none", lo=lo, hi=hi)
+    if vacuous:
+        detail += " -- " + t("engine.range.vacuous",
+                             sizes=", ".join(map(str, vacuous)))
     return Result("sweep", Status.UNSAT, Verdict.PROVED, "certo/range", ms,
-                  cert, detail=t("engine.range.none", lo=lo, hi=hi), meta=meta)
+                  cert, detail=detail, meta=meta)

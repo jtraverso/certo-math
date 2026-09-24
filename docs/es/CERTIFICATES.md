@@ -25,7 +25,7 @@ certificado en concreto: *"verificado sin solver"*, *"comprobado contando, sin
 solver"*, *"reejecutando el spec, no confiando en sus respuestas"*. La tabla de
 abajo es el mapa; la cabecera es el territorio.
 
-## Los cuarenta y siete tipos
+## Los cincuenta y dos tipos
 
 | Tipo | Qué atestigua | ¿Sin solver? |
 |---|---|---|
@@ -65,6 +65,11 @@ abajo es el mapa; la cabecera es el territorio.
 | `symmetry_reduction` | las tres hipótesis del argumento de promediado | **sí**, el cociente se reconstruye |
 | `equitable_quotient` | la partición, ambas regularidades, y los dos mapas | **sí**, conteo exacto |
 | `integer_matrix` | rango, determinante, Hermite, Smith, con las transformaciones | **sí**, multiplicación de matrices |
+| `clique_lp` | un óptimo LP sobre todas las cliques de un grafo, sin listarlas | **sí**, aritmética racional y la búsqueda de precios repetida |
+| `symmetric_inertia` | la inercia de una matriz simétrica racional, PSD, y un vector que refuta PSD | **sí**, dos productos racionales: `S A Sᵀ = D`, `S S⁻¹ = I` |
+| `affine_semigroup` | puntiagudo, pertenencia al cono, al grupo y al semigrupo, refutación de normalidad, base de Hilbert propuesta | **sí**, las negativas rehaciendo la búsqueda acotada |
+| `capacity_profile` | una función afín a trozos de una capacidad: cota, alcance y cobertura en un intervalo | **sí**, una comprobación LP exacta por tramo |
+| `branch_frontier` | lo que sabía una ramificación detenida: incumbente, cota, brecha, nodos abiertos | **sí**; un informe de estado, no una prueba |
 | `linear_system` | `A x = b`, o una obstrucción `y·A = 0`, `y·b ≠ 0` | **sí**, un producto |
 | `toric_cone` | primitividad, multiplicidad, altura, discrepancias | **sí**, determinante y resolución exactos |
 | `family_extremum` | el mayor de una familia, y un dual para el resto | reconstruye el programa de cada ítem |

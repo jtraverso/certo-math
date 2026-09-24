@@ -148,7 +148,9 @@ def cases(spec, limits: Limits | None = None, backend: str = DEFAULT_BACKEND,
                          timeout_s=max(1.0, lim.timeout_ms / 1000))
         reports["drup-python"] = rep.to_dict()
         if cross_check and drup.drat_trim_available():
-            reports["drat-trim"] = drup.check_with_drat_trim(dimacs, proof).to_dict()
+            reports["drat-trim"] = drup.check_with_drat_trim(
+                dimacs, proof,
+                timeout_s=max(1.0, lim.timeout_ms / 1000)).to_dict()
         if not rep.ok:
             return Result(
                 "cases", Status.UNKNOWN_SOLVER, Verdict.ERROR, engine, ms(), None,

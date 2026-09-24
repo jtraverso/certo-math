@@ -27,6 +27,20 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
       - run: pip install -e ".[mcp,numerics]"
+      # pycddlib: wheels only for Windows; elsewhere it builds against cddlib
+      # and GMP. Tried everywhere, and a failure is a warning, not a red job:
+      # `semigroup` has a fallback, and the `nocdd` tests exercise it anyway.
+      # nauty, so the test that compares filters pushed into geng with the
+      # Python route runs against a real geng. Debian names it nauty-geng.
+      - name: nauty (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y nauty || true
+      - name: pycddlib (optional)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y libcdd-dev libgmp-dev || true; fi
+          if [ "$RUNNER_OS" = macOS ]; then brew install cddlib gmp || true; fi
+          pip install "pycddlib>=3.0" || echo "::warning::pycddlib did not install; semigroup ran on its fallback"
       - name: capabilities
         run: certo doctor
       # `determinism` was the one cross-cutting rule CI did not check, which
@@ -88,6 +102,20 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[mcp,numerics]"
+      # pycddlib: wheels only for Windows; elsewhere it builds against cddlib
+      # and GMP. Tried everywhere, and a failure is a warning, not a red job:
+      # `semigroup` has a fallback, and the `nocdd` tests exercise it anyway.
+      # nauty, so the test that compares filters pushed into geng with the
+      # Python route runs against a real geng. Debian names it nauty-geng.
+      - name: nauty (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y nauty || true
+      - name: pycddlib (optional)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then sudo apt-get install -y libcdd-dev libgmp-dev || true; fi
+          if [ "$RUNNER_OS" = macOS ]; then brew install cddlib gmp || true; fi
+          pip install "pycddlib>=3.0" || echo "::warning::pycddlib did not install; semigroup ran on its fallback"
       - name: run every example and verify its certificate
         shell: bash
         run: python tests/run_examples.py

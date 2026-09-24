@@ -265,11 +265,8 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
                         primal=None, var_names=None, is_exact=False,
                         integer=False, integral_point=None,
                         integral_objective=None, kinds=None,
-                        target=None, loads=None) -> Certificate:
-    return Certificate(
-        kind="lp_dual",
-        solver_free=True,
-        payload={
+                        target=None, loads=None, backend=None) -> Certificate:
+    payload = {
             "sense": sense, "objective": objective, "dual": dual,
             "primal": primal, "A": A, "b": b, "c": c,
             "names": names, "var_names": var_names, "exact": is_exact,
@@ -290,7 +287,17 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
             # field, which the frozen schema allows: a reader that does not
             # know about loads verifies the certificate exactly as before.
             "loads": loads or [],
-        },
+    }
+    # Which solver found the point the exact route started from. OPTIONAL and
+    # descriptive: it changes nothing that is checked, but on a degenerate
+    # program HiGHS and CBC return different optimal vertices, so two correct
+    # certificates of the same optimum can differ -- and this says why.
+    if backend is not None:
+        payload["backend"] = backend
+    return Certificate(
+        kind="lp_dual",
+        solver_free=True,
+        payload=payload,
         note_key="cert.note.lp_dual.exact" if is_exact else "cert.note.lp_dual.float",
     )
 
@@ -455,7 +462,8 @@ def domain_sweep_certificate(ids, entries, mode, counts, values=None,
     )
 
 
-def sweep_range_certificate(entries, first_failure, stopped_early) -> Certificate:
+def sweep_range_certificate(entries, first_failure, stopped_early,
+                            vacuous=None) -> Certificate:
     """One sub-certificate per size. The answer to "from which n does it fail?"
 
     Each n is verified on its own; what this adds is the ORDER and the claim
@@ -467,7 +475,11 @@ def sweep_range_certificate(entries, first_failure, stopped_early) -> Certificat
         kind="sweep_range", solver_free=bool(free),
         payload={"entries": entries, "first_failure": first_failure,
                  "stopped_early": stopped_early,
-                 "sizes": [e["n"] for e in entries]},
+                 "sizes": [e["n"] for e in entries],
+                 # The sizes whose family is EMPTY, so the statement holds
+                 # there by vacuity. Optional, and recomputed by `verify`
+                 # from each size's own family.
+                 "vacuous": list(vacuous or [])},
         note_key="cert.note.sweep_range",
     )
 
@@ -903,6 +915,37 @@ def capacity_profile_certificate(payload, title="") -> Certificate:
     )
 
 
+def clique_lp_certificate(out, title="") -> Certificate:
+    """An LP over every clique of a graph: the generated support, the exact
+    dual of the edge rows, and the pricing search that shows no clique
+    outside the support has positive reduced cost. Weak duality does the
+    rest; the verifier reruns the search rather than believing it."""
+    g = out["graph"]
+    pr = out["pricing"]
+    payload = {
+        "problem": out["problem"],
+        "vertices": list(g.labels),
+        "edges": [[g.labels[i], g.labels[j]] for i, j in g.edges],
+        "min_size": out["min_size"],
+        "weight": {"edges": str(out["alpha"]), "vertices": str(out["beta"]),
+                   "constant": str(out["gamma"])},
+        "rhs": [str(r) for r in out["rhs"]],
+        "columns": [{"clique": [g.labels[i] for i in Q], "x": str(x)}
+                    for Q, x in out["support"]],
+        "dual": [str(v) for v in out["z"]],
+        "objective": str(out["objective"]),
+        "pricing": {"max_reduced": (None if pr["best"] is None
+                                    else str(pr["best"])),
+                    "argmax": (None if pr["argmax"] is None
+                               else [g.labels[i] for i in pr["argmax"]]),
+                    "nodes": pr["nodes"]},
+        "rounds": out["rounds"], "generated": out["generated"],
+        "title": title,
+    }
+    return Certificate(kind="clique_lp", solver_free=True, payload=payload,
+                       note_key="cert.note.clique_lp")
+
+
 def affine_semigroup_certificate(payload, title="") -> Certificate:
     """What is finite and checkable about `S = N.a_1 + ... + N.a_k`.
 
@@ -1005,6 +1048,32 @@ def integer_matrix_certificate(question, matrix, result, title="") -> Certificat
         kind="integer_matrix", solver_free=True, payload=payload,
         note_key="cert.note.integer_matrix",
     )
+
+
+def symmetric_inertia_certificate(question, matrix, S, S_inv, D, witness=None,
+                                  title="") -> Certificate:
+    """The inertia of a symmetric rational matrix as a congruence: `S A S^T`
+    is the diagonal `D`, and `S` times `S_inv` is the identity. Sylvester's
+    law makes the signs of `D` the inertia of `A`; the verifier multiplies.
+    `witness`, when there is one, is a vector with `x^T A x < 0`."""
+    from .inertia import counts
+
+    def ser(M):
+        return [[str(x) for x in r] for r in M]
+
+    c = counts(D)
+    payload = {
+        "question": question, "matrix": ser(matrix), "S": ser(S),
+        "S_inv": ser(S_inv), "D": [str(x) for x in D],
+        "n_plus": c["n_plus"], "n_minus": c["n_minus"], "n_zero": c["n_zero"],
+        "rank": c["n_plus"] + c["n_minus"],
+        "psd": c["n_minus"] == 0,
+        "pd": c["n_minus"] == 0 and c["n_zero"] == 0,
+        "witness": None if witness is None else [str(x) for x in witness],
+        "title": title,
+    }
+    return Certificate(kind="symmetric_inertia", solver_free=True,
+                       payload=payload, note_key="cert.note.symmetric_inertia")
 
 
 def hypothesis_audit_certificate(rows, counts, goal_smt2, hypotheses_smt2,
@@ -1145,7 +1214,9 @@ def integer_peak_certificate(parameters, variable, objective, argmax, value,
 def parametric_bound_certificate(parameters, variables, objective,
                                  constraints, dual, bound, rows,
                                  title="", sense="max",
-                                 dual_poly=None, region=None) -> Certificate:
+                                 dual_poly=None, region=None, free=None,
+                                 claim=None, primal=None, box=None,
+                                 box_trees=None) -> Certificate:
     """A bound on `opt(p)` for every p at or above the given floor.
 
     Weak duality holds symbolically. For a packing -- `max c.x, A x <= b` --
@@ -1186,6 +1257,19 @@ def parametric_bound_certificate(parameters, variables, objective,
         payload["dual_poly"] = dual_poly
     if region:
         payload["region"] = region
+    # 0.17, all optional: variables with no sign, a claimed target, and a
+    # primal witness in place of a dual.
+    if free:
+        payload["free"] = list(free)
+    if claim is not None:
+        payload["claim"] = claim
+    if primal is not None:
+        payload["witness"] = "primal"
+        payload["primal"] = primal
+    if box is not None:
+        payload["box"] = box
+        if box_trees:
+            payload["box_trees"] = box_trees
     return Certificate(
         kind="parametric_bound", solver_free=True, payload=payload,
         note_key=("cert.note.parametric_bound_min" if sense == "min"
@@ -2573,6 +2657,47 @@ def _verify_capacity_profile(cert, limits) -> VerifyReport:
     )
 
 
+def _zero_combination(A, c) -> bool:
+    """Non-negative integers, not all zero, with `sum c_i a_i = 0`."""
+    try:
+        c = [int(x) for x in c]
+    except (TypeError, ValueError):
+        return False
+    if len(c) != len(A) or any(x < 0 for x in c) or not any(c):
+        return False
+    return all(sum(c[j] * A[j][r] for j in range(len(A))) == 0
+               for r in range(len(A[0]) if A else 0))
+
+
+def _verify_clique_lp(cert, limits) -> VerifyReport:
+    """The support, the dual and the pricing search, all recomputed."""
+    from . import colgen
+
+    p = cert.payload
+    try:
+        rows = colgen.check(p)
+    except (colgen.NotACliqueLP, KeyError, TypeError, ValueError,
+            ZeroDivisionError) as e:
+        return VerifyReport(False, "clique_lp", True, checks=[(
+            t("verify.colgen.readable"), False, "{}: {}".format(
+                type(e).__name__, e))])
+    labels = {"shape": "verify.colgen.shape",
+              "columns": "verify.colgen.columns",
+              "primal": "verify.colgen.primal",
+              "objective": "verify.colgen.objective",
+              "dual_sign": "verify.colgen.dual_sign",
+              "strong": "verify.colgen.strong",
+              "pricing": "verify.colgen.pricing"}
+    checks = [(t(labels[k]), ok, str(detail)) for k, ok, detail in rows]
+    return VerifyReport(
+        all(c[1] for c in checks), "clique_lp", True, checks=checks,
+        warnings=[t("verify.colgen.scope")],
+        method_key="verify.colgen.method",
+        detail=t("verify.colgen.detail", n=len(p.get("vertices") or []),
+                 m=len(p.get("edges") or []), problem=p.get("problem")),
+    )
+
+
 def _verify_affine_semigroup(cert, limits) -> VerifyReport:
     """Redo every claim from the generators. None of it needs a solver.
 
@@ -2593,9 +2718,22 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
 
     # 1. the grading, which is what makes every search below terminate
     u = p.get("grading")
+    wit = p.get("not_pointed_witness")
     if u is None:
-        checks.append((t("verify.semigroup.grading"), p.get("pointed") is False,
-                       t("verify.semigroup.no_grading")))
+        # Not pointed is a claim and is checked like one: non-negative
+        # integers, not all zero, combining the generators to zero. A
+        # certificate from before 0.17 says False with no witness; it is
+        # accepted, and the warning says what was never shown.
+        pointed = p.get("pointed")
+        if wit is not None:
+            ok = pointed is False and _zero_combination(A, wit)
+            detail = t("verify.semigroup.not_pointed_is",
+                       values=", ".join(map(str, wit[:6])))
+        else:
+            ok = pointed in (None, False)
+            detail = t("verify.semigroup.no_grading" if pointed is False
+                       else "verify.semigroup.pointed_undecided")
+        checks.append((t("verify.semigroup.grading"), ok, detail))
         vec = None
     else:
         vec = [Fraction(x) for x in u]
@@ -2683,7 +2821,10 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
     want_w = sorted(n for n, e in (p.get("points") or {}).items()
                     if e.get("refutes_normality"))
     summaries = [
-        (p.get("pointed") is (u is not None), "pointed"),
+        ((p.get("pointed") is True) if u is not None
+         else (p.get("pointed") is not True), "pointed"),
+        # a grading and a zero combination cannot both be right
+        (u is None or wit is None, "not_pointed_witness"),
         (p.get("dimension") == (len(A[0]) if A else 0), "dimension"),
         (p.get("rank") == sg._rank(A) if A else True, "rank"),
         (sorted(p.get("normality_witnesses") or []) == want_w, "witnesses"),
@@ -2743,9 +2884,12 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
                          n=len(pairs),
                          verdict=str(hb.get("is_minimal_generating_set")))))
 
+    warnings = [t("verify.semigroup.scope")]
+    if u is None and wit is None and p.get("pointed") is False:
+        warnings.append(t("verify.semigroup.legacy_not_pointed"))
     return VerifyReport(
         all(c[1] for c in checks), "affine_semigroup", True, checks=checks,
-        warnings=[t("verify.semigroup.scope")],
+        warnings=warnings,
         method_key="verify.semigroup.method",
         detail=t("verify.semigroup.detail", n=len(order),
                  dim=p.get("dimension"), rank=p.get("rank"),
@@ -2888,6 +3032,66 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
         warnings=warnings, method_key="verify.bind.method",
         detail=t("verify.bind.detail", decl=p["declaration"] or "-",
                  name=p["discharges"], covers=str(p["covers"])),
+    )
+
+
+def _verify_symmetric_inertia(cert, limits) -> VerifyReport:
+    """Two rational products and a diagonal. Nothing is re-eliminated."""
+    from fractions import Fraction
+
+    from . import inertia as inr
+
+    p = cert.payload
+    checks = []
+    try:
+        A = inr.parse(p["matrix"])
+        S = [[Fraction(x) for x in r] for r in p["S"]]
+        Si = [[Fraction(x) for x in r] for r in p["S_inv"]]
+        D = [Fraction(x) for x in p["D"]]
+        n = len(A)
+        shaped = (len(S) == len(Si) == len(D) == n
+                  and all(len(r) == n for r in S + Si))
+    except (inr.NotSymmetric, KeyError, TypeError, ValueError,
+            ZeroDivisionError):
+        return VerifyReport(False, "symmetric_inertia", True,
+                            checks=[(t("verify.inertia.readable"), False,
+                                     t("verify.inertia.unreadable"))])
+    checks.append((t("verify.inertia.readable"), shaped,
+                   t("verify.inertia.shape", n=n)))
+    if shaped:
+        got = inr.check(A, S, Si, D)
+        checks.append((t("verify.inertia.invertible"), got["invertible"],
+                       t("verify.inertia.inverse", n=n)))
+        checks.append((t("verify.inertia.congruent"), got["congruent"],
+                       t("verify.inertia.equation")))
+    # The counts and every summary of them, recomputed from D: each is a
+    # field that states a conclusion, and a stated conclusion nothing
+    # recomputes is a field anyone can edit.
+    c = inr.counts(D)
+    want = dict(c, rank=c["n_plus"] + c["n_minus"], psd=c["n_minus"] == 0,
+                pd=c["n_minus"] == 0 and c["n_zero"] == 0)
+    off = [k for k, v in want.items() if p.get(k) != v]
+    checks.append((t("verify.inertia.counts"), not off,
+                   t("verify.inertia.counts_are", plus=c["n_plus"],
+                     minus=c["n_minus"], zero=c["n_zero"],
+                     bad=", ".join(off) or "-")))
+    # The refutation of PSD, on its own: one quadratic form.
+    w = p.get("witness")
+    if w is not None or not want["psd"]:
+        ok = False
+        if w is not None:
+            try:
+                x = [Fraction(v) for v in w]
+                ok = len(x) == n and inr.quadratic(A, x) < 0
+            except (TypeError, ValueError, ZeroDivisionError):
+                ok = False
+        checks.append((t("verify.inertia.witness"), ok,
+                       t("verify.inertia.witness_is")))
+    return VerifyReport(
+        all(ch[1] for ch in checks), "symmetric_inertia", True, checks=checks,
+        warnings=[t("verify.inertia.scope")],
+        method_key="verify.inertia.method",
+        detail=t("verify.inertia.detail", n=n),
     )
 
 
@@ -3220,6 +3424,10 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
     ring = tuple(p["parameters"])
     lows = p["parameters"]
     minimising = p.get("sense", "max") == "min"
+    if p.get("witness") == "primal":
+        return _verify_parametric_primal(cert, limits)
+    free = set(p.get("free") or [])
+    senses = {row[0]: row[2] for row in p["constraints"]}
     if "dual_poly" in p:
         y = {n: Poly.parse(ring, v) for n, v in p["dual_poly"].items()}
     else:
@@ -3230,8 +3438,9 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
     region = [(n, Poly.parse(ring, g))
               for n, g in sorted(p.get("region", {}).items())]
     terms = region_terms(region, lows)
-    off = sorted(n for n, poly in y.items()
-                 if not nonneg_on_region(poly, lows, terms)[0])
+    nn = _param_nonneg(p, ring, lows, terms)
+    off = sorted(n for n, poly in y.items() if senses.get(n) != "=="
+                 and not nn("dual", n, poly))
     nonneg = not off
     checks = [(t("verify.param.nonneg"), nonneg,
                t("verify.param.offenders", names=", ".join(off) or "-"))]
@@ -3256,7 +3465,10 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
                 acc = acc + Poly.parse(ring, row[var]) * y[name]
         obj = Poly.parse(ring, p["objective"].get(var, {}))
         residual = (obj - acc) if minimising else (acc - obj)
-        ok, _shifted, _used, _rem = nonneg_on_region(residual, lows, terms)
+        if var in free:
+            ok = not residual.terms          # a free column must balance
+        else:
+            ok = nn("columns", var, residual)
         if not ok:
             bad.append(var)
     checks.append((t("verify.param.feasible"), not bad,
@@ -3271,8 +3483,13 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
             got = got + Poly.parse(ring, rhs) * y[name]
     matches = not (got - want)
     checks.append((t("verify.param.bound"), matches, str(want) or "0"))
+    claim_ok = _param_claim_check(p, want, lows, terms, ring, minimising,
+                                  checks, witness="dual")
 
     floor = ", ".join("{} >= {}".format(k, v) for k, v in lows.items())
+    if p.get("box"):
+        floor = ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                          for n, (lo, hi) in p["box"].items())
     detail_key = "verify.param.detail_min" if minimising \
         else "verify.param.detail"
     warnings = [t("verify.param.scope", floor=floor)]
@@ -3285,12 +3502,120 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
         floor = floor + ", " + ", ".join("{} >= 0".format(g)
                                          for _n, g in region)
     return VerifyReport(
-        nonneg and not bad and matches, "parametric_bound", True,
+        nonneg and not bad and matches and claim_ok, "parametric_bound", True,
         checks=checks,
         warnings=warnings,
         method_key="verify.param.method",
         detail=t(detail_key, bound=str(want) or "0", floor=floor),
     )
+
+
+def _param_nonneg(p, ring, lows, terms):
+    """The non-negativity test a parametric payload asks for: Bernstein on the
+    recorded box -- with the recorded splits and degrees, recomputed -- or the
+    shift test on the ray. Returns `nn(kind, name, poly) -> bool`."""
+    from fractions import Fraction
+
+    from .parametric import nonneg_on_region
+
+    raw = p.get("box")
+    if raw is None:
+        return lambda kind, name, poly: nonneg_on_region(poly, lows, terms)[0]
+    from . import bernstein
+
+    box = {n: (Fraction(lo), Fraction(hi)) for n, (lo, hi) in raw.items()}
+    if set(box) != set(ring):
+        return lambda kind, name, poly: False
+    trees = p.get("box_trees") or {}
+
+    def nn(kind, name, poly):
+        tree = (trees.get("claim") if kind == "claim"
+                else (trees.get(kind) or {}).get(name))
+        return bernstein.check(poly, box, tree)
+    return nn
+
+
+def _param_claim_check(p, bound, lows, terms, ring, minimising, checks,
+                       witness):
+    """A claimed target, recomputed: its `holds` must be what the shift test
+    says, in the direction the witness bounds."""
+    from .parametric import nonneg_on_region
+    from .polynomials import Poly
+
+    c = p.get("claim")
+    if c is None:
+        return True
+    target = Poly.parse(ring, c["target"])
+    upper = (witness == "dual") != minimising     # does `bound` bound above?
+    diff = (target - bound) if upper else (bound - target)
+    holds = _param_nonneg(p, ring, lows, terms)("claim", None, diff)
+    want_rel = "<=" if upper else ">="
+    ok = holds == bool(c.get("holds")) and c.get("relation") == want_rel
+    checks.append((t("verify.param.claim"), ok,
+                   "{} {} {}".format("bound", want_rel, target or "0")))
+    return ok
+
+
+def _verify_parametric_primal(cert, limits) -> VerifyReport:
+    """A feasible x(p): signs, rows and the objective, all recomputed."""
+    from .parametric import nonneg_on_region, region_terms
+    from .polynomials import Poly
+
+    p = cert.payload
+    ring = tuple(p["parameters"])
+    lows = p["parameters"]
+    minimising = p.get("sense", "max") == "min"
+    free = set(p.get("free") or [])
+    region = [(n, Poly.parse(ring, g))
+              for n, g in sorted(p.get("region", {}).items())]
+    terms = region_terms(region, lows)
+    x = {v: Poly.parse(ring, e) for v, e in (p.get("primal") or {}).items()}
+    nn = _param_nonneg(p, ring, lows, terms)
+    checks = []
+    neg = sorted(v for v, e in x.items() if v not in free
+                 and not nn("primal", v, e))
+    checks.append((t("verify.param.primal_nonneg"), not neg,
+                   ", ".join(neg[:4]) or "-"))
+    bad = []
+    for name, row, sense, rhs in p["constraints"]:
+        lhs = Poly(ring)
+        for var, coef in row.items():
+            if var in x and x[var].terms:
+                lhs = lhs + Poly.parse(ring, coef) * x[var]
+        r = Poly.parse(ring, rhs)
+        if sense == "==":
+            ok = not (lhs - r)
+        else:
+            slack = (r - lhs) if sense == "<=" else (lhs - r)
+            ok = nn("rows", name, slack)
+        if not ok:
+            bad.append(name)
+    checks.append((t("verify.param.primal_rows"), not bad,
+                   ", ".join(bad[:4]) or "-"))
+    got = Poly(ring)
+    for var, coef in p["objective"].items():
+        if var in x and x[var].terms:
+            got = got + Poly.parse(ring, coef) * x[var]
+    want = Poly.parse(ring, p["bound"])
+    matches = not (got - want)
+    checks.append((t("verify.param.bound"), matches, str(want) or "0"))
+    claim_ok = _param_claim_check(p, want, lows, terms, ring, minimising,
+                                  checks, witness="primal")
+    floor = ", ".join("{} >= {}".format(k, v) for k, v in lows.items())
+    if p.get("box"):
+        floor = ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                          for n, (lo, hi) in p["box"].items())
+    warnings = [t("verify.param.scope", floor=floor)]
+    if region:
+        warnings.append(t("verify.param.region", n=len(region),
+                          conditions="; ".join("{} >= 0".format(g)
+                                               for _n, g in region)))
+    return VerifyReport(
+        not neg and not bad and matches and claim_ok, "parametric_bound", True,
+        checks=checks, warnings=warnings, method_key="verify.param.method",
+        detail=t("verify.param.detail_primal_min" if minimising
+                 else "verify.param.detail_primal_max",
+                 bound=str(want) or "0", floor=floor))
 
 
 def _verify_resultant(cert, limits) -> VerifyReport:
@@ -4184,7 +4509,23 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
 
     rep = exact.check_lp(A, b, c, x, y)
 
-    checks = [
+    # Free variables were split as x = x_pos - x_neg. The two columns must be
+    # exact negatives, in every row and in the objective, or the certified
+    # program is not the one with a free variable in it.
+    split_checks = []
+    if p.get("free_split"):
+        index = {v: j for j, v in enumerate(p.get("var_names") or [])}
+        wrong = []
+        for v, (pos, neg) in sorted(p["free_split"].items()):
+            i, k = index.get(pos), index.get(neg)
+            if (i is None or k is None or c[i] != -c[k]
+                    or any(row[i] != -row[k] for row in A)):
+                wrong.append(v)
+        split_checks.append((t("verify.lp.free_split"), not wrong,
+                             ", ".join(wrong[:4]) or
+                             ", ".join(sorted(p["free_split"]))))
+
+    checks = split_checks + [
         (t("verify.lp.primal_nonneg"), rep["primal_nonneg"], ""),
         (t("verify.lp.primal_feasible"), rep["primal_feasible"], ""),
         (t("verify.lp.dual_nonneg"), rep["dual_nonneg"],
@@ -4454,7 +4795,8 @@ def _verify_drat(cert, limits) -> VerifyReport:
     checks.append((t("verify.drat.steps"), rep.ok, rep.detail))
     checks.append((t("verify.drat.empty"), rep.derived_empty, ""))
     if drup.drat_trim_available():
-        ext = drup.check_with_drat_trim(p["dimacs"], p["proof"])
+        ext = drup.check_with_drat_trim(
+            p["dimacs"], p["proof"], timeout_s=max(1.0, lim.timeout_ms / 1000))
         checks.append((t("verify.drat.external"), ext.ok, ext.detail))
 
     ok = all(c[1] for c in checks)
@@ -4816,6 +5158,18 @@ def _verify_sweep_range(cert, limits) -> VerifyReport:
     if p.get("stopped_early"):
         warnings.append(t("verify.range.stopped"))
 
+    # Vacuity, recomputed from each size's family rather than read. Absent
+    # from certificates before 0.17, which then say nothing about it.
+    if "vacuous" in p:
+        want = sorted(e["n"] for e in p["entries"] if e.get("cert")
+                      and (e["cert"].get("payload") or {}).get("family_count") == 0)
+        checks.append((t("verify.range.vacuous"),
+                       sorted(p.get("vacuous") or []) == want,
+                       ", ".join(map(str, want)) or "-"))
+        if want:
+            warnings.append(t("verify.range.vacuous_warning",
+                              sizes=", ".join(map(str, want))))
+
     return VerifyReport(
         all(c[1] for c in checks), "sweep_range", free, checks=checks,
         warnings=warnings,
@@ -5068,11 +5422,13 @@ VERIFIERS = {
     "symmetry_reduction": _verify_symmetry_reduction,
     "hypothesis_audit": _verify_hypothesis_audit,
     "integer_matrix": _verify_integer_matrix,
+    "symmetric_inertia": _verify_symmetric_inertia,
     "variable_range": _verify_variable_range,
     "dependency_cycle": _verify_dependency_cycle,
     "lean_binding": _verify_lean_binding,
     "toric_cone": _verify_toric_cone,
     "affine_semigroup": _verify_affine_semigroup,
+    "clique_lp": _verify_clique_lp,
     "capacity_profile": _verify_capacity_profile,
     "equitable_quotient": _verify_equitable_quotient,
     "linear_system": _verify_linear_system,

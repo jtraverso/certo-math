@@ -85,7 +85,7 @@ REQUIRED = {"range": ("var",)}
 #: implied, so `tests` can hold `run` to covering everything else.
 NOT_FROM_A_SPEC = frozenset({
     "verify", "status", "doctor", "ask", "commands", "repro", "export",
-    "ledger", "lint", "enum",
+    "ledger", "lint", "enum", "report",
 })
 
 
@@ -131,7 +131,8 @@ def options(command: str, spec=None) -> list:
     fn = _entry(command, spec if spec is not None else object())
     return sorted(p for p, v in inspect.signature(fn).parameters.items()
                   if v.kind in (v.POSITIONAL_OR_KEYWORD, v.KEYWORD_ONLY)
-                  and p not in ("spec", "limits", "spec_path"))
+                  and p not in ("spec", "limits", "spec_path")
+                  and not p.startswith("_"))    # internal to another engine
 
 
 def run(command: str, spec, limits=None, *, spec_path=None,

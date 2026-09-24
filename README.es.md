@@ -6,7 +6,7 @@ romper las afirmaciones falsas, medir lo que sobrevive, reducirlo a lo que
 realmente es, y ensamblar el resto— y cada paso vuelve con un **certificado
 que cualquiera puede re-comprobar sin fiarse de certo.**
 
-CLI y MCP. Cuarenta y ocho comandos. Corre en milisegundos donde una
+CLI y MCP. Cincuenta comandos. Corre en milisegundos donde una
 formalización cuesta horas.
 
 *English: [README.md](README.md) · cualquier comando acepta `--lang en`.*
@@ -14,10 +14,11 @@ formalización cuesta horas.
 | | |
 |---|---|
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
-| **[Comandos](docs/es/COMMANDS.md)** | los cuarenta y ocho, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
+| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
-| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cincuenta tipos, cuáles se re-comprueban sin solver |
+| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cincuenta y dos tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
+| **[Qué significa un resultado](docs/es/VERDICTS.md)** | estado frente a veredicto, las cuatro afirmaciones de optimización que se parecen, `false` frente a `null`, códigos de salida |
 | **[Límites](docs/es/LIMITS.md)** | qué no hace, y las preguntas frecuentes |
 | **[Recorrido](examples/WALKTHROUGH.md)** | un problema, siete comandos, quince segundos |
 
@@ -71,8 +72,11 @@ pip install -e ".[mcp,numerics]"
 
 Dependencias: `z3-solver` y `pulp`, que traen sus binarios. Los extras son
 `mcp` para el servidor MCP y `numerics` para `bounds` y `sos` (`python-flint`,
-`mpmath` y `numpy`); sin ellos tienes el CLI, menos numérica rigurosa y sumas
-de cuadrados.
+`mpmath`, `numpy`, `clarabel` y `highspy`); sin ellos tienes el CLI, menos
+numérica rigurosa y sumas de cuadrados, y los LP se resuelven lanzando CBC en
+vez de con HiGHS dentro del proceso. `polyhedra` (`pycddlib`) hace que `semigroup`
+decida con las facetas del cono en vez de buscar; solo trae *wheels* para
+Windows, y en el resto se compila contra cddlib y GMP.
 
 Comprueba que funciona:
 
@@ -140,7 +144,7 @@ en tu idioma.
    un bucle sobre la CLI: manda el arranque, y un apaño escrito para evitarlo
    es un apaño en punto flotante.
 
-## Los cuarenta y ocho comandos
+## Los cincuenta comandos
 
 Agrupados como los agrupa [`certo commands`](docs/es/COMMANDS.md). Las entradas
 completas, con lo que cada uno **no** establece, en
@@ -169,6 +173,7 @@ completas, con lo que cada uno **no** establece, en
 | `solve` | `A x = b` exactamente, sobre ℚ o ℤ | eliminación exacta, Smith | **la solución y el sistema**, un producto que comprobar; una obstrucción cuando no hay |
 | `quotient` | Una partición de un programa, y la equivalencia que induce | conteo exacto | **los datos de clase y ambas regularidades**, sin solver |
 | `cone` | Datos tóricos locales: primitividad, multiplicidad, funcional de altura, discrepancias | det y solve exactos | **los números que consumen dos teoremas geométricos**, sin solver |
+| `columns` | Un LP sobre todas las cliques de un grafo, sin listarlas: generación de columnas con una búsqueda de precios que el verificador repite | aritmética racional exacta | sin solver |
 | `semigroup` | Semigrupos afines como comprobador: puntiagudez, minimalidad y pertenencia al cono, al grupo y al semigrupo | aritmética entera y racional exacta | **refuta la normalidad con un testigo, nunca la afirma**, sin solver |
 | `profile` | Cómo responde un óptimo a UNA capacidad en todo un intervalo: una función afín a trozos, no un valor | aritmética racional exacta | **decide `f` en su dominio** — cota, alcanzabilidad y cobertura — sin solver |
 | `family` | El mayor de diez mil programas lineales, y por qué nada lo supera | LP exacto | **el ganador y un dual para el resto**, sin solver |
@@ -190,6 +195,7 @@ completas, con lo que cada uno **no** establece, en
 | `lint` | Comprueba un spec antes de gastar el cómputo en él | — | — |
 | `status` | Dónde está una demostración: demostrado, debido, hueco, obsoleto | — | — |
 | `doctor` | Qué puede hacer esta instalación, y qué cuesta cada hueco | — | — |
+| `report` | ¿De quién es el bug -- de certo, del spec o de la máquina? -- y una carpeta local para reportarlo. No envía nada | — | — |
 | `ask` | Un único punto de entrada: carga un spec y corre lo que pida (`what` es el mismo comando) | — | lo que produzca el comando |
 | `commands` | Qué comando responde qué pregunta | — | — |
 | `repro` | Empaqueta spec, certificados, versiones y hashes para un árbitro | — | el paquete |
@@ -201,7 +207,8 @@ Opciones comunes, **después** del subcomando: `--json`, `--cert FILE`,
 `--lang`, `--timeout-ms`, `--rlimit`, `--max-memory-mb`, `--seed`.
 
 Códigos de salida: `0` concluyente, `2` no concluyente, `1` certificado
-inválido, `3` error.
+inválido, `3` error. Qué significa cada estado y cada veredicto está en
+[Qué significa un resultado](docs/es/VERDICTS.md).
 
 ## Qué no hace
 

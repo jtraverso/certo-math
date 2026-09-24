@@ -238,7 +238,41 @@ def certify(spec) -> dict:
             return Poly.const(ring, x)
         return Poly.from_z3(x, ring)
 
-    y = {n: P(v) for n, v in spec.dual.items()}
+    free = {str(v) for v in (getattr(spec, "free", None) or [])}
+    claim = getattr(spec, "claim", None)
+
+    # THE BOX, when there is one: Bernstein coefficients decide every
+    # non-negativity below, in place of the shift test on a ray.
+    box = _box_of(spec, ring)
+    depth = int(getattr(spec, "subdivide", 0) or 0)
+    trees = {"dual": {}, "columns": {}, "primal": {}, "rows": {}, "claim": None}
+    terms_box = []
+
+    def nn(poly, degrees=None):
+        """`(ok, shifted, used, remainder, tree)` -- on the box when there is
+        one, by the shift test otherwise."""
+        if box is not None:
+            from . import bernstein
+            ok, tree = bernstein.nonneg(poly, box, depth, degrees)
+            return ok, poly, {}, poly, tree
+        ok, sh, used, rem = nonneg_on_region(poly, spec.parameters,
+                                             terms_box[0] if terms_box else [])
+        return ok, sh, used, rem, None
+
+    if getattr(spec, "primal", None) is not None:
+        return _certify_primal(spec, P, ring, minimising, free, claim, nn,
+                               trees, box)
+
+    if getattr(spec, "dual", None) is None:
+        raise NotParametric(_t("param.no_witness"))
+    hints = {}
+    if spec.dual == "bernstein":
+        if box is None:
+            raise NotParametric(_t("param.bernstein_needs_box"))
+        y, hints = _find_dual_bernstein(spec, P, ring, box, minimising, free)
+    else:
+        y = {n: P(v) for n, v in spec.dual.items()}
+    senses = {n: s for n, _, s, _ in spec.constraints}
     names = [n for n, _, _, _ in spec.constraints]
     missing = [n for n in names if n not in y]
     if missing:
@@ -252,14 +286,24 @@ def certify(spec) -> dict:
     # the certificate holds where they hold, and says so every verification.
     region = [(str(n), P(g)) for n, g in (getattr(spec, "region", None) or [])]
     terms = region_terms(region, spec.parameters)
+    terms_box.append(terms)
 
     # `y >= 0`. A constant dual is a comparison; a polynomial one is the same
     # test the residuals get, and "not shown non-negative" is what a failure
     # means there -- never "negative".
     negative, dual_rows = [], []
     for name in sorted(y):
-        ok, shifted, used, _rem = nonneg_on_region(y[name], spec.parameters,
-                                                   terms)
+        if senses.get(name) == "==":
+            # An equality row's dual has either sign: nothing to show.
+            dual_rows.append({"constraint": str(name),
+                              "value": y[name].serialize(),
+                              "shifted": y[name].serialize(), "ok": True,
+                              "free": True, "region_multipliers": {}})
+            continue
+        ok, shifted, used, _rem, tree = nn(y[name],
+                                           hints.get(("dual", str(name))))
+        if tree is not None:
+            trees["dual"][str(name)] = tree
         if not ok:
             negative.append(name)
         dual_rows.append({"constraint": str(name), "value": y[name].serialize(),
@@ -281,8 +325,14 @@ def certify(spec) -> dict:
         obj = P(spec.objective.get(var, 0))
         # Maximise: `A^T y >= c`. Minimise: `M^T y <= w`. One sign.
         residual = (obj - acc) if minimising else (acc - obj)
-        ok, shifted, used, _rem = nonneg_on_region(residual, spec.parameters,
-                                                   terms)
+        if var in free:
+            # No sign on the variable, so the column must balance exactly.
+            ok, shifted, used = not residual.terms, residual, {}
+        else:
+            ok, shifted, used, _rem, tree = nn(residual,
+                                               hints.get(("column", var)))
+            if tree is not None:
+                trees["columns"][var] = tree
         rows.append({"variable": var,
                      "residual": residual.serialize(),
                      "shifted": shifted.serialize(),
@@ -296,7 +346,24 @@ def certify(spec) -> dict:
         if y[name].terms:
             bound = bound + P(rhs) * y[name]
 
+    claimed = None
+    if claim is not None:
+        target = P(claim)
+        # A dual bounds a maximisation from above: the claim is bound <= T.
+        diff = (bound - target) if minimising else (target - bound)
+        ok_c, _sh, _u, _r, tree = nn(diff)
+        trees["claim"] = tree
+        claimed = {"target": target.serialize(), "holds": ok_c,
+                   "relation": ">=" if minimising else "<="}
+
     return {
+        "witness": "dual",
+        "box": _box_text(box),
+        "box_trees": _trees_text(trees) if box is not None else None,
+        "found_dual": {str(n): v.serialize() for n, v in y.items()}
+        if spec.dual == "bernstein" else None,
+        "free": sorted(free),
+        "claim": claimed,
         "variables": variables,
         "rows": rows,
         "bound": bound,
@@ -313,6 +380,210 @@ def certify(spec) -> dict:
         "negative_dual": negative,
         "ok": not negative and all(r["ok"] for r in rows),
         "failed": [r["variable"] for r in rows if not r["ok"]],
+    }
+
+
+def _box_of(spec, ring):
+    raw = getattr(spec, "box", None)
+    if raw is None:
+        return None
+    from . import bernstein
+
+    if getattr(spec, "region", None):
+        raise NotParametric(_t("param.box_region"))
+    try:
+        return bernstein.parse_box(raw, ring)
+    except bernstein.NotABox as e:
+        raise NotParametric(str(e)) from None
+
+
+def _box_text(box):
+    if box is None:
+        return None
+    return {n: [str(lo), str(hi)] for n, (lo, hi) in box.items()}
+
+
+def _trees_text(trees):
+    """Only the splits and degree hints that say something: a plain leaf at
+    the polynomial's own degree is the default and is not written."""
+    out = {}
+    for key in ("dual", "columns", "primal", "rows"):
+        kept = {n: t for n, t in (trees.get(key) or {}).items() if t is not None}
+        if kept:
+            out[key] = kept
+    if trees.get("claim") is not None:
+        out["claim"] = trees["claim"]
+    return out
+
+
+def _find_dual_bernstein(spec, P, ring, box, minimising, free):
+    """A polynomial dual of degree `dual_degree` per parameter, found by ONE
+    exact LP over its Bernstein coefficients on the box.
+
+    Unknowns: the coefficients of every `y_i`, non-negative (so `y_i >= 0`
+    on the box) except on an equality row. Constraints: every Bernstein
+    coefficient of every residual `A^T y - c` (flipped for a minimisation) is
+    `>= 0`, or `== 0` on a free column -- LINEAR in the unknowns, by the
+    product formula. Objective: the sum of the bound's coefficients, the
+    smallest for a maximisation and the largest for a minimisation. Returns
+    the duals as polynomials and the degree each check must use.
+    """
+    from itertools import product
+
+    from . import bernstein as B
+    from .engines import lp as lp_engine
+    from .spec import LPSpec
+
+    k = tuple([int(getattr(spec, "dual_degree", 1) or 0)] * len(ring))
+    grid = list(product(*(range(ki + 1) for ki in k)))
+    rows = [(str(n), row, sense, rhs) for n, row, sense, rhs in spec.constraints]
+
+    def vname(i, alpha):
+        return "y{}_{}".format(i, "_".join(map(str, alpha)))
+
+    L = LPSpec(sense="min" if not minimising else "max",
+               title="bernstein dual")
+    for i, (_n, _r, sense, _rhs) in enumerate(rows):
+        for alpha in grid:
+            L.variable(vname(i, alpha), None if sense == "==" else 0, None)
+
+    variables = sorted({v for _, row, _, _ in rows for v in row}
+                       | set(spec.objective))
+    hints = {}
+    for var in variables:
+        entries = [(i, P(row[var])) for i, (_n, row, _s, _r) in enumerate(rows)
+                   if var in row]
+        obj = P(spec.objective.get(var, 0))
+        deg_a = [B.degrees_of(a) for _i, a in entries] or [(0,) * len(ring)]
+        top = tuple(max(d[j] for d in deg_a) + k[j] for j in range(len(ring)))
+        D = tuple(max(t, o) for t, o in zip(top, B.degrees_of(obj)))
+        hints[("column", var)] = list(D)
+        acc = {}
+        for i, a in entries:
+            da = tuple(D[j] - k[j] for j in range(len(ring)))
+            pm = B.product_map(B.coefficients(a, box, da), da, k)
+            for gamma, row in pm.items():
+                cell = acc.setdefault(gamma, {})
+                for alpha, w in row.items():
+                    key = vname(i, alpha)
+                    cell[key] = cell.get(key, 0) + w
+        oc = B.coefficients(obj, box, D)
+        for gamma in product(*(range(Dj + 1) for Dj in D)):
+            coeffs = dict(acc.get(gamma, {}))
+            c0 = oc.get(gamma, 0)
+            name = "col_{}_{}".format(var, "_".join(map(str, gamma)))
+            if var in free:
+                L.constraint(coeffs, "==", c0, name=name)
+            elif minimising:
+                # c - A^T y >= 0, i.e. A^T y <= c
+                L.constraint(coeffs, "<=", c0, name=name)
+            else:
+                L.constraint(coeffs, ">=", c0, name=name)
+    # The bound b(p).y(p), by the same product formula; its coefficients'
+    # sum is the objective.
+    bound_obj = {}
+    rhs_deg = [B.degrees_of(P(rhs)) for _n, _r, _s, rhs in rows]
+    Db = tuple(max(d[j] for d in rhs_deg) + k[j] for j in range(len(ring)))
+    for i, (_n, _r, _s, rhs) in enumerate(rows):
+        b = P(rhs)
+        da = tuple(Db[j] - k[j] for j in range(len(ring)))
+        for _gamma, row in B.product_map(B.coefficients(b, box, da), da,
+                                         k).items():
+            for alpha, w in row.items():
+                key = vname(i, alpha)
+                bound_obj[key] = bound_obj.get(key, 0) + w
+    L.objective(bound_obj)
+    res = lp_engine.opt(L)
+    if res.certificate is None or not res.meta.get("exact"):
+        raise NotParametric(_t("param.bernstein_no_dual",
+                               degree=k[0] if k else 0,
+                               detail=res.detail or res.status.value))
+    sol = res.meta.get("solution") or {}
+    y = {}
+    for i, (n, _r, _s, _rhs) in enumerate(rows):
+        coeffs = {alpha: Fraction(sol.get(vname(i, alpha), "0"))
+                  for alpha in grid}
+        y[n] = B.from_coefficients(ring, box, k, coeffs)
+        hints[("dual", n)] = list(k)
+    return y, hints
+
+
+def _certify_primal(spec, P, ring, minimising, free, claim, nn=None,
+                    trees=None, box=None) -> dict:
+    """A feasible `x(p)`: every row holds, every non-free `x >= 0`.
+
+    Weak duality is not used at all, so any row sense is allowed. The bound
+    is the objective at `x`, and it bounds the optimum from BELOW for a
+    maximisation and from ABOVE for a minimisation -- the direction a user
+    was getting by passing a primal off as the dual of a max program.
+    """
+    region = [(str(n), P(g)) for n, g in (getattr(spec, "region", None) or [])]
+    terms = region_terms(region, spec.parameters)
+    trees = trees if trees is not None else {"primal": {}, "rows": {},
+                                             "claim": None}
+    if nn is None or box is None:
+        def nn(poly, degrees=None):
+            ok, sh, used, rem = nonneg_on_region(poly, spec.parameters, terms)
+            return ok, sh, used, rem, None
+    x = {str(v): P(e) for v, e in spec.primal.items()}
+    variables = sorted({v for _, row, _, _ in spec.constraints for v in row}
+                       | set(spec.objective) | set(x))
+    xrows = []
+    for var in variables:
+        value = x.get(var, Poly(ring))
+        if var in free:
+            xrows.append({"variable": var, "value": value.serialize(),
+                          "ok": True, "free": True})
+            continue
+        ok, shifted, used, _rem, tree = nn(value)
+        if tree is not None:
+            trees["primal"][var] = tree
+        xrows.append({"variable": var, "value": value.serialize(), "ok": ok,
+                      "shifted": shifted.serialize(),
+                      "region_multipliers": {k: str(v) for k, v in used.items()}})
+    rows = []
+    for name, row, sense, rhs in spec.constraints:
+        lhs = Poly(ring)
+        for var, coef in row.items():
+            if x.get(var) is not None and x[var].terms:
+                lhs = lhs + P(coef) * x[var]
+        if sense == "==":
+            slack = lhs - P(rhs)
+            ok, shifted = not slack.terms, slack
+        else:
+            slack = (P(rhs) - lhs) if sense == "<=" else (lhs - P(rhs))
+            ok, shifted, _u, _r, tree = nn(slack)
+            if tree is not None:
+                trees["rows"][str(name)] = tree
+        rows.append({"constraint": str(name), "slack": slack.serialize(),
+                     "shifted": shifted.serialize(), "ok": ok})
+    bound = Poly(ring)
+    for var, coef in spec.objective.items():
+        if x.get(var) is not None and x[var].terms:
+            bound = bound + P(coef) * x[var]
+    claimed = None
+    if claim is not None:
+        target = P(claim)
+        # A primal bounds a minimisation from above: the claim is bound <= T.
+        diff = (target - bound) if minimising else (bound - target)
+        ok_c, _sh, _u, _r, tree = nn(diff)
+        trees["claim"] = tree
+        claimed = {"target": target.serialize(), "holds": ok_c,
+                   "relation": "<=" if minimising else ">="}
+    negative = [r["variable"] for r in xrows if not r["ok"]]
+    failed = [r["constraint"] for r in rows if not r["ok"]]
+    return {
+        "witness": "primal", "free": sorted(free), "claim": claimed,
+        "box": _box_text(box),
+        "box_trees": _trees_text(trees) if box is not None else None,
+        "found_dual": None,
+        "variables": variables, "rows": rows, "primal_rows": xrows,
+        "bound": bound, "sense": "min" if minimising else "max",
+        "region": {n: g.serialize() for n, g in region},
+        "dual_rows": [], "polynomial_dual": False,
+        "primal": {v: e.serialize() for v, e in sorted(x.items())},
+        "negative_dual": negative, "ok": not negative and not failed,
+        "failed": failed,
     }
 
 

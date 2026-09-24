@@ -1320,6 +1320,44 @@ async def repro(directory: str | None = None, out: str | None = None,
 
 
 @mcp.tool(description=(
+    "REPORT: something went wrong and you want to know WHOSE fault it is -- "
+    "certo's, the spec's, or the machine's -- before anybody files anything. "
+    "Give it the certo command line that misbehaved (e.g. `opt spec.py "
+    "--target 5`), and optionally a certificate and whether the RESULT is "
+    "mathematically false. It re-runs the command keeping the traceback that "
+    "the CLI throws away, and classifies with evidence: `certo-bug` when certo "
+    "produced a certificate its own verifier rejects (the one certain "
+    "verdict); `certo-bug?` when an exception came from a call certo made; "
+    "`spec` when it came from the spec's own code or `lint` reports an error; "
+    "`environment` when `doctor` finds something missing; `soundness` when a "
+    "certificate VERIFIES and is reported false -- the worst bug this tool can "
+    "have. It writes a local folder and returns its path, the triage and a "
+    "link. IT NEVER FILES ANYTHING. The folder contains the spec, which may be "
+    "unpublished mathematics, so what gets shared is the PERSON'S decision "
+    "after reading it: tell them where it is and let them choose. Before "
+    "blaming yourself for a failure, run this -- a report this project "
+    "received from an agent turned out to be certo's own bug."))
+@_guard
+async def report(command_line: str | None = None,
+                 certificate_path: str | None = None,
+                 wrong: bool = False, include_coverage: bool = False,
+                 out: str | None = None) -> dict:
+    import shlex
+
+    from . import report as _report
+
+    argv = shlex.split(command_line) if command_line else None
+    if argv and argv[0] == "certo":
+        argv = argv[1:]
+    dest = str(_resolve(out)) if out else None
+    cert = str(_resolve(certificate_path)) if certificate_path else None
+    info = await _off(_report.build, argv, cert, wrong, include_coverage, dest)
+    info["note"] = ("nothing has been sent; the folder includes the spec, "
+                    "so ask the person before sharing any of it")
+    return info
+
+
+@mcp.tool(description=(
     "DOCTOR: what this install can and cannot do, with what happens without "
     "each missing piece. Run it when something came back inconclusive and "
     "you want to know whether that was the mathematics or the machine -- a "
@@ -1560,9 +1598,13 @@ async def profile(spec_path: str | None = None, spec_source: str | None = None,
     "BECAUSE OF A GRADING: a functional `u` with `<u,a_i> >= 1` bounds the "
     "total number of generators in any representation by `<u,v>`, and that "
     "bound travels in the certificate so a verifier redoes the search rather "
-    "than believing it. Without such a functional the semigroup is not "
-    "pointed, no search here is finite, and it says so instead of looking for "
-    "a while. IT NEVER CLAIMS S IS NORMAL: a witness refutes normality, and "
+    "than believing it. Without such a functional no search here is finite, "
+    "and it says so instead of looking for a while. `pointed` is true with the "
+    "grading, false with a zero combination of the generators that proves it, "
+    "and NULL when neither was found -- null is undecided, not no. With "
+    "pycddlib installed (`backend: cddlib`) pointedness and cone membership "
+    "are decided from the facets. IT NEVER CLAIMS S IS NORMAL: a witness "
+    "refutes normality, and "
     "establishing it means deciding membership for every lattice point of the "
     "cone, which is what Normaliz is for. `normal` is null on purpose."))
 @_guard
@@ -1574,6 +1616,30 @@ async def semigroup(spec_path: str | None = None, spec_source: str | None = None
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), SemigroupSpec)
     res = await _off(algebra.affine_semigroup, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
+    "COLUMNS: an LP over EVERY clique of a graph, one row per edge, solved "
+    "WITHOUT listing the cliques. `problem` is packing (max, load <= rhs), "
+    "cover (min, >=) or partition (min, =); each clique Q of size >= "
+    "min_size is a column with weight a|E(Q)| + b|Q| + c from `weight` "
+    "{edges, vertices, constant}. Column generation with an EXACT pricing "
+    "search: the certificate holds the support, the exact dual of every edge "
+    "row, and the search that shows no clique has positive reduced cost -- "
+    "which the verifier RERUNS, so there is no oracle to trust. Weak duality "
+    "then proves the optimum over all cliques. Use it where listing the "
+    "cliques for `opt` is too many; for a few hundred, `opt` is as fast. "
+    "partition needs min_size <= 2."))
+@_guard
+async def columns(spec_path: str | None = None, spec_source: str | None = None,
+                  timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import CliqueLPSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), CliqueLPSpec)
+    res = await _off(algebra.clique_lp, spec, _limits(timeout_ms), str(f))
     return _emit(res, spec_file=f)
 
 
@@ -1590,7 +1656,13 @@ async def semigroup(spec_path: str | None = None, spec_source: str | None = None
     "invariant factors -- and so the torsion of Z^n / A Z^m -- a finite "
     "checkable fact. `rows` and `cols` on the spec select a submatrix first, "
     "which is how you ask about a MINOR. Entries must be integers: 2.5 is "
-    "refused rather than rounded."))
+    "refused rather than rounded. INERTIA: `question=\"inertia\"` or "
+    "`\"psd\"` takes a SYMMETRIC matrix of exact rationals (ints, Fractions, "
+    "or strings like \"3/7\") and answers by a congruence S.A.S^T = D with "
+    "S.S_inv = I, so the signs of D are the inertia by Sylvester's law; `psd` "
+    "is REFUTED with a vector x where x^T A x < 0. For many matrices in a "
+    "loop, `certo.inertia.signature(rows)` in Python gives the same counts "
+    "exactly, fast, without a certificate."))
 @_guard
 async def matrix(spec_path: str | None = None, spec_source: str | None = None,
                  timeout_ms: int = 60_000) -> dict:

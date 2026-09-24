@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: A certificate that verifies and is false (private)
+    url: https://github.com/jtraverso/certo-math/security/advisories/new
+    about: The worst bug this tool can have. Reported privately, so it is not public before it is fixed.
+  - name: A bug whose reproducer contains unpublished mathematics (private)
+    url: https://github.com/jtraverso/certo-math/security/advisories/new
+    about: If you cannot share the spec in public, report it through the same private channel.

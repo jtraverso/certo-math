@@ -237,10 +237,22 @@ class _FilterRegistry:
     def get(self, spec: str):
         if "=" in spec:
             name, val = spec.split("=", 1)
+            # `edges=A:B`, inclusive, either end optional: a user needed
+            # e(G) > M(n), and `edges=K` could only say "exactly K".
+            if name == "edges" and ":" in val:
+                lo, hi = _edge_range(val)
+                if lo is None and hi is None:
+                    return None
+                return lambda g: ((lo is None or g.m >= lo)
+                                  and (hi is None or g.m <= hi))
             try:
                 k = int(val)
             except ValueError:
                 return None
+            if name == "min_edges":
+                return lambda g: g.m >= k
+            if name == "max_edges":
+                return lambda g: g.m <= k
             if name == "min_degree":
                 return lambda g: all(g.degree(v) >= k for v in range(g.n))
             if name == "max_degree":
@@ -251,7 +263,20 @@ class _FilterRegistry:
         return _BASE_FILTERS.get(spec)
 
     def names(self):
-        return sorted(_BASE_FILTERS) + ["min_degree=K", "max_degree=K", "edges=K"]
+        return sorted(_BASE_FILTERS) + ["min_degree=K", "max_degree=K", "edges=K",
+                                        "edges=A:B", "min_edges=K",
+                                        "max_edges=K"]
+
+
+def _edge_range(val):
+    """`"A:B"`, `"A:"`, `":B"` -> (lo, hi), None for an open end or a typo."""
+    a, _, b = val.partition(":")
+    try:
+        lo = int(a) if a.strip() else None
+        hi = int(b) if b.strip() else None
+    except ValueError:
+        return None, None
+    return lo, hi
 
 
 FILTERS = _FilterRegistry()
@@ -292,7 +317,103 @@ def compile_filters(specs):
 
 
 def _geng_path():
-    return shutil.which("geng")
+    # Debian and Ubuntu ship nauty's programs prefixed: `apt install nauty`
+    # gives `nauty-geng`, and a `geng`-only lookup never found it.
+    return shutil.which("geng") or shutil.which("nauty-geng")
+
+
+_GENG_HELP = {}
+
+
+def _geng_supports(geng) -> set:
+    """Which optional restrictions THIS `geng` has, read from its own help.
+
+    `-c`, `-d`, `-D` and the edge range are in every nauty anyone has; the
+    class restrictions came later, and a flag this build does not know would
+    either fail or -- worse -- mean something else. So they are pushed only
+    when the help names them with the class they restrict to.
+    """
+    if geng in _GENG_HELP:
+        return _GENG_HELP[geng]
+    found = set()
+    try:
+        proc = subprocess.run([geng, "-help"], capture_output=True, text=True,
+                              timeout=10)
+        text = ((proc.stdout or "") + (proc.stderr or "")).lower()
+    except (OSError, subprocess.SubprocessError):
+        text = ""
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("-t") and "triangle" in s:
+            found.add("t")
+        if s.startswith("-k") and "k4" in s:
+            found.add("k")
+        if s.startswith("-t") and "chordal" in s:
+            found.add("T")
+    _GENG_HELP[geng] = found
+    return found
+
+
+def geng_args(n, fns, supported=frozenset(), connected_only=False):
+    """`(args, pushed, empty)`: the `geng` command line for `n` vertices and
+    these filters, which of them it carries, and whether the edge range is
+    empty so there is nothing to run.
+
+    Only restrictions that mean EXACTLY what certo's filter means are pushed;
+    every filter is applied again in Python afterwards, so a pushed flag can
+    cost nothing but time -- unless it excluded a graph the filter keeps, which
+    is why each one here is an equivalence, and why a test compares the two
+    routes where `geng` is installed. Pushing is what made a chordal sweep at
+    n=9 stop enumerating 274 668 graphs to keep 125.
+    """
+    names = [name for name, _ in fns if isinstance(name, str)]
+    flags, pushed = [], []
+    if connected_only or "connected" in names:
+        flags.append("-c")
+        pushed.append("connected")
+    mind = [int(x.split("=", 1)[1]) for x in names
+            if x.startswith("min_degree=") and x.split("=", 1)[1].isdigit()]
+    maxd = [int(x.split("=", 1)[1]) for x in names
+            if x.startswith("max_degree=") and x.split("=", 1)[1].isdigit()]
+    if mind:
+        flags.append("-d{}".format(max(mind)))
+        pushed.append("min_degree")
+    if maxd:
+        flags.append("-D{}".format(min(maxd)))
+        pushed.append("max_degree")
+    if "triangle_free" in names and "t" in supported:
+        flags.append("-t")
+        pushed.append("triangle_free")
+    if "k4_free" in names and "k" in supported:
+        flags.append("-k")
+        pushed.append("k4_free")
+    if "chordal" in names and "T" in supported:
+        flags.append("-T")
+        pushed.append("chordal")
+    lo, hi = 0, None
+    for x in names:
+        key, _, val = x.partition("=")
+        if key == "edges" and ":" in val:
+            a, b = _edge_range(val)
+            lo = max(lo, a or 0)
+            hi = b if hi is None else (hi if b is None else min(hi, b))
+        elif key in ("edges", "min_edges", "max_edges") and val.lstrip("-").isdigit():
+            k = int(val)
+            if key in ("edges", "min_edges"):
+                lo = max(lo, k)
+            if key in ("edges", "max_edges"):
+                hi = k if hi is None else min(hi, k)
+    args = ["-q", *flags, str(n)]
+    if hi is not None and hi < lo:
+        return args, pushed, True          # an empty range: nothing to run
+    if hi is not None:
+        args.append("{}:{}".format(lo, hi))
+        pushed.append("edges")
+    elif lo > 0:
+        # `lo:0` is geng's own spelling of "lo or more"
+        args.append("{}:0".format(lo))
+        pushed.append("edges")
+    return args, pushed, False
 
 
 class WorkBudget(RuntimeError):
@@ -384,14 +505,27 @@ def enumerate_graphs(n: int, filters=None, use_geng: bool = True,
     fns = compile_filters(filters)
     geng = _geng_path() if use_geng else None
 
+    if n < 0:
+        from .i18n import t
+        raise ValueError(t("graphs.negative_n", n=n))
+    if n == 0:
+        # THE EMPTY GRAPH, and only it. The augmentation starts from one
+        # vertex, so n=0 used to come back as the graph on ONE vertex: a
+        # sweep "at n=0" examined K1 and reported it as the case n=0 -- the
+        # degenerate case being the one most likely to break a statement.
+        cands = [Graph(0, 0)]
+        keep = [g for g in cands if all(f(g) for _, f in fns)]
+        return keep, ("nauty/geng" if geng else "augmentation (python)"), 1
+
     if geng:
-        args = [geng, "-q"]
-        if connected_only or any(s == "connected" for s, _ in fns):
-            args.append("-c")
-        args.append(str(n))
-        out = _run_geng(args, lim.enumerate_timeout_s,
-                        lim.max_output_mb * 1024 * 1024)
-        cands = [Graph.from_graph6(line) for line in out.split() if line]
+        tail, _pushed, empty = geng_args(n, fns, _geng_supports(geng),
+                                         connected_only)
+        if empty:
+            cands = []
+        else:
+            out = _run_geng([geng, *tail], lim.enumerate_timeout_s,
+                            lim.max_output_mb * 1024 * 1024)
+            cands = [Graph.from_graph6(line) for line in out.split() if line]
         engine = "nauty/geng"
     else:
         cands = _augment(n)

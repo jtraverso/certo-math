@@ -266,6 +266,14 @@ def _self_check(res, args):
                 name, "  ({})".format(detail) if detail else ""),
                 file=sys.stderr)
     print(t("cli.selfcheck.report"), file=sys.stderr)
+
+    # The one case where certo KNOWS the bug is its own. Write the report
+    # without being asked -- locally, never sent -- and say where it is.
+    from . import report as _report
+
+    where = _report.capture_selfcheck(res, args)
+    if where:
+        print(t("cli.report.captured", path=where), file=sys.stderr)
     return False
 
 
@@ -277,6 +285,8 @@ def limits_from(args) -> Limits:
         seed=args.seed,
         max_iterations=getattr(args, "max_iterations", 10_000),
         conflict_budget=getattr(args, "conflict_budget", 1_000_000),
+        enumerate_timeout_s=getattr(args, "enumerate_timeout_s", 120),
+        max_output_mb=getattr(args, "max_output_mb", 64),
     )
 
 
@@ -409,6 +419,63 @@ def cmd_profile(args):
     return rc
 
 
+def cmd_report(args):
+    """Run a command again, decide whose bug it is, and write it all down.
+
+    Sends nothing. What it prints is where the folder is and a link that opens
+    a pre-filled issue with only non-sensitive fields in it; what goes into
+    the issue is the person's decision, made after reading the folder.
+    """
+    from . import report
+
+    argv = list(args.argv or [])
+    if argv and argv[0] == "--":
+        argv = argv[1:]
+    info = report.build(argv=argv or None, cert_path=args.certificate,
+                        wrong=args.wrong, with_coverage=args.coverage,
+                        out=args.out)
+    if args.json:
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+        return 0
+
+    tri = info["triage"]
+    print(t("cli.report.header", category=tri["category"]))
+    for e in tri["evidence"]:
+        print("    - [{}] {}".format(e["category"], e["detail"]))
+    print()
+    print("  " + t("cli.report.folder", path=info["folder"]))
+    print("  " + t("cli.report.archive", path=info["archive"]))
+    if info["spec_included"]:
+        print("  " + t("cli.report.spec_warning"))
+    if info["coverage_included"]:
+        print("  " + t("cli.report.coverage_included"))
+    print()
+    if tri["category"] == "soundness":
+        print("  " + t("cli.report.private", link=info["link"]))
+    else:
+        print("  " + t("cli.report.file_it", link=info["link"]))
+    print("  " + t("cli.report.nothing_sent"))
+    return 0
+
+
+def cmd_columns(args):
+    from .engines import algebra
+    from .spec import CliqueLPSpec, load_spec
+
+    spec = load_spec(args.spec, CliqueLPSpec)
+    res = algebra.clique_lp(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.certificate is not None:
+        p = res.certificate.payload
+        for col in p["columns"][:args.top]:
+            print("  {:<10} {}".format(col["x"], "{" + ", ".join(col["clique"]) + "}"))
+        if len(p["columns"]) > args.top:
+            print("  " + t("cli.solution.more", n=len(p["columns"]) - args.top))
+        print("  " + t("cli.colgen.pricing", nodes=p["pricing"]["nodes"],
+                       value=p["pricing"]["max_reduced"] or "-"))
+    return rc
+
+
 def cmd_semigroup(args):
     from .engines import algebra
     from .spec import SemigroupSpec, load_spec
@@ -533,7 +600,9 @@ def cmd_matrix(args):
     res = algebra.integer_matrix(spec, limits_from(args), spec_path=args.spec)
     rc = emit(res, args)
     if not args.json and res.certificate is not None:
-        print("  " + t("verify.lattice.scope"))
+        print("  " + t("verify.inertia.scope"
+                       if res.certificate.kind == "symmetric_inertia"
+                       else "verify.lattice.scope"))
     return rc
 
 
@@ -832,7 +901,7 @@ def cmd_doctor(args):
     if args.json:
         rep["mcp"] = doctor.mcp_status()
         if args.register_mcp:
-            rep["registration"] = doctor.register_mcp()
+            rep["registration"] = doctor.register_mcp(getattr(args, "mcp_path", None))
         print(json.dumps(rep, indent=2, ensure_ascii=False))
         return 0 if rep["ok"] else 3
 
@@ -864,7 +933,7 @@ def cmd_doctor(args):
     m = doctor.mcp_status()
     print("    " + t("doctor.mcp.workspace", path=m["workspace"]))
     if args.register_mcp:
-        reg = doctor.register_mcp()
+        reg = doctor.register_mcp(getattr(args, "mcp_path", None))
         if not reg["written"]:
             print("    !! " + reg["detail"])
         elif reg["already"]:
@@ -1633,6 +1702,8 @@ def _sweep_range(args, spec, mode):
         if not args.json:
             print(t("cli.range.row", n=row["n"], verdict=row["verdict"],
                     detail=row["detail"][:70]))
+            if row.get("vacuous"):
+                print("      !! " + t("cli.range.vacuous"))
 
     res = graphsearch.sweep_range(spec, lo, hi, limits_from(args),
                                   stop_on_first=args.stop_on_first,
@@ -2126,7 +2197,8 @@ def _write_lean(text, args, sources, cert=None):
     if args.check:
         # "It should compile" is the claim most likely to be wrong and the one
         # nobody should take on trust from a text generator.
-        rep = leanexport.check(out, args.lean_project)
+        rep = leanexport.check(out, args.lean_project,
+                               timeout=getattr(args, "check_timeout_s", 900))
         if not rep["ran"]:
             print("  " + t("cli.lean.not_checked", reason=rep["reason"]))
             return 0
@@ -2174,6 +2246,16 @@ def build_parser():
     common.add_argument("--max-memory-mb", type=int, default=2048,
                         dest="max_memory_mb")
     common.add_argument("--seed", type=int, default=0)
+    # Separate from --timeout-ms ON PURPOSE -- see `Limits` -- and settable,
+    # which it was not: the bound on `geng` existed and nobody could move it.
+    common.add_argument("--enumerate-timeout-s", type=int, default=120,
+                        dest="enumerate_timeout_s",
+                        help="clock for an external enumeration (geng), "
+                             "separate from a solver's --timeout-ms")
+    common.add_argument("--max-output-mb", type=int, default=64,
+                        dest="max_output_mb",
+                        help="how much an external enumeration may print "
+                             "before it is stopped")
     common.add_argument("--log", nargs="?", const="-", metavar="FILE",
                         help="append this run to the audit ledger "
                              "(default: ./ledger.jsonl)")
@@ -2328,6 +2410,33 @@ def build_parser():
                         "duals, sources and coverage")
     sp.add_argument("spec", help=".py file returning a ProfileSpec")
     sp.set_defaults(func=cmd_profile)
+    sp = add("report", "run a command again, decide whose bug it is -- "
+                       "certo's, the spec's or the environment's -- and write "
+                       "it all to a local folder. Sends nothing")
+    sp.add_argument("argv", nargs=argparse.REMAINDER,
+                    help="the certo command to reproduce, e.g. "
+                         "`opt spec.py --target 5`")
+    sp.add_argument("--certificate", metavar="FILE",
+                    help="a certificate to include and re-verify")
+    sp.add_argument("--wrong", action="store_true",
+                    help="the result is mathematically FALSE. A certificate "
+                         "that verifies and is false is the worst bug this "
+                         "tool can have, and it is reported privately")
+    sp.add_argument("--coverage", action="store_true",
+                    help="also include the coverage summary -- which kinds of "
+                         "question certo could not settle here. Counts and "
+                         "sizes only, never what was asked")
+    sp.add_argument("--out", metavar="DIR",
+                    help="where to write the folder (default: "
+                         "./certo-report-<time>-<triage>)")
+    sp.set_defaults(func=cmd_report)
+    sp = add("columns", "an LP over EVERY clique of a graph, without listing "
+                        "them: column generation, and a pricing search the "
+                        "verifier reruns")
+    sp.add_argument("spec", help=".py file returning a CliqueLPSpec")
+    sp.add_argument("--top", type=int, default=20,
+                    help="how many cliques of the support to print")
+    sp.set_defaults(func=cmd_columns)
     sp = add("semigroup", "an affine semigroup as a CHECKER: pointedness, a "
                           "minimal generating set, and membership with the "
                           "coefficients or the bound that settles it")
@@ -2409,6 +2518,11 @@ def build_parser():
     sp.add_argument("--register-mcp", action="store_true", dest="register_mcp",
                     help="add certo to .mcp.json in the current directory, "
                          "merging with whatever is already registered")
+    # `register_mcp` always took a path; the command line only ever gave it
+    # the current directory, so registering for a project meant `cd` first.
+    sp.add_argument("--mcp-path", metavar="FILE", dest="mcp_path",
+                    help="with --register-mcp: the .mcp.json to write "
+                         "instead of the one in the current directory")
     sp.set_defaults(func=cmd_doctor)
 
     sp = add("ideal", "polynomial equations: refute them outright, or certify "
@@ -2644,6 +2758,11 @@ def build_parser():
     sp.add_argument("--lean-project", metavar="DIR", dest="lean_project",
                     help="the Lean project to compile inside (default: the "
                          "output file's directory)")
+    # Compiling against Mathlib is minutes, not a solver's ten seconds, so it
+    # has its own clock -- which used to be a constant nobody could move.
+    sp.add_argument("--check-timeout-s", type=int, default=900,
+                    dest="check_timeout_s",
+                    help="how long --check may compile before it is stopped")
     sp.add_argument("--lean", action="store_true",
                     help="emit a graph counterexample as Lean 4 data "
                          "(checked against Lean/Mathlib v4.28.0)")

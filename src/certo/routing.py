@@ -38,13 +38,14 @@ SPEC_OF = {
     "audit": "*", "reduce": "SymmetrySpec", "matrix": "MatrixSpec", "solve": "LinearSystemSpec",
     "quotient": "EquitableQuotientSpec", "cone": "ConeSpec",
     "semigroup": "SemigroupSpec", "profile": "ProfileSpec",
+    "columns": "CliqueLPSpec",
     "range": "Spec", "cycle": "CycleSpec",
     "bind": "BindSpec",
 }
 
 #: Which commands leave a certificate that re-checks with NO solver.
 SOLVER_FREE = {
-    "cone", "semigroup", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
+    "cone", "semigroup", "columns", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
     "cover", "ideal", "eliminate", "sos", "number", "order", "bounds",
     "cases",
 }
@@ -62,6 +63,7 @@ BY_QUESTION = (
         ("commands.q.audit", "audit"),
         ("commands.q.status", "status"),
         ("commands.q.doctor", "doctor"),
+        ("commands.q.report", "report"),
     )),
     ("commands.group.size", (
         ("commands.q.opt", "opt"),
@@ -75,6 +77,7 @@ BY_QUESTION = (
         ("commands.q.cone", "cone"),
         ("commands.q.semigroup", "semigroup"),
         ("commands.q.profile", "profile"),
+        ("commands.q.columns", "columns"),
         ("commands.q.range", "range --var X"),
         ("commands.q.cycle", "cycle"),
         ("commands.q.solve", "solve"),
@@ -200,7 +203,7 @@ TIER = {
     "mixed": YES, "farkas": YES, "ratio": YES, "parametric": YES,
     "peak": YES, "entry": YES, "moment": YES, "cover": YES, "exists": YES,
     "cases": YES, "number": YES, "sos": YES, "ideal": YES, "eliminate": YES,
-    "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "reduce": YES,
+    "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "columns": YES, "reduce": YES,
     "order": YES, "bounds": YES, "check": YES, "enum": YES, "shrink": YES,
     "range": YES, "cycle": YES,
 
@@ -223,7 +226,7 @@ TIER = {
     # Report or route; they make no claim of their own.
     "lint": None, "status": None, "doctor": None, "ask": None,
     "commands": None, "repro": None, "verify": None, "export": None,
-    "ledger": None,
+    "ledger": None, "report": None,
 }
 
 
@@ -248,9 +251,12 @@ KIND_OF = {
     "parametric": "parametric_bound", "peak": "integer_peak",
         # `--parametric` asks the same question about a family.
     "reduce": ("symmetry_reduction", "parametric_symmetry"),
-    "matrix": "integer_matrix",
+    # `question="inertia"` or `"psd"` is a symmetric rational matrix, and a
+    # congruence rather than a unimodular transform.
+    "matrix": ("integer_matrix", "symmetric_inertia"),
     "solve": "linear_system", "quotient": "equitable_quotient",
     "cone": "toric_cone", "semigroup": "affine_semigroup", "profile": "capacity_profile",
+    "columns": "clique_lp",
     "range": "variable_range",
     "cycle": "dependency_cycle", "bind": "lean_binding",
     "family": "family_extremum", "ratio": "ratio_bound",
@@ -266,7 +272,7 @@ KIND_OF = {
     # These report or route; they make no claim of their own.
     "lint": None, "status": None, "doctor": None, "ask": None,
     "commands": None, "repro": None, "verify": None, "export": None,
-    "ledger": None, "catalogue": None,
+    "ledger": None, "catalogue": None, "report": None,
 }
 
 
@@ -293,6 +299,7 @@ RUNNERS = {
     "cone": ("certo.engines.algebra", "toric_cone"),
     "semigroup": ("certo.engines.algebra", "affine_semigroup"),
     "profile": ("certo.engines.algebra", "capacity_profile"),
+    "columns": ("certo.engines.algebra", "clique_lp"),
     # `range` stays out on purpose: it needs `--var`, which is a decision
     # `ask` cannot make. `cycle` and `bind` need nothing, so routing them
     # is the whole point of having one entry point.

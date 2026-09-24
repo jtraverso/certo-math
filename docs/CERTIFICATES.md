@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The forty-seven kinds
+## The fifty-two kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -65,6 +65,11 @@ answers"*. The table below is the map; the header is the territory.
 | `symmetry_reduction` | the three hypotheses of the averaging argument | **yes**, the quotient is rebuilt |
 | `equitable_quotient` | the partition, both regularities, and the two maps | **yes**, exact counting |
 | `integer_matrix` | rank, determinant, Hermite, Smith, with the transforms | **yes**, matrix multiplication |
+| `clique_lp` | an LP optimum over every clique of a graph, without listing them | **yes**, rational arithmetic and the pricing search rerun |
+| `symmetric_inertia` | the inertia of a symmetric rational matrix, PSD, and a vector refuting PSD | **yes**, two rational products: `S A Sᵀ = D`, `S S⁻¹ = I` |
+| `affine_semigroup` | pointedness, cone, group and semigroup membership, a refutation of normality, a proposed Hilbert basis | **yes**, the negatives by redoing the bounded search |
+| `capacity_profile` | a piecewise-affine function of a capacity: a bound, its attainment and its coverage on an interval | **yes**, one exact LP check per segment |
+| `branch_frontier` | what a stopped branch and bound knew: incumbent, bound, gap, open nodes | **yes**; a status report, not a proof |
 | `linear_system` | `A x = b`, or an obstruction `y·A = 0`, `y·b ≠ 0` | **yes**, one product |
 | `toric_cone` | primitivity, multiplicity, height, discrepancies | **yes**, exact determinant and solve |
 | `family_extremum` | the largest of a family, and a dual for the rest | rebuilds each item's program |
