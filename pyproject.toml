@@ -29,7 +29,12 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
-dependencies = ["z3-solver>=4.12", "pulp>=2.7"]
+# pulp below 4: 4.0.0 (2026-09-25, Python >= 3.12 only) removed
+# `LpVariable(lowBound=...)` and `PULP_CBC_CMD`, and an unbounded `pulp>=2.7`
+# installed it the day it appeared -- every 3.12 and 3.13 job went red while
+# 3.11, which cannot have it, stayed green. The bound is the version the suite
+# ran against; porting to 4 is its own change, measured, in the backlog.
+dependencies = ["z3-solver>=4.12", "pulp>=2.7,<4"]
 
 [project.urls]
 Homepage = "https://jtraverso.github.io/certo-math/"

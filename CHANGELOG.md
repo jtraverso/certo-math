@@ -26,6 +26,14 @@ The substitutions are the same failure as 0.17's two: an answer for a
 different problem from the one written. `opt --gap` and `mixed` rebuilt a
 packing without its loads, and the integer optimum was another packing's.
 
+**PuLP is bounded below 4.** PuLP 4.0.0 came out the morning this was tagged.
+It supports Python 3.12 and later only, and it removed `LpVariable(lowBound=)`
+and `PULP_CBC_CMD`. With `pulp>=2.7` and no upper bound, every 3.12 and 3.13
+job installed it and failed, while 3.11, which cannot have it, passed. The tag
+was stopped before anything reached the index. 0.18.0 requires `pulp<4`.
+**An install of 0.17.0 or earlier on Python 3.12+ made from now on gets PuLP
+4 and a broken `opt`**: upgrade to 0.18.0, or pin `pulp<4` yourself.
+
 ### One dual per box
 
 `subdivide` checked ONE dual on every leaf of a box, and a user's workflow is a

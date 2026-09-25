@@ -110,6 +110,7 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | Port to PuLP 4 | **S-M** | **low** | med | 4.0.0 (2026-09-25, Python >= 3.12) removed `LpVariable(lowBound=)` and `PULP_CBC_CMD`; 0.18.0 bounds `pulp<4` so nothing broke on release. The port touches every PuLP call in `engines/lp.py`, `mixed`, `bb` and the HiGHS route's fallback. A bound is a date, not a fix: new Python versions will only get 4 |
 | **P3** | A parametric row's polynomials by size, not in full | **S** | **high** | low | **a schema decision, not code**: `rows[*].residual`/`shifted` are most of a large `parametric_bound` once it is written compact, and no verifier -- 0.17 included -- reads them. Dropping them past a size is a REMOVAL under the freeze, so it was built, measured, and taken out of 0.18.0 before release. Needs either the freeze rule widened for never-read descriptive copies, or `SCHEMA_VERSION` 5 |
 | **P3** | The map for items that are not cliques | **S-M** | med | low | `graph=`/`cliques=`/`edges=` is all or nothing: every item must be a clique and every resource an edge. A packing that mixes cliques with other items (vertex resources, radials) cannot declare the part that is a graph yet |
 | **P3** | The `proof` kind in the adversarial suite | **S** | **high** | low | it is not in it, and a tamper of its `assumptions` goes uncaught. Found while adding cited lemmas; the verifier re-checks what it is given, but nothing mutates it systematically |
