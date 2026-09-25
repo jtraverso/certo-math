@@ -1065,6 +1065,8 @@ def parametric(spec, limits: Limits | None = None,
     except (NotParametric, NotPolynomial) as e:
         return Result("parametric", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_PARAM, 0.0, None, detail=str(e))
+    if out.get("witness") == "pieces":
+        return _parametric_pieces(spec, out, t0, spec_path)
 
     ms = (time.perf_counter() - t0) * 1000
     floor = ", ".join("{} >= {}".format(k, v)
@@ -1147,6 +1149,57 @@ def parametric(spec, limits: Limits | None = None,
                   meta={"bound": str(out["bound"]), "floor": floor,
                         "sense": out["sense"],
                         "columns": len(out["variables"])})
+
+
+def _parametric_pieces(spec, out, t0, spec_path):
+    """One dual per box: a certificate whose pieces tile the box."""
+    from ..certificate import parametric_bound_certificate
+
+    ms = (time.perf_counter() - t0) * 1000
+    floor = ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                      for n, (lo, hi) in out["box"].items())
+    if not out["ok"]:
+        return Result("parametric", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      ENGINE_PARAM, ms, None,
+                      detail=t("engine.param.pieces_failed",
+                               n=len(out["failed_boxes"]),
+                               boxes="; ".join(
+                                   ", ".join("{} in [{}, {}]".format(k, a, b)
+                                             for k, (a, b) in fb.items())
+                                   for fb in out["failed_boxes"][:3])),
+                      meta={"failed_boxes": out["failed_boxes"]})
+    pieces = []
+    for b, piece in out["pieces"]:
+        pieces.append({
+            "box": {n: [str(lo), str(hi)] for n, (lo, hi) in b.items()},
+            "dual": _dual_texts(spec, piece),
+            "dual_poly": _dual_polys(spec, piece),
+            "bound": piece["bound"].serialize(),
+            "box_trees": piece.get("box_trees") or {},
+            "claim": piece.get("claim"),
+        })
+    cert = parametric_bound_certificate(
+        parameters=dict(spec.parameters), variables=out["variables"],
+        objective={v: _ser(spec, c) for v, c in spec.objective.items()},
+        constraints=[[str(n), {v: _ser(spec, c) for v, c in row.items()},
+                      sense, _ser(spec, rhs)]
+                     for n, row, sense, rhs in spec.constraints],
+        dual={}, bound=(out["claim"]["target"] if out["claim"] else {}),
+        rows=[], title=spec.title, sense=out["sense"],
+        free=out.get("free") or None, claim=out.get("claim"),
+        box=out["box"], pieces=pieces, split=out["split"],
+    ).stamp(spec_path or None)
+    if out["claim"]:
+        key = ("engine.param.pieces_claim_min" if out["sense"] == "min"
+               else "engine.param.pieces_claim")
+        detail = t(key, floor=floor, n=len(pieces),
+                   target=str(_poly_text(spec, out["claim"]["target"])))
+    else:
+        detail = t("engine.param.pieces", floor=floor, n=len(pieces))
+    return Result("parametric", Status.UNSAT, Verdict.PROVED, ENGINE_PARAM,
+                  ms, cert, detail=detail,
+                  meta={"pieces": len(pieces), "floor": floor,
+                        "sense": out["sense"]})
 
 
 def _dual_texts(spec, out):

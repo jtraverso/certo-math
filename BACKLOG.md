@@ -110,24 +110,23 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P1** | Branch and bound SPARSE end to end: the node's system, the model build and the exact check from non-zeros only | **M** | med | med | the 1048-column instance still does not finish in 20 minutes (90 nodes, ~13 s each): the matrix is still materialised densely per node. The certificate per node is gone already |
-| **P1** | Bernstein subdivision with ONE DUAL PER LEAF, and the leaves aggregated into one statement | **M** | med | **high** | `subdivide` checks one dual on every leaf; a user's workflow is a dual per box, and joining them is the covering row below |
+| **P3** | A parametric row's polynomials by size, not in full | **S** | **high** | low | **a schema decision, not code**: `rows[*].residual`/`shifted` are most of a large `parametric_bound` once it is written compact, and no verifier -- 0.17 included -- reads them. Dropping them past a size is a REMOVAL under the freeze, so it was built, measured, and taken out of 0.18.0 before release. Needs either the freeze rule widened for never-read descriptive copies, or `SCHEMA_VERSION` 5 |
+| **P3** | The map for items that are not cliques | **S-M** | med | low | `graph=`/`cliques=`/`edges=` is all or nothing: every item must be a clique and every resource an edge. A packing that mixes cliques with other items (vertex resources, radials) cannot declare the part that is a graph yet |
+| **P3** | The `proof` kind in the adversarial suite | **S** | **high** | low | it is not in it, and a tamper of its `assumptions` goes uncaught. Found while adding cited lemmas; the verifier re-checks what it is given, but nothing mutates it systematically |
+| **P3** | Does the support pass help branch and bound? | **S** | **low** | low | `exact.certify` now solves on the float solution's support before the exact simplex -- 97 s to under 1 on a Bernstein dual. Not measured on the 1048-column tree, whose cost is 11 `check_lp` a node on the ladder, before that pass |
+| **P3** | `certo report` recognises a native-crash trace and a deadline dump in stderr, and triages them | **S** | med | low | both now print a stack; triage should say which frames are certo's, which a library's, and which the interpreter's start-up |
+| **P2** | Branch and bound on 1048 columns: the exact check's reconstruction ladder, and the frontier certificate | **M** | med | med | sparse end to end landed and the instance still does not finish in 20 minutes (99 nodes). Measured: `check_lp` runs 11 times a node -- every denominator rung times three sign variants of the dual, each checked in full -- about 3.5 s a node; and building the frontier certificate at the stop serialises the whole system, 40 million `serialize` calls, about 190 s |
+| **P3** | `doctor --register-mcp --venv`: register the MCP server with a venv's interpreter | **S** | med | low | the global interpreter on a machine with a start-up hook dies at 7-12% of starts under load; an MCP server started by it inherits that |
 | **P2** | `box` together with `region`: multipliers for Bernstein coefficients | **M** | **low** | med | refused for now; the region's multipliers are found for the shift test on a ray |
-| **P2** | `claim=` as a CONSTRAINT when certo finds the dual, not only checked afterwards | **S** | **high** | low | today the Bernstein LP minimises the bound and the claim is checked on what it found |
-| **P2** | Covering a parameter domain: N boxes cover a semialgebraic set, and N parametric certificates aggregate into one statement | **L** | **low** | med | coverage is audited by a user's own script today, across SEVERAL coordinate charts. `CoverSpec` for parameter domains, with the charts as part of what is checked |
-| **P2** | Cite a lemma the certificate cannot recompute, in `compose` | **M** | med | med | **unblocked**: it was waiting for a second instance, and a user's chain of bounds resting on an external section is it. `compose` already takes certificates as lemmas; what is missing is the cited one |
+| **P2** | Covering a parameter domain: N boxes cover a semialgebraic set, and N parametric certificates aggregate into one statement | **L** | **low** | med | coverage is audited by a user's own scripts today -- exact tiling, delta coverage, boundaries -- over ~2 000 boxes in THREE coordinate charts, plus regions covered by external lemmas. `CoverSpec` for parameter domains, with the charts and the cited lemmas as part of what is checked |
 | **P2** | A `sweep` predicate certified in one line: a partition returned by the predicate, checked by `cover`, and `predicate_certified` set | **M** | med | med | a user covered the predicate with another tool because building the certificate by hand was too much |
-| **P2** | Parametric certificates: size and verification time | **M** | **low** | med | ~6 MB of JSON per box, reported twice; `verify` about 5 s per box of ~3 600 control points in one report and minutes for one box in the other -- which one dominates needs the instance before sizing. Storing Bernstein coefficients instead of expanded polynomials may be most of it |
-| **P2** | Choosing, on a degenerate LP, the optimal dual that maximises a given direction | **S-M** | med | low | the duals a solver's marginals give are not maximal |
 | **P2** | Column generation beyond cliques: other implicit families, and a Farkas certificate for an infeasible partition | **L** | **low** | med | `columns` shipped for cliques; the pricing is the part that has to be exact for each family |
-| **P2** | Certify the MAP: which clique a row is, which edge a capacity is | **M** | med | med | a perfectly certified LP that was badly translated leaves the original problem unproven. NOT the users' physical auditor — see below |
 | **P2** | A certified integer UPPER bound for packings -- **re-measure first** | **L** | **low** | med | branch and bound became 40 to 60 times faster on a user's instances; it may already be the answer |
-| **P2** | LP bounds to Lean: weak duality instantiated, closed by `linarith` | **S** | **high** | low | fits the export rule exactly. Trees are the row below |
 | **P2** | Branch-and-bound trees to Lean; a small finite `sweep` to Lean by `decide` | **L** | **low** | med | two users asked. The risk is the scaffolding, which is what removed the last structured exporter |
 | **P2** | Chvatal-Gomory cuts with their multipliers in the certificate; symmetry in branching; warm start | **L** | med | med | on small instances a node now costs ~30 ms; this is what is left of the throughput gap after the P1 row above |
 | **P2** | The coverage map, read again once `why` has accumulated | **S** | **high** | low | the first reading found the instrument could not say which gap; it now records the message key |
 | **P2** | Chow ring and toric intersection | **L** | **low** | none | route space, but depth-shaped: an engine, not a checker. See the breadth/depth split above |
-| **P3** | Semialgebraic regions: polynomial multipliers (bounded Putinar), equality constraints, and boxes whose boundary is a curve | **L** | **low** | med | `region` multipliers are constants and products of pairs. A user's parameters live on a surface and needed three rational charts found by hand; boxes cut by a curve (`k1 = 0`, `x1 = 0`) end up left as frontier |
+| **P3** | Semialgebraic regions: polynomial multipliers (bounded Putinar), equality constraints, and boxes whose boundary is a curve | **L** | **low** | med | `region` multipliers are constants and products of pairs. A user's parameters live on a surface and needed three rational charts found by hand -- a blow-up at the apex, a projection from a point of the conic -- and boxes cut by a curve (`k1 = 0`, `x1 = 0`, `gamma0 = 1/10`) still leave slivers |
 | **P3** | The minimum over a family of an arbitrary certified leaf -- an LP, an inertia, a count | **M-L** | **low** | med | `family` maximises over explicit LPs only |
 | **P3** | Multi-capacity profiles: `profile` in more than one parameter | **M-L** | med | med | the regions and their duals, not only breakpoints |
 | **P3** | A canonical form that scales, isomorphism in `enum`, and pynauty behind it | **L** | med | **high** | pynauty has no Windows wheel |
@@ -140,7 +139,6 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | PyNormaliz as a proposer for `semigroup --hilbert` | **S** | med | low | Linux-only, no Windows wheel; Normaliz computes, `check_hilbert` already decides. Optional backend like `geng` |
 | **P3** | PySCIPOpt's exact mode and VIPR certificates | **M** | low | **high** | unverified that the wheel ships exact SCIP at all. Check that first, before sizing |
 | **P3** | cypari2 / fpylll: number fields, primality, lattice reduction | **L** | low | med | no Windows wheels. A new domain for cypari2; fpylll proposes what `matrix` already checks |
-| **P3** | `in_cone: false` with no separator is not re-checked by `verify` | **S** | med | low | only without cddlib, when Caratheodory exhausts and the subset search finds no separator. Redo it in the verifier or require the separator |
 
 **Not planned: an adapter that runs another tool's operations inside certo.**
 Asked for so that a second checker costs no start-up per call. It is a
@@ -159,6 +157,7 @@ and a list that mixes them makes the second look like neglect.
 | The three quarantined payloads | a user | the files themselves. Three claims of certificates that verify and should not could not be reproduced; the reconstructions all came back INVALID, which means they differ from the originals |
 | A resume protocol for `branch_frontier` | a decision nobody has stated | what is GUARANTEED when two partial runs are recombined. Emitting a frontier is not retaking one, and 0.12.1 deliberately stopped at the first |
 | Recorded machine profiles for the `doctor` fixtures | access to varied machines | a Linux box, a venv, an editable install and a deliberately broken one. The code is S; what is missing is the machines, which is CI rather than a person |
+| Removing `pip_system_certs` from this machine's global Python, or moving certo and its MCP server to a venv | the machine's owner | a decision about the machine, not about certo: pip may need the hook behind a corporate proxy. Measured cost of keeping it: 7-12% of starts die under load, and a start takes 5 s instead of 0.4 |
 | A required reviewer on the `pypi` environment | the repository owner | one setting. Nine versions have reached the index in three days with nobody approving the step, and a version on PyPI cannot be replaced |
 
 **The coverage map, and why the row that shipped said *record* rather
@@ -292,8 +291,11 @@ into certo would delete the only check that does not share certo's
 assumptions, which is precisely the check that has been catching things all
 year. So the item is the narrow half: a declarative contract tying each row to
 the clique it is, and each capacity to the edge it is, so certo can refuse a
-translation error WITHOUT replacing the independent reconstruction. Agreed in
-shape, not yet in detail.
+translation error WITHOUT replacing the independent reconstruction.
+*(built in 0.18.0: `graph=`, `cliques=`, `edges=` on `PackingSpec`, checked
+at construction and again against the certificate's matrix. What it leaves
+out on purpose -- which cliques belong in the family, and the capacities --
+is repeated in every verification.)*
 
 **The half `opt --gap` leaves open.** *(still open)* A packing question has two sides. The
 lower one is solved and exact: a feasible packing is its own witness, and
@@ -385,6 +387,19 @@ the cost is being paid somewhere else.
 | The degenerate sizes: n=0 as the empty graph, vacuity named per size, `lint` below the swept n | **0.17.0** |
 | Free variables in `LPSpec`; `==` rows, `free`, `claim=` and a primal witness in `ParametricSpec` | **0.17.0** |
 | **`parametric` on a box**: Bernstein coefficients, subdivision, and the dual found by one exact LP | **0.17.0** |
+| A trace when a run dies or hangs: `faulthandler` always on, `--deadline`, `--heartbeat` | **0.18.0** -- a native crash now prints the stack; a hang past the deadline dumps every thread and exits 2 |
+| Branch and bound sparse from end to end | **0.18.0** -- `as_leq_sparse` is the one definition; the dense matrix only for the exact simplex |
+| One dual per box, the leaves tiling the box and aggregated under `claim=` | **0.18.0** |
+| The cause of the silent deaths and hangs: `pip_system_certs` at interpreter start, measured and named by `doctor` | **0.18.0** -- 7-12% of starts died natively under load with the hook, 0 of 90 from a venv without it |
+| Exit codes explained: `--deadline`'s 2, a native death, a kill from outside | **0.18.0** -- `docs/VERDICTS.md` |
+| `claim=` as a constraint when certo finds the dual | **0.18.0** -- the Bernstein LP carries `bound <= claim` on the box's coefficients |
+| An exact LP bound to Lean, as weak duality closed by `linarith` | **0.18.0** -- `lp_dual` in `EXPORTERS`, compiled against the pinned Mathlib and in the CI job |
+| `in_cone: false` without a separator, searched again by `verify` | **0.18.0** |
+| `opt --dual-direction`: the optimal dual maximising a direction, proved maximal | **0.18.0** -- the second LP travels as `dual_selection` and is rebuilt by `verify` |
+| `ProofSpec.cite`: a lemma with a source and no certificate | **0.18.0** -- the proof says it is RELATIVE, every verification lists the cited lemmas |
+| Parametric certificates: size and verification time | **0.18.0** -- measured on synthetic instances: `verify` 19 s to 2.4 s (`shift` was quadratic), the Bernstein dual 101 s to 2.3 s (an exact solve on the float support), files past 1 MB written compact. The users' own instances were not at hand; re-measure on one |
+| Certify the map: which clique a row is, which edge a capacity is | **0.18.0** -- the narrow half: declared on `PackingSpec`, refused by name, rechecked against the certificate's matrix. The family and the capacities stay with the user's auditor |
+| `--gap` and `mixed` kept a packing's loads | **0.18.0** -- both copies had listed their fields and left `loads` out |
 | A GitHub Release per tag, from `publish.yml` | **0.15.0** -- the release job, and the ten missing ones created by hand |
 | The project page stating its version and naming new commands | **0.15.0** -- tied to `__version__` by a test |
 | **The facets of a cone behind `semigroup`** | pycddlib, `certo[polyhedra]`, **0.17.0** -- gradings for 140 of 140 pointed cones against 77, and `pointed: false` now needs a zero combination |
@@ -964,11 +979,12 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.12.1**, with **48 certificate kinds**. The certificate schema
+Current: **0.18.0**, with **52 certificate kinds**. The certificate schema
 has been **frozen** since 0.4.0 and `SCHEMA_VERSION` is still 4: everything
 since has been a new kind, an optional field, or a command that emits no
-certificate. The optional fields added under the freeze so far are `loads`,
-`declared` and `relative`.
+certificate. Among the optional fields added under the freeze: `loads`,
+`declared` and `relative`, and in 0.18.0 `dual_selection`, `map` and a
+lemma's `cited`.
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

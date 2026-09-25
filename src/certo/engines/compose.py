@@ -79,6 +79,21 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
 
     entries, statements = [], []
     for lem in spec.lemmas:
+        if getattr(lem, "cited", ""):
+            # CITED: nothing to discharge and nothing to verify. The statement
+            # goes into the final step, and the source goes into the
+            # certificate, where every verification will repeat it.
+            statements.append((lem.name, lem.states))
+            entry = {"name": lem.name,
+                     "statement_smt2": z3util.smt2(lem.states),
+                     "derived": False, "bridge": "", "cited": lem.cited,
+                     "engine": "cited", "cert": None}
+            if lem.subject:
+                entry["subject"] = list(lem.subject)
+            if lem.transport:
+                entry["transport"] = lem.transport
+            entries.append(entry)
+            continue
         if lem.proves is not None:
             res, engine = _discharge(lem, lim)
             if res.verdict is not Verdict.PROVED or res.certificate is None:
@@ -175,12 +190,21 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
         subject=theorem_subject, crossings=crossings,
     ).stamp(spec_path or None)
 
-    bridges = [e["name"] for e in entries if not e["derived"]]
+    bridges = [e["name"] for e in entries
+               if not e["derived"] and not e.get("cited")]
+    cited = [e["name"] for e in entries if e.get("cited")]
+    cited_used = [n for n in cited if n in used]
+    detail = t("engine.compose.proved", lemmas=len(entries),
+               derived=len(entries) - len(bridges) - len(cited),
+               bridges=len(bridges))
+    if cited_used:
+        detail += " -- " + t("engine.compose.relative", n=len(cited_used),
+                             names=", ".join(cited_used[:4]))
     return Result(
         "compose", Status.UNSAT, Verdict.PROVED, ENGINE, ms, cert,
-        detail=t("engine.compose.proved", lemmas=len(entries),
-                 derived=len(entries) - len(bridges), bridges=len(bridges)),
+        detail=detail,
         meta={"lemmas": [e["name"] for e in entries], "used": used,
-              "unused": unused, "bridges": bridges,
+              "unused": unused, "bridges": bridges, "cited": cited,
+              "cited_used": cited_used,
               "vacuous": bool(step.meta.get("vacuous"))},
     )

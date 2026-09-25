@@ -6,6 +6,180 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-09-25
+
+**Parametric certificates that verify in seconds, a packing that says what
+its rows are, runs that leave a trace when they die, and two more silent
+substitutions closed.** A minor: no new command and no new kind, still 50 and
+52. What is new is optional fields -- `dual_selection` and `map` on `lp_dual`,
+`witness: "pieces"` with `pieces` and `split` on `parametric_bound`, `cited`
+on a proof's lemma -- a third Lean exporter, and `--deadline` and
+`--heartbeat` on every command. No existing payload changes shape, and a
+certificate written by 0.17 verifies unchanged. Checked the other way, against
+the installed 0.17.0: it verifies the new `lp_dual` fields, which it ignores,
+and it REFUSES the two new shapes -- a parametric bound by pieces, and a proof
+resting on a cited lemma. That is the safe direction, since an older reader
+refuses what it cannot check rather than accepting it, but verifying those
+needs 0.18.
+
+The substitutions are the same failure as 0.17's two: an answer for a
+different problem from the one written. `opt --gap` and `mixed` rebuilt a
+packing without its loads, and the integer optimum was another packing's.
+
+### One dual per box
+
+`subdivide` checked ONE dual on every leaf of a box, and a user's workflow is a
+dual per box. With `dual="bernstein"` and `subdivide=d`, certo now finds a dual
+on the box and, where there is none -- or it misses the `claim` -- halves the
+box and finds one on each half. The certificate carries the split tree and one
+piece per leaf; `verify` recomputes the tiling, halving the declared box
+exactly as the tree says, and verifies every piece on its own leaf. With
+`claim=T` the statement of the whole is `opt <= T` on the box. A constant dual
+bounds `1/(2-p)` by 1 on `[0, 1]` at best; `p/2 + 11/20` takes seven boxes.
+And a claim that is false -- `opt <= 9/10` on `[0, 1]`, where `opt(1) = 1` -- is
+not proved by cutting finer: the boxes near 1 are named, and nothing is
+certified.
+
+### Branch and bound, sparse from end to end
+
+A node of `mixed --prove-optimal` now builds its system, its solver model and
+its exact check from the non-zeros only: `LPSpec.as_leq_sparse` is the one
+definition of the program, `as_leq_system` densifies from it, and the exact
+route materialises the dense matrix only if it reaches its last pass, the
+exact simplex. Honestly: the user's 1048-column instance still does not
+finish in 20 minutes -- 99 nodes, from 90. What remains is measured and in the
+backlog: the exact check runs 11 times a node, and the frontier certificate
+serialises the whole system at the stop.
+
+### A run that dies or hangs leaves a trace
+
+A user reported a `parametric` that sat 70 minutes at 0% CPU on a spec that
+takes six seconds, and runs that ended under load with NO output -- no error,
+no JSON -- and proved when relaunched. The same shape had been seen here three
+times on a loaded machine and put down to the load: a native crash
+`0xC0000409`, and two examples hung 900 seconds that take seconds alone. None
+reproduced in isolation, and every one left only an absence behind.
+
+So first, evidence. `faulthandler` is on for every CLI run: a crash in native
+code now prints the stack of every thread instead of ending the process
+silently -- checked first that z3 raising and catching its own exceptions
+prints nothing. `--deadline S` (or `CERTO_DEADLINE_S`) bounds the whole run:
+at S seconds every thread's stack goes to stderr and certo exits 2,
+inconclusive, with `faulthandler`'s C watchdog behind it for a hang inside a
+native call that never gives the interpreter back. `--heartbeat S` (or
+`CERTO_HEARTBEAT_S`) says the run is alive. None of this fixes a cause; it
+makes the next one say where it was.
+
+**And then the cause, found by measuring.** Hundreds of interpreters started
+in parallel under the load this machine already had: with the site hooks, 9,
+13 and 14 of 120 died natively with `0xC000070A` about 2.5 seconds in; with
+`python -S`, none of 120, and ten times faster. Every death's stack ended in
+`pip_system_certs`, whose `.pth` creates an SSL context from the system trust
+store at EVERY interpreter start -- before any certo code runs, which is why
+nothing was ever printed. The certo examples that had hung here, repeated 90
+times in parallel: 7 deaths and one hang past its own `--deadline` from the
+global Python, and 0 of 90 from a venv without the hook, three times faster.
+`doctor`'s own history already had half of it: a `certo --help` that never
+returned on a corporate network, traced to the same trust-store call. So the
+reporter's two symptoms -- 70 minutes at 0% CPU, and runs ending with no
+output that succeed on relaunch -- are one hook, outside certo, and certo
+cannot reach it. What it can do: `doctor` now names the hook whenever it is
+present, with the remedy -- run certo from a venv without it -- and the verdict
+page says which exit codes are certo's and which are a native death or a kill.
+
+### A packing can say what its rows are -- and `verify` checks it
+
+A certified LP that was badly translated leaves the original problem unproven,
+and certo accepted rows with no idea where they came from. A `PackingSpec`
+built from a graph can now declare `graph=` (its edges),
+`cliques={item: vertices}` and `edges={resource: (u, v)}`. certo refuses,
+by name, an item that is not a clique, a resource that is no edge of the
+graph, two capacities on one edge, the same clique twice, and an item whose
+resources are not exactly its clique's edges. The map goes into the
+certificate as an optional `map` field, and `verify` checks it against the
+certificate's own matrix: each edge row's support must be exactly the cliques
+holding that edge, with coefficient 1. So a row edited afterwards fails even
+though the map is untouched. A variable's own bound row is accepted for what
+it is, a single ±1 on its column, and not because of its name. What this does
+NOT check, deliberately and repeated in every verification, is which cliques
+belong in the family, and the capacities. That stays with the user's
+independent reconstruction, the only check that does not share certo's
+assumptions.
+
+### Two more silent substitutions: `--gap` and `mixed` dropped the loads
+
+Found while wiring the map through. The integer half of `opt --gap`, and a
+`PackingSpec` handed to `mixed`, were rebuilt by listing the fields to keep,
+and `loads` was not on the list. With a load forbidding every triangle of K4,
+the integer half still reported ν = 1, the optimum of a different packing.
+Both copies now go through `dataclasses.replace`, which carries every field,
+the new map included.
+
+### Parametric certificates: verification 8x faster, the dual found in seconds
+
+Measured on synthetic instances at the size users reported, since none of
+theirs was at hand. Three causes, three fixes:
+
+- **`verify`** spent 17 of its 19 seconds in `shift`, which added one term at
+  a time to an accumulated polynomial and copied it at each step, so its cost
+  was quadratic. It now accumulates into one dictionary, and `Poly` arithmetic
+  no longer re-normalises coefficients that are already exact: **19.0 s →
+  2.4 s** on 19 columns in three parameters.
+- **Finding a Bernstein dual** went to the exact simplex. The vertices of that
+  LP have denominators near 10²⁹, no rung of the reconstruction ladder reaches
+  them, and 660 rational pivots took 97 of 101 seconds. A new pass reads only
+  the *support* of the float solution (which columns are positive, which rows
+  bind) and solves those square systems exactly. It is two eliminations, and
+  `check_lp` still decides: **101 s → 2.3 s**, the same exact bound. A
+  degree-6 box with 19 columns that did not finish in 10 minutes takes 10
+  seconds. The pass sits after the ladder and before the exact simplex in
+  `exact.certify`, so anything that already certified certifies exactly as
+  before.
+- **Size.** Indentation was nearly half of a large file (0.69 MB written for
+  0.37 MB of content). A certificate past a megabyte is now written without
+  indentation. The digest is over the content, so it does not change, and a
+  smaller certificate is byte-for-byte what it was. The payload is untouched:
+  `rows[*].residual` and `shifted` are most of what remains, and `verify`
+  rebuilds them and never reads them, but the schema is frozen and dropping
+  them is a removal, so it waits for a schema decision (in the backlog).
+
+### A lemma certo cannot recompute, cited with its source
+
+`ProofSpec.cite(name, states, source)` puts a published result, or one proved
+in another tool, into a composed proof as what it is: a statement with a
+source and no certificate. The proof is then true RELATIVE to it, and the
+result says so (`RELATIVE to 1 cited lemma(s)`). Every verification lists
+each cited lemma with its source and statement, and says whether the final
+step actually used it. A cited lemma carrying a certificate, or with an empty
+source, is refused.
+
+### Which optimal dual: `opt --dual-direction ROW=W,...`
+
+On a degenerate LP there are many optimal duals, and the solver's is
+arbitrary. `--dual-direction` asks for the optimal dual maximising a weighted
+sum of named constraints' multipliers, found by a second exact LP
+(`max d·y` over `Aᵀy ≥ c`, `b·y ≤ v*`). That LP's own certificate travels as
+the optional `dual_selection` field, and `verify` rebuilds that second program
+from the certificate, verifies it, and checks that its optimum is the dual
+given. An unknown constraint name is refused, with the known ones listed.
+
+### Three smaller ones
+
+- **The `claim` as a constraint.** With `dual="bernstein"` and a `claim`,
+  the dual LP now includes `bound ≤ claim` (`≥` for a minimisation) on the
+  box's Bernstein coefficients, so certo looks for a dual that meets the
+  claim, not merely one that bounds. A claim no dual of that degree meets is
+  reported as such.
+- **An exact LP bound to Lean.** `certo export --lean` gains `lp_dual`: the
+  bound as weak duality, `c·x ≤ v` from the rows the dual weights and the
+  signs the reduced costs need, closed by `linarith`. Compiled against the
+  pinned Mathlib, and added to the CI job that compiles. Inexact
+  certificates, and programs past 200 variables or rows, are refused rather
+  than emitted.
+- **`in_cone: false` without a separator is searched again.** A semigroup
+  certificate's point declared outside the cone with no separating functional
+  was taken at its word; `verify` now reruns the membership test.
+
 ## [0.17.0] — 2026-09-24
 
 **Six user reports, a command, three certificate kinds, and two silent

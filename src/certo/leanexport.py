@@ -1,7 +1,7 @@
-"""Lean 4 export: two exporters, and the shortness is the policy.
+"""Lean 4 export: three exporters, and the shortness is the policy.
 
-certo emits Lean for a LINEAR Farkas certificate and for a SMITH normal form,
-and for nothing else. That is not a gap waiting to be filled -- it is where
+certo emits Lean for a LINEAR Farkas certificate, for an exact LP bound, and
+for a SMITH normal form, and for nothing else. That is not a gap waiting to be filled -- it is where
 the line landed after compiling generated files against a real Mathlib, and it
 follows from one rule:
 
@@ -14,6 +14,12 @@ multipliers exactly, `linarith` is complete for linear arithmetic over an
 ordered field, and the file is thirty-eight lines: an `example`, its
 hypotheses, and one tactic call. If Lean disagrees you find out here rather
 than three weeks in.
+
+An exact LP bound is the same shape: weak duality instantiated, the rows its
+dual uses and the signs its reduced costs need as hypotheses, the bound as the
+goal, closed by `linarith`. Added when two users asked for LP certificates in
+Lean, and registered only after a maximisation and a minimisation with
+rational coefficients both compiled against the pinned Mathlib.
 
 A Smith certificate is the same shape with a different tactic. The matrices go
 out as `!![...]` literals and `decide` re-does the arithmetic: `U * A * V = S`,
@@ -109,6 +115,7 @@ IMPORTS = {
     # so the hypotheses would not even elaborate. Found by --check, which is
     # the whole reason it exists.
     "farkas": ["Mathlib.Data.Real.Basic", "Mathlib.Tactic.Linarith"],
+    "lp_dual": ["Mathlib.Data.Real.Basic", "Mathlib.Tactic.Linarith"],
     # `!![...]` is `Matrix.of ![...]`. The module it lives in MOVED: it is
     # `Mathlib.LinearAlgebra.Matrix.Notation` in 4.28-era Mathlib, not
     # `Mathlib.Data.Matrix.Notation`, and multiplication is in `.Mul` rather
@@ -250,6 +257,114 @@ def farkas_to_lean(data: dict, source="") -> str:
         lines.append("  linarith{}".format(
             " [{}]".format(", ".join(hints)) if hints else ""))
 
+    lines.append("")
+    lines.append(FOOTER)
+    return _trim_header("\n".join(lines))
+
+
+#: Beyond this many hypotheses or variables, "linarith closes it" stops being
+#: a promise worth making about the time it takes.
+LP_LEAN_MAX = 200
+
+_LEAN_WORDS = {"at", "by", "do", "else", "end", "fun", "have", "if", "in",
+               "let", "match", "open", "show", "then", "with", "where", "from",
+               "theorem", "example", "def", "lemma", "namespace", "section",
+               "variable", "calc", "suffices", "this", "Type", "Prop", "Sort"}
+
+
+def _real(c: Fraction) -> str:
+    """A rational constant AS A REAL. `_rat` writes `(p/q : ℚ)`, which is right
+    beside rational variables and a coercion puzzle beside real ones."""
+    return str(c.numerator) if c.denominator == 1 else         "({}/{} : ℝ)".format(c.numerator, c.denominator)
+
+
+def _linear(coeffs, names) -> str:
+    """`sum c_j x_j` as Lean, subtraction for negative terms, `0` if empty."""
+    out = ""
+    for j, c in coeffs:
+        if not c:
+            continue
+        mag = abs(c)
+        term = names[j] if mag == 1 else "{} * {}".format(_real(mag), names[j])
+        if not out:
+            out = term if c > 0 else "-{}".format(
+                term if mag == 1 else "({})".format(term))
+        else:
+            out += (" + " if c > 0 else " - ") + term
+    return out or "0"
+
+
+def lp_to_lean(data: dict, source="") -> str:
+    """An exact LP bound as an `example` closed by `linarith`: weak duality,
+    instantiated.
+
+    The hypotheses are what the dual USES -- the rows with a non-zero
+    multiplier, and `0 <= x_j` only where the reduced cost is positive --
+    which is the certificate's whole content, as with Farkas. `linarith` is
+    complete for linear arithmetic over an ordered field, so it rediscovers
+    the multipliers; they are not transcribed. The statement is over the
+    reals, which bounds the rational and the integer programs as well.
+    """
+    p = data["payload"]
+    if not p.get("exact"):
+        raise NotExportable(t("lean.lp.not_exact"))
+    A = [[Fraction(v) for v in r] for r in p["A"]]
+    b = [Fraction(v) for v in p["b"]]
+    c = [Fraction(v) for v in p["c"]]
+    y = [Fraction(v) for v in p["dual"]]
+    n, m = len(c), len(A)
+    rows_used = [i for i in range(m) if y[i]]
+    reduced = [sum((A[i][j] * y[i] for i in range(m)), Fraction(0)) - c[j]
+               for j in range(n)]
+    signs = [j for j in range(n) if reduced[j]]
+    if len(rows_used) + len(signs) > LP_LEAN_MAX or n > LP_LEAN_MAX:
+        raise NotExportable(t("lean.lp.too_large", hyps=len(rows_used)
+                              + len(signs), vars=n, limit=LP_LEAN_MAX))
+    raw = list(p.get("var_names") or ["x{}".format(j) for j in range(n)])
+    names, seen = [], set()
+    for j, v in enumerate(raw):
+        nm = _safe(str(v))
+        if nm in _LEAN_WORDS or nm in seen:
+            nm = "x{}_{}".format(j, nm)
+        seen.add(nm)
+        names.append(nm)
+    row_names = list(p.get("names") or ["r{}".format(i) for i in range(m)])
+    bound = sum((b[i] * y[i] for i in range(m)), Fraction(0))
+    used_vars = sorted({j for i in rows_used for j in range(n) if A[i][j]}
+                       | {j for j in range(n) if c[j]} | set(signs))
+    binder = " ".join(names[j] for j in used_vars) or "_x"
+
+    lines = [_header("lp_dual", data.get("digest", "?"), source), ""]
+    lines.append("/-- Weak duality, instantiated: the rows the dual uses and the")
+    lines.append("signs its reduced costs need, and the bound they give. -/")
+    lines.append("example ({} : ℝ)".format(binder))
+    hyps = []
+    for j in signs:
+        h = "h_{}".format(names[j])
+        hyps.append(h)
+        lines.append("    ({} : 0 ≤ {})".format(h, names[j]))
+    for k, i in enumerate(rows_used):
+        name = str(row_names[i])
+        if name.endswith("_geq"):
+            # Stored negated, as `-a.x <= -b`; written the way it was declared.
+            h = "r{}_{}".format(k, _safe(name[:-4]))
+            lines.append("    ({} : {} ≥ {})".format(
+                h, _linear([(j, -v) for j, v in enumerate(A[i])], names),
+                _real(-b[i])))
+        else:
+            h = "r{}_{}".format(k, _safe(name))
+            lines.append("    ({} : {} ≤ {})".format(
+                h, _linear(list(enumerate(A[i])), names), _real(b[i])))
+        hyps.append(h)
+    if p.get("sense") == "min":
+        # The system maximises `-w.x`; the lemma a reader wants is `bound' <= w.x`.
+        lines.append("    : {} ≤ {} := by".format(
+            _real(-bound), _linear([(j, -cj) for j, cj in enumerate(c)], names)))
+    else:
+        lines.append("    : {} ≤ {} := by".format(
+            _linear(list(enumerate(c)), names), _real(bound)))
+    lines.append("  linarith{}".format(" [{}]".format(", ".join(hyps))
+                                        if hyps else ""))
     lines.append("")
     lines.append(FOOTER)
     return _trim_header("\n".join(lines))
@@ -518,6 +633,10 @@ EXPORTERS = {
     # documenting nothing whose error landed four lines away. That is the
     # whole argument for the gate.
     "integer_matrix": smith_to_lean,
+    # Weak duality, instantiated. Registered after both shapes -- a packing
+    # maximisation and a covering minimisation with rational coefficients --
+    # compiled against the pinned Mathlib with no `sorry`.
+    "lp_dual": lp_to_lean,
 }
 
 

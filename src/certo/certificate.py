@@ -32,6 +32,10 @@ from .i18n import t
 SCHEMA_VERSION = 4
 
 
+#: Characters of indented JSON past which a certificate is written compact.
+COMPACT_ABOVE = 1_000_000
+
+
 def _without_provenance(value):
     """The same structure with every `provenance` block dropped, recursively.
 
@@ -111,6 +115,18 @@ class Certificate:
             note_args=d.get("note_args", {}),
             provenance=d.get("provenance") or {"legacy": True},
         )
+
+    def to_json(self) -> str:
+        """The text written to disk: indented to be read, until it is too big
+        to be read. Past `COMPACT_ABOVE` the indentation was nearly half the
+        file -- a parametric certificate of 0.37 MB of content wrote 0.69 MB
+        -- and nobody reads a file that size by eye. The digest is over the
+        content, so it is the same either way."""
+        d = self.to_dict()
+        text = json.dumps(d, indent=2, ensure_ascii=False)
+        if len(text) > COMPACT_ABOVE:
+            text = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+        return text
 
     def digest(self) -> str:
         """Content addressing: kind and payload, with every timestamp removed.
@@ -265,7 +281,8 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
                         primal=None, var_names=None, is_exact=False,
                         integer=False, integral_point=None,
                         integral_objective=None, kinds=None,
-                        target=None, loads=None, backend=None) -> Certificate:
+                        target=None, loads=None, backend=None,
+                        dual_selection=None, meaning=None) -> Certificate:
     payload = {
             "sense": sense, "objective": objective, "dual": dual,
             "primal": primal, "A": A, "b": b, "c": c,
@@ -294,6 +311,15 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
     # certificates of the same optimum can differ -- and this says why.
     if backend is not None:
         payload["backend"] = backend
+    # Which optimal dual, when a direction chose it: the second LP that
+    # proves `d.y` maximal over the optimal duals, as its own certificate.
+    if dual_selection is not None:
+        payload["dual_selection"] = dual_selection
+    # What the rows are, when they came from a graph: `verify` checks the
+    # matrix against it, so a row that is not the clique it claims is caught
+    # in the certificate and not only in the spec that made it.
+    if meaning is not None:
+        payload["map"] = meaning
     return Certificate(
         kind="lp_dual",
         solver_free=True,
@@ -1216,7 +1242,8 @@ def parametric_bound_certificate(parameters, variables, objective,
                                  title="", sense="max",
                                  dual_poly=None, region=None, free=None,
                                  claim=None, primal=None, box=None,
-                                 box_trees=None) -> Certificate:
+                                 box_trees=None, pieces=None,
+                                 split=None) -> Certificate:
     """A bound on `opt(p)` for every p at or above the given floor.
 
     Weak duality holds symbolically. For a packing -- `max c.x, A x <= b` --
@@ -1270,6 +1297,12 @@ def parametric_bound_certificate(parameters, variables, objective,
         payload["box"] = box
         if box_trees:
             payload["box_trees"] = box_trees
+    if pieces is not None:
+        # One dual per box: the leaves of `split` tile `box`, and each piece
+        # is a whole parametric certificate on its own leaf.
+        payload["witness"] = "pieces"
+        payload["pieces"] = pieces
+        payload["split"] = split
     return Certificate(
         kind="parametric_bound", solver_free=True, payload=payload,
         note_key=("cert.note.parametric_bound_min" if sense == "min"
@@ -1814,11 +1847,23 @@ def _verify_proof(cert, limits) -> VerifyReport:
     checks, warnings = [], []
     statements = []
 
+    used = set(p.get("used") or [])
     for lem in p["lemmas"]:
         name = lem["name"]
         phi = _parse_one(lem["statement_smt2"])
         statements.append(phi)
         sub = lem.get("cert")
+        if lem.get("cited"):
+            # Nothing to verify, by declaration -- and a cited lemma carrying
+            # a certificate is not one, so the combination is refused.
+            checks.append((t("verify.proof.cited_shape", name=name),
+                           sub is None and bool(str(lem["cited"]).strip()),
+                           lem.get("cited", "")))
+            warnings.append(t("verify.proof.cited" if name in used
+                              else "verify.proof.cited_unused",
+                              name=name, source=lem["cited"],
+                              statement=str(phi)[:160]))
+            continue
         if sub is None:
             checks.append((t("verify.proof.lemma", name=name), False,
                            t("verify.bisect.no_cert")))
@@ -2779,6 +2824,19 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
                            if e.get("separating")),
                      bad=", ".join(unsep[:3]) or "-")))
 
+    # 3b. "Not in the cone" WITHOUT a separator is a negative too, and it was
+    # read rather than redone. It arises only without cddlib, when the subset
+    # search found no separator; the claim then rests on Caratheodory having
+    # exhausted every independent subset, so that search is run again.
+    unproved = []
+    for name, e in sorted((p.get("points") or {}).items()):
+        if e.get("in_cone") is False and not e.get("separating"):
+            again = sg.in_cone(A, [int(x) for x in e["point"]])
+            if not again.get("exhausted") or again.get("coefficients") is not None:
+                unproved.append(name)
+    checks.append((t("verify.semigroup.cone_absence"), not unproved,
+                   ", ".join(unproved[:3]) or "-"))
+
     # 4. THE NEGATIVES, redone rather than believed. A point the certificate
     # says is not in the semigroup is searched for again, under the bound the
     # certificate itself states.
@@ -3426,6 +3484,8 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
     minimising = p.get("sense", "max") == "min"
     if p.get("witness") == "primal":
         return _verify_parametric_primal(cert, limits)
+    if p.get("witness") == "pieces":
+        return _verify_parametric_pieces(cert, limits)
     free = set(p.get("free") or [])
     senses = {row[0]: row[2] for row in p["constraints"]}
     if "dual_poly" in p:
@@ -3554,6 +3614,97 @@ def _param_claim_check(p, bound, lows, terms, ring, minimising, checks,
     checks.append((t("verify.param.claim"), ok,
                    "{} {} {}".format("bound", want_rel, target or "0")))
     return ok
+
+
+def _verify_parametric_pieces(cert, limits) -> VerifyReport:
+    """The leaves tile the box, and every piece verifies on its own leaf."""
+    from fractions import Fraction
+
+    from . import bernstein
+
+    p = cert.payload
+    checks = []
+    try:
+        box = {n: (Fraction(lo), Fraction(hi)) for n, (lo, hi) in p["box"].items()}
+        pieces = list(p["pieces"])
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return VerifyReport(False, "parametric_bound", True,
+                            checks=[(t("verify.param.tiling"), False, "-")])
+
+    # The tiling, recomputed: the split tree's leaves, in order, must be
+    # exactly the pieces' boxes -- halves of halves of the declared box.
+    leaves = []
+
+    def walk(b, node, depth=0):
+        if depth > 64:
+            raise ValueError("split too deep")
+        if node is None:
+            leaves.append(b)
+            return
+        if not isinstance(node, list) or len(node) != 3 or node[0] not in b:
+            raise ValueError("malformed split")
+        left, right = bernstein.halves(b, node[0])
+        walk(left, node[1], depth + 1)
+        walk(right, node[2], depth + 1)
+
+    try:
+        walk(box, p.get("split"))
+        declared = [{n: (Fraction(lo), Fraction(hi))
+                     for n, (lo, hi) in pc["box"].items()} for pc in pieces]
+        tiles = leaves == declared
+    except (ValueError, KeyError, TypeError):
+        tiles = False
+    checks.append((t("verify.param.tiling"), tiles,
+                   t("verify.param.tiles", n=len(pieces))))
+
+    # Every piece, as the certificate it would be on its own leaf.
+    bad = []
+    claim = p.get("claim")
+    for k, pc in enumerate(pieces):
+        sub_payload = {k2: p[k2] for k2 in ("parameters", "variables",
+                                            "objective", "constraints",
+                                            "title") if k2 in p}
+        sub_payload.update({"dual": pc.get("dual") or {},
+                            "bound": pc.get("bound"), "rows": [],
+                            "box": pc.get("box")})
+        for k2 in ("sense", "free"):
+            if k2 in p:
+                sub_payload[k2] = p[k2]
+        if pc.get("dual_poly") is not None:
+            sub_payload["dual_poly"] = pc["dual_poly"]
+        if pc.get("box_trees"):
+            sub_payload["box_trees"] = pc["box_trees"]
+        if claim is not None:
+            sub_payload["claim"] = pc.get("claim") or {}
+        rep = _verify_parametric_bound(
+            Certificate(kind="parametric_bound", solver_free=True,
+                        payload=sub_payload), limits)
+        ok = rep.ok
+        if claim is not None:
+            pcl = pc.get("claim") or {}
+            ok = ok and pcl.get("holds") is True \
+                and pcl.get("target") == claim.get("target")
+        if not ok:
+            bad.append(str(k))
+    checks.append((t("verify.param.pieces"), not bad,
+                   t("verify.param.pieces_bad", n=len(pieces),
+                     bad=", ".join(bad[:4]) or "-")))
+    if claim is not None:
+        checks.append((t("verify.param.claim"),
+                       bool(claim.get("holds")) == (not bad and tiles),
+                       str(claim.get("target"))))
+    # The stated bound of the whole is the claim, or nothing: a piecewise
+    # bound lives in the pieces, and a top-level number would be unchecked.
+    want = claim.get("target") if claim is not None else {}
+    checks.append((t("verify.param.bound"), p.get("bound") == want,
+                   str(p.get("bound"))))
+    floor = ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                      for n, (lo, hi) in p["box"].items())
+    return VerifyReport(
+        all(c[1] for c in checks), "parametric_bound", True, checks=checks,
+        warnings=[t("verify.param.scope", floor=floor)],
+        method_key="verify.param.method",
+        detail=t("verify.param.detail_pieces", n=len(pieces), floor=floor))
 
 
 def _verify_parametric_primal(cert, limits) -> VerifyReport:
@@ -4525,7 +4676,14 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
                              ", ".join(wrong[:4]) or
                              ", ".join(sorted(p["free_split"]))))
 
-    checks = split_checks + [
+    map_checks, map_warnings = _check_packing_map(p, A)
+    split_checks = split_checks + map_checks
+    selection_checks = []
+    sel = p.get("dual_selection")
+    if sel is not None:
+        selection_checks.append(_check_dual_selection(A, b, c, y, p, sel))
+
+    checks = split_checks + selection_checks + [
         (t("verify.lp.primal_nonneg"), rep["primal_nonneg"], ""),
         (t("verify.lp.primal_feasible"), rep["primal_feasible"], ""),
         (t("verify.lp.dual_nonneg"), rep["dual_nonneg"],
@@ -4539,7 +4697,7 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
          t("verify.lp.declared", value=p["objective"])),
     ]
 
-    warnings = []
+    warnings = list(map_warnings)
     if p.get("integer"):
         # The dual is a bound on the integer optimum, never the optimum
         # itself. Whether the two coincide is a separate, checkable fact.
@@ -4662,6 +4820,90 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
         all(k[1] for k in checks), "lp_dual", True, checks=checks,
         warnings=warnings, detail=detail,
     )
+
+
+def _check_packing_map(p, A):
+    """The declared map against THIS matrix: each resource row's support is
+    exactly the items whose clique holds its edge, with coefficient 1, and
+    the map itself is a faithful translation of the graph. Returns
+    `(checks, warnings)`; both empty when no map is declared."""
+    from . import exact
+    from .packing import check_map
+
+    m = p.get("map")
+    if m is None:
+        return [], []
+    problems = []
+    try:
+        names = list(p.get("names") or [])
+        cols = list(p.get("var_names") or [])
+        loads = {ld.get("name") for ld in p.get("loads") or []}
+        edges = m["edges"]
+        item_resources = {v: [] for v in cols}
+        index = {v: j for j, v in enumerate(cols)}
+        for i, r in enumerate(names):
+            if r in loads:
+                continue
+            # A variable's own bound -- `bound_<v>_hi`, what makes a discrete
+            # item binary -- is no row of the translation. Accepted by what
+            # it IS, a single +-1 on that column, never by its name alone.
+            bound = next((v for v in cols if r in ("bound_{}_hi".format(v),
+                                                   "bound_{}_lo".format(v))),
+                         None)
+            if bound is not None:
+                support = [j for j in range(len(cols))
+                           if exact.to_fraction(A[i][j]) != 0]
+                if support == [index[bound]] and \
+                        abs(exact.to_fraction(A[i][index[bound]])) == 1:
+                    continue
+            if r not in edges:
+                problems.append(t("packing.map.row_unmapped", row=r))
+                continue
+            for j, v in enumerate(cols):
+                a = exact.to_fraction(A[i][j])
+                if a == 1:
+                    item_resources[v].append(r)
+                elif a != 0:
+                    problems.append(t("packing.map.coefficient", row=r,
+                                      item=v, value=exact.serialize(a)))
+        problems += check_map(m["graph"], m["cliques"], edges, item_resources)
+        detail = "; ".join(problems[:3]) or t(
+            "verify.lp.map_detail", items=len(m["cliques"]),
+            rows=len(edges), edges=len(m["graph"]))
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+        problems.append(t("packing.map.malformed"))
+        detail = problems[-1]
+    return ([(t("verify.lp.map"), not problems, detail)],
+            [t("verify.lp.map_scope")])
+
+
+def _check_dual_selection(A, b, c, y, p, sel):
+    """The second LP, rebuilt from THIS certificate and compared with the one
+    carried: same program, verified, and its optimum is this dual."""
+    from . import exact
+
+    ok = False
+    try:
+        d = exact.parse_all(sel["direction"])
+        inner = Certificate.from_dict(sel["certificate"])
+        q = inner.payload
+        m, n = len(A), len(c)
+        v = exact.to_fraction(p["objective"])
+        # max d.y  s.t.  -A^T y <= -c  (the `>=` columns),  b.y <= v
+        want_A = [[-A[i][j] for i in range(m)] for j in range(n)] + [list(b)]
+        want_b = [-cj for cj in c] + [v]
+        got_A = [exact.parse_all(r) for r in q["A"]]
+        same = (got_A == want_A and exact.parse_all(q["b"]) == want_b
+                and exact.parse_all(q["c"]) == d and len(d) == m)
+        inner_ok = verify(inner).ok
+        chosen = exact.parse_all(q["primal"]) == list(y)
+        value = sum((d[i] * y[i] for i in range(m)), exact.to_fraction(0))
+        ok = same and inner_ok and chosen and \
+            exact.to_fraction(sel["value"]) == value
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        ok = False
+    return (t("verify.lp.dual_selection"), ok,
+            t("verify.lp.dual_selection_is", value=str(sel.get("value"))))
 
 
 def _verify_lp_dual_float(p) -> VerifyReport:

@@ -184,10 +184,7 @@ def emit(res: Result, args) -> int:
 
     out = getattr(args, "cert", None)
     if out and res.certificate is not None:
-        Path(out).write_text(
-            json.dumps(res.certificate.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        Path(out).write_text(res.certificate.to_json(), encoding="utf-8")
         if not getattr(args, "json", False):
             print("  " + t("cli.cert.written", path=out))
 
@@ -1246,10 +1243,11 @@ def cmd_mixed(args):
     if isinstance(spec, PackingSpec):
         # A packing whose items are whole-or-nothing IS a mixed design, and
         # making the user write the conversion would be busywork.
-        spec = PackingSpec(items=spec.items, capacities=spec.capacities,
-                           sense=spec.sense,
-                           integer=spec.integer or True,
-                           title=spec.title).to_lp()
+        # Every field carried: listing the ones to keep is how the loads
+        # were dropped here, silently, so the design answered another packing.
+        import dataclasses
+
+        spec = dataclasses.replace(spec, integer=spec.integer or True).to_lp()
     elif not isinstance(spec, LPSpec):
         print("mixed needs an LPSpec or a PackingSpec; spec() returned "
               + type(spec).__name__, file=sys.stderr)
@@ -1355,9 +1353,7 @@ def cmd_synth(args):
         universal_cert=uni.certificate.to_dict() if uni.certificate else None,
     ).stamp(args.spec)
     if args.cert:
-        Path(args.cert).write_text(
-            json.dumps(combo.to_dict(), indent=2, ensure_ascii=False),
-            encoding="utf-8")
+        Path(args.cert).write_text(combo.to_json(), encoding="utf-8")
         print("  " + t("cli.combined.written", path=args.cert))
     return rc if uni.verdict is Verdict.PROVED else 2
 
@@ -1391,8 +1387,14 @@ def cmd_opt(args):
               + type(spec).__name__, file=sys.stderr)
         return 1
 
+    direction = None
+    if getattr(args, "dual_direction", None):
+        direction = {}
+        for part in args.dual_direction.split(","):
+            name, _, w = part.partition("=")
+            direction[name.strip()] = w.strip() or "1"
     res = lp.opt(spec, limits_from(args), use_exact=not args.no_exact,
-                 target=args.target)
+                 target=args.target, dual_direction=direction)
     rc = emit(res, args)
     if not args.json:
         sol = res.meta.get("solution") or {}
@@ -2246,6 +2248,16 @@ def build_parser():
     common.add_argument("--max-memory-mb", type=int, default=2048,
                         dest="max_memory_mb")
     common.add_argument("--seed", type=int, default=0)
+    # The WHOLE run, wall clock -- not one solver call, which is --timeout-ms.
+    # At the deadline every thread's stack goes to stderr and the process
+    # exits 2: the answer to "what was it waiting on", which a user whose run
+    # sat at 0% CPU for 70 minutes had no way to get.
+    common.add_argument("--deadline", type=float, default=None, metavar="S",
+                        help="stop the whole run after S seconds, printing "
+                             "where every thread was (or CERTO_DEADLINE_S)")
+    common.add_argument("--heartbeat", type=float, default=None, metavar="S",
+                        help="a line on stderr every S seconds while running "
+                             "(or CERTO_HEARTBEAT_S)")
     # Separate from --timeout-ms ON PURPOSE -- see `Limits` -- and settable,
     # which it was not: the bound on `geng` existed and nobody could move it.
     common.add_argument("--enumerate-timeout-s", type=int, default=120,
@@ -2327,6 +2339,11 @@ def build_parser():
                          "reporting the optimum. For an existence proof the "
                          "question is usually whether a bound is reached, not "
                          "what the best possible value is")
+    sp.add_argument("--dual-direction", metavar="ROW=W,...",
+                    dest="dual_direction",
+                    help="on a degenerate LP, the OPTIMAL dual maximising the "
+                         "weighted sum of these constraints' multipliers -- "
+                         "proved maximal by a second exact LP it carries")
     sp.add_argument("--gap", action="store_true",
                     help="with a PackingSpec: the integrality gap mu* - nu as "
                          "ONE exact rational, with both sides certified and "
@@ -2847,8 +2864,15 @@ def main(argv=None) -> int:
     if getattr(args, "func", None) is None:
         build_parser().print_help()
         return 2
+    # A run that dies or hangs leaves a trace -- see `watch`.
+    from . import watch
+
+    watch.enable_crash_traces()
     try:
-        return args.func(args)
+        with watch.watched(command=getattr(args, "cmd", "") or "",
+                           deadline=getattr(args, "deadline", None),
+                           heartbeat=getattr(args, "heartbeat", None)):
+            return args.func(args)
     except Exception as e:  # noqa: BLE001
         print(t("cli.error", type=type(e).__name__, message=e),
               file=sys.stderr)

@@ -82,15 +82,19 @@ def shift(poly: Poly, offsets: dict) -> Poly:
             raise NotParametric(_t("param.unknown", name=name,
                                    names=", ".join(out.vars)))
         k = out.vars.index(name)
-        acc = Poly(out.vars)
+        # One dict for the whole substitution. Adding a one-term Poly per
+        # binomial term copied the accumulated sum each time -- quadratic in
+        # the number of terms, and most of what a large verification cost.
+        acc = {}
+        powers = [Fraction(1)]
         for e, coef in out.terms.items():
             power = e[k]
+            while len(powers) <= power:
+                powers.append(powers[-1] * off)
             for j in range(power + 1):
-                mono = list(e)
-                mono[k] = j
-                weight = Fraction(comb(power, j)) * off ** (power - j)
-                acc = acc + Poly(out.vars, {tuple(mono): coef * weight})
-        out = acc
+                mono = e[:k] + (j,) + e[k + 1:]
+                acc[mono] = acc.get(mono, 0) + coef * comb(power, j) * powers[power - j]
+        out = Poly._exact(out.vars, {e: Fraction(c) for e, c in acc.items() if c})
     return out
 
 
@@ -269,6 +273,12 @@ def certify(spec) -> dict:
     if spec.dual == "bernstein":
         if box is None:
             raise NotParametric(_t("param.bernstein_needs_box"))
+        if depth > 0:
+            # ONE DUAL PER BOX: find a dual on the box, and where there is
+            # none -- or it misses the claim -- halve the box and find one on
+            # each half. `subdivide` with a GIVEN dual halves where that one
+            # dual's coefficients fall short; here each leaf gets its own.
+            return _certify_pieces(spec, box, depth)
         y, hints = _find_dual_bernstein(spec, P, ring, box, minimising, free)
     else:
         y = {n: P(v) for n, v in spec.dual.items()}
@@ -351,7 +361,7 @@ def certify(spec) -> dict:
         target = P(claim)
         # A dual bounds a maximisation from above: the claim is bound <= T.
         diff = (bound - target) if minimising else (target - bound)
-        ok_c, _sh, _u, _r, tree = nn(diff)
+        ok_c, _sh, _u, _r, tree = nn(diff, hints.get(("claim", None)))
         trees["claim"] = tree
         claimed = {"target": target.serialize(), "holds": ok_c,
                    "relation": ">=" if minimising else "<="}
@@ -381,6 +391,71 @@ def certify(spec) -> dict:
         "ok": not negative and all(r["ok"] for r in rows),
         "failed": [r["variable"] for r in rows if not r["ok"]],
     }
+
+
+def _certify_pieces(spec, box, depth):
+    """The box, halved where one dual is not enough, with a dual found on
+    every leaf. Returns the same shape `certify` does, with `pieces`."""
+    import dataclasses
+
+    from . import bernstein
+
+    pieces, failed = [], []
+
+    def attempt(b):
+        leaf = dataclasses.replace(
+            spec, box={n: (lo, hi) for n, (lo, hi) in b.items()},
+            subdivide=0)
+        try:
+            out = certify(leaf)
+        except NotParametric:
+            return None
+        if not out["ok"]:
+            return None
+        if out.get("claim") is not None and not out["claim"]["holds"]:
+            return None
+        return out
+
+    def rec(b, d):
+        out = attempt(b)
+        if out is not None:
+            pieces.append((b, out))
+            return None                  # a leaf
+        if d <= 0:
+            failed.append(b)
+            return None
+        # halve the widest interval
+        name = max(b, key=lambda n: (b[n][1] - b[n][0], -list(b).index(n)))
+        left, right = bernstein.halves(b, name)
+        return [name, rec(left, d - 1), rec(right, d - 1)]
+
+    tree = rec(box, depth)
+    minimising = getattr(spec, "sense", "max") == "min"
+    return {
+        "witness": "pieces", "pieces": pieces, "split": tree,
+        "failed_boxes": [_box_text(b) for b in failed],
+        "box": _box_text(box), "claim": None if getattr(spec, "claim", None)
+        is None else {"target": _claim_text(spec), "holds": not failed,
+                      "relation": ">=" if minimising else "<="},
+        "ok": not failed, "failed": [], "negative_dual": [],
+        "sense": "min" if minimising else "max",
+        "variables": sorted({v for _, row, _, _ in spec.constraints for v in row}
+                            | set(spec.objective)),
+        "rows": [], "dual_rows": [], "polynomial_dual": True,
+        "bound": None, "region": {}, "free": sorted(getattr(spec, "free", None)
+                                                   or []),
+        "box_trees": None, "found_dual": None,
+    }
+
+
+def _claim_text(spec):
+    from .polynomials import Poly
+
+    c = spec.claim
+    ring = tuple(spec.parameters)
+    if isinstance(c, Poly):
+        return c.serialize()
+    return Poly.const(ring, c).serialize()
 
 
 def _box_of(spec, ring):
@@ -493,9 +568,37 @@ def _find_dual_bernstein(spec, P, ring, box, minimising, free):
                 key = vname(i, alpha)
                 bound_obj[key] = bound_obj.get(key, 0) + w
     L.objective(bound_obj)
+
+    # THE CLAIM AS A CONSTRAINT, not only a check afterwards: minimising the
+    # bound's total can miss a claim at one end of the box that some other
+    # dual meets. Every Bernstein coefficient of `T - b.y` must be >= 0 (the
+    # other way for a minimisation), at one common degree -- which the check
+    # below is then told to use.
+    claim = getattr(spec, "claim", None)
+    if claim is not None:
+        T = P(claim)
+        Dc = tuple(max(a, b) for a, b in zip(Db, B.degrees_of(T)))
+        acc = {}
+        for i, (_n, _r, _s, rhs) in enumerate(rows):
+            b = P(rhs)
+            da = tuple(Dc[j] - k[j] for j in range(len(ring)))
+            for gamma, row in B.product_map(B.coefficients(b, box, da), da,
+                                            k).items():
+                cell = acc.setdefault(gamma, {})
+                for alpha, w in row.items():
+                    key = vname(i, alpha)
+                    cell[key] = cell.get(key, 0) + w
+        tc = B.coefficients(T, box, Dc)
+        for gamma in product(*(range(Dj + 1) for Dj in Dc)):
+            L.constraint(dict(acc.get(gamma, {})),
+                         ">=" if minimising else "<=", tc.get(gamma, 0),
+                         name="claim_{}".format("_".join(map(str, gamma))))
+        hints[("claim", None)] = list(Dc)
     res = lp_engine.opt(L)
     if res.certificate is None or not res.meta.get("exact"):
-        raise NotParametric(_t("param.bernstein_no_dual",
+        raise NotParametric(_t("param.bernstein_no_dual_claim"
+                               if claim is not None else
+                               "param.bernstein_no_dual",
                                degree=k[0] if k else 0,
                                detail=res.detail or res.status.value))
     sol = res.meta.get("solution") or {}

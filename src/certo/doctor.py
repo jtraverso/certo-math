@@ -121,6 +121,17 @@ def _startup():
 
     bare = timed(["-S"], 20)
     full = timed([], 20)
+    # A hook known to kill or hang interpreters at start-up is named whatever
+    # this one start measured, because the failure is intermittent: one start
+    # in ten or so under load, and a fast start here proves nothing about the
+    # next. See KNOWN_START_HOOKS.
+    risky = [h for h in _startup_hooks() if h in KNOWN_START_HOOKS]
+    if risky:
+        return False, t("doctor.detail.startup_known_hook",
+                        names=", ".join(risky),
+                        total="-" if full is None else "{:.2f}".format(full),
+                        bare="-" if bare in (None, -1.0) else
+                        "{:.2f}".format(bare))
     if full is None:
         return False, t("doctor.detail.startup_hang", seconds=20,
                         names=", ".join(_startup_hooks()[:3]) or "-")
@@ -135,6 +146,17 @@ def _startup():
                     total="{:.2f}".format(full),
                     overhead="{:.2f}".format(overhead),
                     names=", ".join(_startup_hooks()[:3]) or "-")
+
+
+#: `.pth` hooks measured to kill or hang the interpreter at start-up, before
+#: any certo code runs. `pip_system_certs` creates an SSL context from the
+#: system trust store at EVERY start: on this project's Windows machine under
+#: load it died natively, `0xC000070A`, in 9 of 120 bare starts and 7 of 90
+#: example runs, and hung one run past its own `--deadline`, while a venv
+#: without it had 0 of 90 and started three times faster. Earlier, on a
+#: corporate network, the same trust-store call blocked outright. Neither can
+#: be seen from inside certo -- the hook runs first.
+KNOWN_START_HOOKS = {"pip_system_certs.pth"}
 
 
 def _startup_hooks() -> list:

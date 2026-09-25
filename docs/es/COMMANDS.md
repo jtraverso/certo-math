@@ -471,6 +471,14 @@ VÁLIDO  certificado lp_dual (verificado sin solver)
 `--no-exact` salta la reconstrucción; el certificado queda en punto flotante y
 `verify` lo marca como **no citable**.
 
+**Qué dual óptimo.** Un LP degenerado tiene muchos duales óptimos y un
+solver devuelve uno de ellos. `--dual-direction both=1,cap=2` (u
+`opt(spec, dual_direction={...})`) devuelve el dual óptimo que maximiza la
+suma ponderada de los multiplicadores de esas restricciones, encontrado por un
+segundo LP exacto sobre los duales óptimos — y el certificado lleva ese
+segundo LP, que `verify` reconstruye desde el propio certificado, así que la
+elección queda probada maximal, no solo óptima.
+
 **Una variable libre** — `variable("x", None, None)` — se parte como
 `x_pos − x_neg`, se certifica el programa partido, y el certificado registra
 la partición para que `verify` compruebe que las dos columnas son exactamente
@@ -496,6 +504,20 @@ insuficiente, y son afirmaciones distintas.
 
 `loads=[...]` declara regiones nombradas que el diseño debe respetar, y el dual
 las tarifica: ver [Cargas locales](CASES.md#cargas-locales).
+
+**Qué son las filas.** Un empaquetamiento construido desde un grafo puede
+decirlo: `graph=` (su lista de aristas), `cliques={ítem: vértices}` y
+`edges={recurso: (u, v)}`. certo rechaza entonces un error de traducción al
+construir el spec: un ítem que no es clique, un recurso que no es arista, dos
+capacidades sobre una arista, el mismo clique dos veces, o un ítem cuyos
+recursos no son exactamente las aristas de su clique. El mapa viaja en el
+certificado, y `verify` lo contrasta con la **matriz** del propio
+certificado, no con el spec, así que una fila editada después se detecta. Los
+tres argumentos van juntos o ninguno, porque medio mapa solo comprueba media
+traducción. Lo que **no** comprueba es qué cliques deben estar en la
+familia, ni las capacidades. Eso corresponde a tu propia reconstrucción del
+problema, y conviene mantenerla independiente de certo; `verify` repite este
+límite en sus avisos.
 
 `--gap` sobre un `PackingSpec` reporta `mu*` (la relajación), `nu` (el valor
 entero alcanzado) y la distancia entre ambos, como **un** artefacto en vez de
@@ -1180,6 +1202,14 @@ incógnitas de un único LP exacto cuyas restricciones son los coeficientes de
 los residuos. `box` con `region` se rechaza por ahora. Ver
 `examples/parametric_box.py`.
 
+**Un dual por caja.** Con `dual="bernstein"` y `subdivide=d`, certo busca un
+dual en la caja y, donde no lo hay —o no alcanza el `claim`—, la parte en
+mitades y busca uno en cada mitad, hasta `d` niveles. El certificado lleva el
+árbol de particiones y una pieza por hoja; `verify` recalcula que las hojas
+teselan la caja y verifica cada pieza en su propia hoja. Con `claim=T` el
+enunciado del conjunto es `opt ≤ T` en la caja; donde ninguna hoja lo alcanza,
+se nombran las cajas que fallan y no se certifica nada.
+
 ### `certo peak`
 
 **Pregunta** — Lo resolví para `n = 1..40`. ¿Qué entero es el mejor para TODO
@@ -1687,6 +1717,14 @@ no alcanza.
 Dos lemas *derivados* nunca pueden contradecirse —ambos son ciertos. Solo los
 **puentes** pueden, y dos puentes que chocan hacen vacuo todo el teorema, lo
 que se reporta por nombre.
+
+**Un lema que certo no puede recalcular** — una sección de un artículo, un
+resultado probado en otra herramienta — es
+`p.cite("sec16", states=G <= b*s, source="Sección 16 de …")`. Entra al paso
+final como cualquier lema, y el teorema queda entonces **relativo** a él: el
+veredicto lo dice, y cada `verify` lista cada lema citado con su fuente y dice
+si el paso final lo usó de verdad. Una cita necesita una fuente, y no puede
+llevar un certificado propio — si lo hay, es un `lemma(..., certificate=...)`.
 
 ### `certo verify`
 

@@ -20,7 +20,86 @@ from dataclasses import dataclass, field
 from itertools import combinations
 
 from .exact import to_fraction
+from .i18n import t
 from .status import Verdict
+
+
+def check_map(graph, cliques, edges, item_resources):
+    """Every way the declared rows can fail to be the graph's. Returns the
+    problems, as sentences; an empty list is a faithful translation.
+
+    `item_resources` is item -> the resources its column uses. Nothing here
+    is solved: it is set comparison, and the same function runs in `verify`
+    on what the certificate's matrix says instead of what the spec said.
+    """
+    out = []
+    E = set()
+    for e in graph or []:
+        pair = [str(v) for v in e]
+        key = frozenset(pair)
+        if len(pair) != 2 or len(key) != 2:
+            out.append(t("packing.map.bad_edge", edge=pair))
+        elif key in E:
+            out.append(t("packing.map.edge_twice", edge="-".join(sorted(key))))
+        E.add(key)
+    cliques = {str(k): [str(v) for v in vs] for k, vs in (cliques or {}).items()}
+    edges = {str(k): [str(v) for v in vs] for k, vs in (edges or {}).items()}
+    items = {str(k): [str(r) for r in rs] for k, rs in item_resources.items()}
+
+    resource_of = {}
+    for r, pair in sorted(edges.items()):
+        key = frozenset(pair)
+        if key not in E:
+            out.append(t("packing.map.not_an_edge", resource=r,
+                         edge="-".join(pair)))
+        elif key in resource_of:
+            out.append(t("packing.map.edge_reused", resource=r,
+                         other=resource_of[key], edge="-".join(sorted(key))))
+        else:
+            resource_of[key] = r
+    used_resources = {r for rs in items.values() for r in rs}
+    for r in sorted(used_resources - set(edges)):
+        out.append(t("packing.map.resource_unmapped", resource=r))
+    for i in sorted(set(items) - set(cliques)):
+        out.append(t("packing.map.item_unmapped", item=i))
+    for i in sorted(set(cliques) - set(items)):
+        out.append(t("packing.map.clique_without_item", item=i))
+
+    seen = {}
+    for i, vs in sorted(cliques.items()):
+        if i not in items:
+            continue
+        key = frozenset(vs)
+        if len(key) != len(vs):
+            out.append(t("packing.map.vertex_twice", item=i))
+        if key in seen:
+            out.append(t("packing.map.clique_twice", item=i, other=seen[key],
+                         clique=",".join(sorted(key))))
+        seen.setdefault(key, i)
+        pairs = [frozenset((a, b)) for a, b in combinations(sorted(key), 2)]
+        missing = ["-".join(sorted(q)) for q in pairs if q not in E]
+        if missing:
+            out.append(t("packing.map.not_a_clique", item=i,
+                         missing=", ".join(missing[:4])))
+            continue
+        want = {resource_of[q] for q in pairs if q in resource_of}
+        uncovered = ["-".join(sorted(q)) for q in pairs if q not in resource_of]
+        if uncovered:
+            out.append(t("packing.map.edge_without_row", item=i,
+                         edges=", ".join(uncovered[:4])))
+        got = set(items[i])
+        if len(items[i]) != len(got):
+            out.append(t("packing.map.resource_twice", item=i))
+        # Resources that are no edge at all were reported above, once.
+        extra = sorted((got & set(edges)) - want)
+        lost = sorted(want - got)
+        if extra:
+            out.append(t("packing.map.extra_resource", item=i,
+                         resources=", ".join(extra[:4])))
+        if lost:
+            out.append(t("packing.map.missing_resource", item=i,
+                         resources=", ".join(lost[:4])))
+    return out
 
 
 @dataclass
@@ -44,6 +123,17 @@ class PackingSpec:
     # part of the encoding. They become rows like any other, so the dual
     # prices them, and the certificate records what the solution does to each.
     loads: list = field(default_factory=list)
+    # WHAT THE ROWS MEAN, when they come from a graph. `graph` is its edge
+    # list; `cliques` says which vertex set each item IS, and `edges` which
+    # edge each resource IS. Then certo checks the translation -- every item
+    # a real clique, every resource a real edge, none repeated, and each
+    # item's resources exactly its clique's edges -- here and again in
+    # `verify`, from the certificate's own matrix. It does NOT rebuild the
+    # family: which cliques should be there at all is the user's
+    # reconstruction, kept independent on purpose.
+    graph: object = None
+    cliques: dict = None
+    edges: dict = None
     _kinds: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
@@ -81,6 +171,25 @@ class PackingSpec:
                                                       ", ".join(unknown[:5])))
         self.items = norm
         self._kinds = {i[0]: i[3] for i in norm}
+        declared = [x is not None for x in (self.graph, self.cliques, self.edges)]
+        if any(declared):
+            if not all(declared):
+                raise ValueError(t("packing.map.partial"))
+            problems = check_map(self.graph, self.cliques, self.edges,
+                                 {n: r for n, r, _g, _k in norm})
+            if problems:
+                raise ValueError(t("packing.map.refused", n=len(problems),
+                                   problems="; ".join(problems[:5])))
+
+    def map_payload(self):
+        """The declaration, as the certificate carries it. None when absent."""
+        if self.graph is None:
+            return None
+        return {"graph": sorted(sorted(map(str, e)) for e in self.graph),
+                "cliques": {str(k): sorted(map(str, v))
+                            for k, v in sorted(self.cliques.items())},
+                "edges": {str(k): sorted(map(str, v))
+                          for k, v in sorted(self.edges.items())}}
 
     # -- structure ---------------------------------------------------------
 
@@ -134,11 +243,22 @@ class PackingSpec:
                           {i: w for i, w in dict(weights).items()
                            if str(i) in alive},
                           sense, bound))
+        kept = [(n, r, g, k) for n, r, g, k in self.items if k in keep]
+        used = {str(x) for _n, r, _g, _k in kept for x in r}
+        mapped = {}
+        if self.graph is not None:
+            # The map travels too, projected like the loads: the graph is the
+            # same graph, and only the items and rows that survive are named.
+            mapped = dict(graph=self.graph,
+                          cliques={n: v for n, v in self.cliques.items()
+                                   if str(n) in alive},
+                          edges={r: e for r, e in self.edges.items()
+                                 if str(r) in used})
         return PackingSpec(
-            items=[(n, r, g, k) for n, r, g, k in self.items if k in keep],
+            items=kept,
             capacities=self.capacities, sense=self.sense,
             integer=self.integer,
-            loads=loads,
+            loads=loads, **mapped,
             title="{} [{}]".format(self.title, ", ".join(sorted(keep))),
         )
 
@@ -198,6 +318,7 @@ class PackingSpec:
             lp.constraint({str(k): v for k, v in weights.items()},
                           sense, bound, name=key)
             lp.load_names.append(key)
+        lp.meaning = self.map_payload()
         return lp
 
 
@@ -303,16 +424,18 @@ def gap(spec, limits=None, target=None):
     # gap is 3/2, on a run of seven orders that all came back zero. `--gap`
     # asks for the relaxation against the integer optimum whatever the spec
     # says it is, so it builds the relaxation.
-    relaxed = PackingSpec(items=spec.items, capacities=spec.capacities,
-                          sense=spec.sense, integer=False, title=spec.title,
-                          loads=spec.loads)
+    import dataclasses
+
+    relaxed = dataclasses.replace(spec, integer=False)
     overrode = bool(spec.integer)
     frac = lp.opt(relaxed.to_lp(), limits)
     if frac.verdict is not Verdict.SATISFIABLE or not frac.meta.get("exact"):
         return None, frac
 
-    whole = PackingSpec(items=spec.items, capacities=spec.capacities,
-                        sense=spec.sense, integer=True, title=spec.title)
+    # With its LOADS. This copy used to list the fields it kept and left them
+    # out, so the integer half answered a different packing -- the declared
+    # regions gone -- and the gap compared two problems, not one.
+    whole = dataclasses.replace(spec, integer=True)
     integral = mixed.mixed(whole.to_lp(), limits)
     if integral.verdict not in (Verdict.SATISFIABLE, Verdict.REFUTED):
         return None, integral

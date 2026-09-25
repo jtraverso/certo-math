@@ -303,6 +303,132 @@ def _opt_split(spec, free, lim, use_exact, target, _vectors_only):
     return res
 
 
+def _build_sparse(spec, rows, b, c):
+    """The PuLP model from `{column: coefficient}` rows -- the same model
+    `_build` makes, with positions for names, without touching a zero."""
+    prob = pulp.LpProblem("node", pulp.LpMaximize)
+    x = [pulp.LpVariable("x{}".format(j), lowBound=0)
+         for j in range(len(spec.var_names))]
+    prob += pulp.lpSum(float(cj) * x[j] for j, cj in enumerate(c) if cj)
+    for i, r in enumerate(rows):
+        prob += (pulp.lpSum(float(v) * x[j] for j, v in r.items())
+                 <= float(b[i]), _row(i))
+    return prob, x
+
+
+def _opt_vectors(spec, lim, t0):
+    """A branch-and-bound node, end to end from the non-zeros: the sparse
+    system, the sparse model, the exact check on the sparse matrix, and only
+    the two vectors back. The dense matrix is built only if the exact route
+    reaches its last pass, the exact simplex."""
+    rows, b, c, names = spec.as_leq_sparse()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    solver, name = _solver(lim, integral=False)
+    engine = "pulp/" + name
+    if not c and not rows:
+        return Result("opt", Status.SAT, Verdict.SATISFIABLE, engine, ms(),
+                      Vectors([], [], "0"), "",
+                      meta={"objective": "0", "exact": True,
+                            "lp_solver": engine})
+    prob, xs = _build_sparse(spec, rows, b, c)
+    st = pulp.LpStatus[prob.solve(solver)]
+    if st == "Infeasible":
+        return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine, ms(),
+                      None, detail=t("engine.opt.infeasible"),
+                      meta={"lp_solver": engine})
+    if st != "Optimal":
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      engine, ms(), None,
+                      detail=t("engine.opt.cbc", status=st, solver=name),
+                      meta={"lp_solver": engine})
+    x_float = [float(v.value() or 0.0) for v in xs]
+    raw = _duals(prob, names, negate=name == "HiGHS")
+    have = all(v is not None for v in raw)
+    y_float = [0.0 if v is None else v for v in raw]
+    alts = ([[-v for v in y_float], [abs(v) for v in y_float]] if have else [])
+    P = exact.Prepared.from_sparse(rows, b, c)
+    x_ex, y_ex, rep, denom = exact.certify(P, b, c, x_float, y_float,
+                                           y_alts=alts)
+    if x_ex is None:
+        return Result("opt", Status.SAT, Verdict.SATISFIABLE, engine, ms(),
+                      None, detail=t("engine.opt.unverifiable",
+                                     value=repr(sum(float(cj) * xv for cj, xv
+                                                    in zip(c, x_float)))),
+                      meta={"exact": False, "lp_solver": engine})
+    objective_ex = rep["objective"]
+    if spec.sense == "min":
+        objective_ex = -objective_ex
+    return Result(
+        "opt", Status.SAT, Verdict.SATISFIABLE, engine, ms(),
+        Vectors(exact.serialize_all(y_ex), exact.serialize_all(x_ex),
+                exact.serialize(rep["objective"])),
+        t("engine.opt.exact", value=exact.serialize(objective_ex), denom=denom),
+        meta={"objective": exact.serialize(objective_ex), "exact": True,
+              "lp_solver": engine})
+
+
+def _direction_vector(spec, cons_names, direction):
+    """Weights on the dual of each DECLARED constraint, as a vector over the
+    rows of the internal system: a `<=` row as it is, a `>=` row on its
+    `_geq` row, an equality's weight split `+w`/`-w` over its two halves --
+    so `d.y` is the weighted sum of the declared constraints' multipliers."""
+    declared = {name: sense for name, _c, sense, _r in spec.cons}
+    unknown = sorted(set(direction) - set(declared))
+    if unknown:
+        raise ValueError(t("engine.opt.direction_unknown",
+                           names=", ".join(unknown[:4]),
+                           known=", ".join(sorted(declared)[:6])))
+    index = {n: i for i, n in enumerate(cons_names)}
+    d = [exact.to_fraction(0)] * len(cons_names)
+    for name, w in direction.items():
+        w = exact.to_fraction(w)
+        sense = declared[name]
+        if sense == "<=":
+            d[index[name]] += w
+        elif sense == ">=":
+            d[index[name + "_geq"]] += w
+        else:
+            d[index[name + "_le"]] += w
+            d[index[name + "_ge"]] -= w
+    return d
+
+
+def _select_dual(spec, A, b, c, cons_names, x_ex, rep, direction, lim):
+    """Among the OPTIMAL duals, one maximising `d.y`, by a second exact LP:
+
+        max d.y   s.t.   A^T y >= c,   b.y <= v*,   y >= 0
+
+    where weak duality turns `b.y <= v*` into `b.y = v*`. Returns
+    `(y, selection)` -- the chosen dual, and a record carrying that second
+    LP's own certificate, which is what proves the choice MAXIMAL rather
+    than merely optimal -- or None when the direction is unbounded on the
+    optimal face or the second LP could not be certified."""
+    from ..spec import LPSpec
+
+    d = _direction_vector(spec, cons_names, direction)
+    m, n = len(A), len(c)
+    v = rep["objective"]
+    s = LPSpec(sense="max", title="dual selection")
+    ys = ["y{}".format(i) for i in range(m)]
+    for y in ys:
+        s.variable(y)
+    s.objective({ys[i]: d[i] for i in range(m) if d[i]})
+    for j in range(n):
+        s.constraint({ys[i]: A[i][j] for i in range(m) if A[i][j]}, ">=", c[j],
+                     name="col{}".format(j))
+    s.constraint({ys[i]: b[i] for i in range(m) if b[i]}, "<=", v, name="value")
+    res = opt(s, lim)
+    if res.certificate is None or not res.meta.get("exact"):
+        return None
+    y = [exact.to_fraction(res.meta["solution"].get(name, "0")) for name in ys]
+    if not exact.check_lp(A, b, c, x_ex, y)["ok"]:
+        return None                      # not an optimal dual after all
+    value = sum((d[i] * y[i] for i in range(m)), exact.to_fraction(0))
+    return y, {"direction": exact.serialize_all(d),
+               "value": exact.serialize(value),
+               "certificate": res.certificate.to_dict()}
+
+
 class Vectors:
     """What a branch-and-bound node keeps of an exact LP solution: the dual
     and the primal, exactly as a certificate would hold them, and nothing
@@ -318,7 +444,7 @@ class Vectors:
 
 
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
-        target=None, _vectors_only: bool = False) -> Result:
+        target=None, dual_direction=None, _vectors_only: bool = False) -> Result:
     """`_vectors_only=True` is for callers that keep only the dual and the
     primal -- branch and bound, which derives every node's program from the
     root. Serialising the whole matrix into a certificate at every node was
@@ -341,6 +467,9 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     free = [v for v in spec.var_names if spec.bounds.get(v, (0, None))[0] is None]
     if free:
         return _opt_split(spec, free, lim, use_exact, target, _vectors_only)
+    if _vectors_only and use_exact and not (
+            getattr(spec, "discrete", None) or getattr(spec, "integer", False)):
+        return _opt_vectors(spec, lim, t0)
 
     A, b, c, cons_names = spec.as_leq_system()
 
@@ -434,6 +563,13 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                                                y_alts=alts)
         exact_ok = x_ex is not None
 
+    selection = None
+    if exact_ok and dual_direction and not _vectors_only:
+        chosen = _select_dual(spec, A, b, c, cons_names, x_ex, rep, dual_direction,
+                              lim)
+        if chosen is not None:
+            y_ex, selection = chosen
+
     if exact_ok and _vectors_only:
         objective_ex = rep["objective"]
         if spec.sense == "min":
@@ -454,7 +590,8 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         loads = _load_report(spec, x_ex,
                              dict(zip(cons_names, y_ex)) if y_ex else {})
         cert = lp_dual_certificate(
-            loads=loads, backend=engine(),
+            loads=loads, backend=engine(), dual_selection=selection,
+            meaning=getattr(spec, "meaning", None),
             sense=spec.sense, objective=exact.serialize(rep["objective"]),
             dual=exact.serialize_all(y_ex), primal=exact.serialize_all(x_ex),
             A=[exact.serialize_all(r) for r in A], b=exact.serialize_all(b),

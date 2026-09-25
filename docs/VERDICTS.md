@@ -51,6 +51,15 @@ search usually comes with what the search knew when it stopped -- see
 check, `3` error. `lint` differs: `0` clean or notes only, `1` errors,
 `2` warnings. Scripts should branch on these, not on the text.
 
+`--deadline` stops a run with `2`, after printing every thread's stack. Any
+OTHER code is not certo's: `-1073741819` (`0xC0000005`) or `-1073740022`
+(`0xC000070A`) on Windows, or a negative signal number on Linux, is the
+process dying in native code; a large or negative code with nothing on
+stderr is usually a kill from outside -- a driver's own timeout. A run that
+ends with no output and succeeds when relaunched: run `certo doctor`, whose
+`startup` row names the start-up hooks known to kill the interpreter before
+certo runs. Setting `PYTHONFAULTHANDLER=1` makes even those print a stack.
+
 ## Optimisation: four different claims
 
 This is where the words matter most, because four results look alike on

@@ -339,8 +339,20 @@ Las opciones comunes van **después** del subcomando:
 | `--rlimit` | el presupuesto de trabajo de Z3 — este es el reproducible |
 | `--max-memory-mb` | techo duro |
 | `--seed` | para los motores que toman uno |
+| `--deadline S` | la corrida ENTERA, reloj de pared; a los S segundos la pila de cada hilo va a stderr y certo sale con 2. O `CERTO_DEADLINE_S` |
+| `--heartbeat S` | una línea en stderr cada S segundos mientras corre. O `CERTO_HEARTBEAT_S` |
 | `--enumerate-timeout-s` | reloj de una enumeración externa (`geng`), separado del de un solver; por defecto 120 |
 | `--max-output-mb` | cuánto puede imprimir una enumeración externa antes de detenerla; por defecto 64 |
+
+**Una corrida que muere o se cuelga deja rastro.** Un fallo dentro de código
+nativo — z3, HiGHS, Clarabel, numpy, cddlib — imprime en stderr la pila de
+Python de cada hilo en vez de terminar en silencio, y `--deadline` hace lo
+mismo con una corrida que deja de avanzar. Ninguno arregla una causa; los dos
+dicen dónde estaba. Ninguno ve una muerte ANTES de que arranque certo: un hook
+`.pth` corre en cada arranque del intérprete, y se midió aquí que
+`pip_system_certs` mataba entre el 7 y el 12 % de los arranques con carga.
+`certo doctor` lo nombra; corre certo desde un venv sin él, y define
+`PYTHONFAULTHANDLER=1` en un driver para obtener una pila incluso de ahí.
 
 **Hasta dónde llega el presupuesto.** `--timeout-ms` se le pasa a z3, a HiGHS
 y CBC, a Clarabel dentro de `sos`, a los binarios SAT, y a `drat-trim` cuando

@@ -79,6 +79,32 @@ class Prepared:
 
     __slots__ = ("rows", "cols", "b", "c")
 
+    @classmethod
+    def from_sparse(cls, rows, b, c):
+        """From `{column: coefficient}` rows, never densified."""
+        self = cls.__new__(cls)
+        self.b = [to_fraction(v) for v in b]
+        self.c = [to_fraction(v) for v in c]
+        self.rows = [sorted((j, to_fraction(v)) for j, v in r.items() if v)
+                     for r in rows]
+        self.cols = [[] for _ in self.c]
+        for i, r in enumerate(self.rows):
+            for j, f in r:
+                self.cols[j].append((i, f))
+        return self
+
+    def dense(self):
+        """The dense matrix, for the one pass -- the exact simplex -- that
+        needs it. Built only when that pass runs."""
+        width = len(self.c)
+        out = []
+        for r in self.rows:
+            row = [Fraction(0)] * width
+            for j, f in r:
+                row[j] = f
+            out.append(row)
+        return out
+
     def __init__(self, A, b, c):
         self.b = [to_fraction(v) for v in b]
         self.c = [to_fraction(v) for v in c]
@@ -315,6 +341,65 @@ def dual_from_primal(A, b, c, x):
     return next(iter(dual_candidates(A, b, c, x)), None)
 
 
+def support_candidates(P, x_float, y_float, y_alts=(), tol=1e-7):
+    """An exact pair from the SUPPORT of the float one, not from its digits.
+
+    Rounding asks the float solver for the vertex's numbers; this asks it only
+    which columns are positive and which rows bind -- a question it answers
+    reliably long after its digits stop meaning anything. With the support
+    fixed, the vertex is the solution of a square system, and so is the dual:
+
+        A[tight, active] x[active] = b[tight]       (every other x_j = 0)
+        A[:, active]^T y = c[active]  over the rows the dual weights
+
+    Two eliminations, where the exact simplex behind it pivots hundreds of
+    times over the whole tableau. It exists because a Bernstein dual's LP has
+    vertices with denominators near 10^29: no rung of the ladder reaches them,
+    no rounded primal is feasible, and the exact simplex was taking 97 of 101
+    seconds of a small parametric run. Yields candidates; `check_lp` decides.
+    """
+    m, n = len(P.rows), len(P.c)
+    entry = [dict(r) for r in P.rows]
+    # Relative to the largest entry, never to 1: a vertex whose entries are
+    # all near 10^-9 has a support, and a floor of 1 read it as the origin.
+    scale = max([abs(float(v)) for v in x_float] + [0.0]) or 1.0
+    active = [j for j in range(n) if float(x_float[j]) > tol * scale]
+    slack = [float(P.b[i]) - sum(float(v) * float(x_float[j])
+                                 for j, v in entry[i].items())
+             for i in range(m)]
+    tight = [i for i in range(m) if abs(slack[i]) <= tol * (1 + abs(float(P.b[i])))]
+    xs = []
+    if not active:
+        xs.append([Fraction(0)] * n)
+    elif tight:
+        sol = solve_exact([[entry[i].get(j, Fraction(0)) for j in active]
+                           for i in tight], [P.b[i] for i in tight])
+        if sol is not None:
+            x = [Fraction(0)] * n
+            for pos, j in enumerate(active):
+                x[j] = sol[pos]
+            xs.append(x)
+    for y_try in (y_float, *y_alts):
+        ysc = max([abs(float(v)) for v in y_try] + [0.0]) or 1.0
+        weighted = [i for i in range(m) if float(y_try[i]) > tol * ysc]
+        for rows_used in (weighted, tight):
+            if not rows_used:
+                continue
+            eqs = [[entry[i].get(j, Fraction(0)) for i in rows_used]
+                   for j in active]
+            sol = solve_exact(eqs, [P.c[j] for j in active]) if eqs                 else [Fraction(0)] * len(rows_used)
+            if sol is None:
+                continue
+            y = [Fraction(0)] * m
+            for pos, i in enumerate(rows_used):
+                y[i] = sol[pos]
+            for x in xs:
+                yield x, y
+            # the dual alone fixes a primal too, by complementary slackness
+            if not xs:
+                yield None, y
+
+
 def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     """Reconstruct and verify. Returns (x, y, report, denom) or (None, ...).
 
@@ -349,7 +434,16 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     1/2 and 3/11: every pair was exact at one shared rung.
     """
     last = None
-    P = Prepared(A, b, c)
+    P = A if isinstance(A, Prepared) else Prepared(A, b, c)
+    if isinstance(A, Prepared):
+        b, c = P.b, P.c
+    dense = [None]
+
+    def A_dense():
+        if dense[0] is None:
+            dense[0] = P.dense() if isinstance(A, Prepared) else A
+        return dense[0]
+
     for denom in ladder:
         x = reconstruct(x_float, denom)
         for y_try in (y_float, *y_alts):
@@ -379,6 +473,19 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
                 return x, y, rep, dx
             last = rep
 
+    # 2b. Read which columns and rows are in play off the float solution, and
+    # solve for the vertex and its dual exactly on that support.
+    for x, y in support_candidates(P, x_float, y_float, y_alts):
+        if x is None:
+            x = primal_from_dual(A_dense(), b, c, y)
+            if x is None:
+                continue
+        rep = check_lp(P, b, c, x, y)
+        if rep["ok"]:
+            denom = max((v.denominator for v in list(x) + list(y)), default=1)
+            return x, y, rep, denom
+        last = rep
+
     # 3. Solve the dual outright. Enumerating bases is right for a handful of
     # tight rows and hopeless past it -- a realistic exact cover reaches
     # C(49, 7), about 10^8 -- so past that the answer is an exact simplex
@@ -395,7 +502,7 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     from .simplex import SimplexLimit, minimise
 
     try:
-        y = minimise(A, b, c)
+        y = minimise(A_dense(), b, c)
     except (SimplexLimit, ZeroDivisionError):
         return None, None, last, None
 
@@ -408,7 +515,7 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     # No rounded primal fits this dual. Complementary slackness says which one
     # must, and it is exact -- so the answer no longer depends on a float
     # solution rounding onto a vertex.
-    x = primal_from_dual(A, b, c, y)
+    x = primal_from_dual(A_dense(), b, c, y)
     if x is not None:
         rep = check_lp(P, b, c, x, y)
         if rep["ok"]:

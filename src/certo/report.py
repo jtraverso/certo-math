@@ -423,8 +423,7 @@ def capture_selfcheck(res, args) -> str:
         # The run already happened; record what it produced directly.
         if res is not None and res.certificate is not None:
             (folder / "certificate.json").write_text(
-                json.dumps(res.certificate.to_dict(), indent=2,
-                           ensure_ascii=False), encoding="utf-8")
+                res.certificate.to_json(), encoding="utf-8")
         tri = {"category": "certo-bug",
                "evidence": [{"category": "certo-bug",
                              "detail": "certo produced a `{}` certificate its "

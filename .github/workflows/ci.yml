@@ -161,3 +161,8 @@ jobs:
           certo export out/fk.json --lean \
             --out .github/lean/CertoEmitted.lean \
             --lean-project .github/lean --check
+          # An exact LP bound, the second route that decides its fragment.
+          certo opt examples/walkthrough.py --cert out/lp.json
+          certo export out/lp.json --lean \
+            --out .github/lean/CertoEmittedLp.lean \
+            --lean-project .github/lean --check

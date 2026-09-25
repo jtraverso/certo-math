@@ -424,8 +424,7 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
             "digest": c.digest(), "note": c.note}
     if save_cert:
         p = _workspace() / "certs" / "{}-{}.json".format(res.command, c.digest())
-        p.write_text(json.dumps(c.to_dict(), indent=2, ensure_ascii=False),
-                     encoding="utf-8")
+        p.write_text(c.to_json(), encoding="utf-8")
         info["path"] = str(p.relative_to(_workspace())).replace("\\", "/")
         info["verify_with"] = "verify(certificate_path='{}')".format(info["path"])
     out["certificate"] = info

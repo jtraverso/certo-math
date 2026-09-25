@@ -127,6 +127,10 @@ class LPSpec:
     # informational to the LP -- a row is a row -- and it is what lets the
     # certificate report them separately from the encoding.
     load_names: list = field(default_factory=list)
+    # What the rows and columns ARE, when a PackingSpec came from a graph:
+    # `PackingSpec.map_payload()`. Carried into the certificate, where
+    # `verify` checks the matrix against it.
+    meaning: dict = None
 
     KINDS = ("continuous", "integer", "binary")
 
@@ -261,7 +265,32 @@ class LPSpec:
         return self
 
     def as_leq_system(self):
+        """Normalise to max c.x subject to A x <= b, x >= 0, with A dense.
+
+        Built from `as_leq_sparse`, which is the one definition: two readings
+        of the same program are the gap a wrong certificate fits through.
+        """
+        rows, b, c, names = self.as_leq_sparse()
+        from .exact import to_fraction
+
+        Z = to_fraction(0)
+        width = len(self.var_names)
+        A = []
+        for r in rows:
+            row = [Z] * width
+            for j, v in r.items():
+                row[j] = v
+            A.append(row)
+        return A, b, c, names
+
+    def as_leq_sparse(self):
         """Normalise to max c.x subject to A x <= b, x >= 0.
+
+        Rows are `{column: coefficient}`, non-zeros only. Branch and bound on
+        a 1048-column packing spent most of every node materialising the
+        dense matrix -- building it, building the solver model from it, and
+        checking the answer against it -- for rows that name a handful of
+        columns each.
 
         Variable bounds are materialised as rows of A: otherwise the standard
         dual does not see them and the certificate would be invalid.
@@ -293,26 +322,26 @@ class LPSpec:
         A, b, names = [], [], []
         Z = to_fraction(0)
         index = {v: j for j, v in enumerate(self.var_names)}
-        width = len(self.var_names)
-
-        # From the non-zeros: a packing row names a handful of its thousand
-        # columns, and converting every absent one to Fraction was most of
-        # building a node's system.
         def row_of(coeffs):
-            row = [Z] * width
+            row = {}
             for v, c in coeffs.items():
-                row[index[v]] = to_fraction(c)
+                f = to_fraction(c)
+                if f:
+                    row[index[v]] = f
             return row
+
+        def neg(row):
+            return {j: -x for j, x in row.items()}
 
         for name, coeffs, sense, rhs in self.cons:
             row = row_of(coeffs)
             if sense == "<=":
                 A.append(row); b.append(rhs); names.append(name)
             elif sense == ">=":
-                A.append([-x for x in row]); b.append(-rhs); names.append(name + "_geq")
+                A.append(neg(row)); b.append(-rhs); names.append(name + "_geq")
             else:
                 A.append(row); b.append(rhs); names.append(name + "_le")
-                A.append([-x for x in row]); b.append(-rhs); names.append(name + "_ge")
+                A.append(neg(row)); b.append(-rhs); names.append(name + "_ge")
 
         for v in self.var_names:
             lo, hi = self.bounds.get(v, (0.0, None))
@@ -705,6 +734,10 @@ class Lemma:
     certificate: str = ""            # a certificate already on disk
     states: object = None            # the formula this lemma contributes
     bridge: str = ""                 # prose: why that certificate says that
+    # A CITED lemma: a statement certo cannot recompute -- a section of a
+    # paper, a lemma proved elsewhere -- used on the strength of `cited`, which
+    # says where it comes from. Recorded and repeated, never checked.
+    cited: str = ""
     # WHAT THIS LEMMA IS ABOUT, as (kind, id): ("cone", "sigma_1"), ("graph",
     # "K7"), ("lp", "residual"). Free text, declared and never inferred --
     # guessing the object is the mistake this exists to catch.
@@ -782,6 +815,31 @@ class ProofSpec:
     @property
     def names(self):
         return [n for n, _ in self.assumptions]
+
+    def cite(self, name, states, source, subject=None, transport=""):
+        """A lemma certo CANNOT recompute, used on the strength of `source`.
+
+        For a chain of bounds that rests on a published section, or on a
+        result proved in another tool: the statement enters the final step
+        like any lemma, and the proof is then true RELATIVE to it. Nothing
+        checks it -- that is the point of saying so -- and every verification
+        of the proof lists it, with its source, and says whether the final
+        step actually used it.
+        """
+        if any(l.name == name for l in self.lemmas):
+            raise ValueError(t("spec.duplicate_lemma", name=name))
+        if states is None:
+            raise ValueError(t("spec.lemma_no_statement", name=name))
+        if not str(source or "").strip():
+            raise ValueError(t("spec.cite_no_source", name=name))
+        if subject is not None and (not isinstance(subject, (tuple, list))
+                                    or len(subject) != 2):
+            raise ValueError(t("spec.bad_subject", name=name))
+        self.lemmas.append(Lemma(name=name, states=states,
+                                 cited=str(source).strip(),
+                                 subject=tuple(subject) if subject else None,
+                                 transport=transport))
+        return self
 
     @property
     def lemma_names(self):

@@ -332,8 +332,20 @@ Common options go **after** the subcommand:
 | `--rlimit` | Z3's work budget — this is the reproducible one |
 | `--max-memory-mb` | hard ceiling |
 | `--seed` | for the engines that take one |
+| `--deadline S` | the WHOLE run, wall clock; at S seconds every thread's stack goes to stderr and certo exits 2. Or `CERTO_DEADLINE_S` |
+| `--heartbeat S` | a line on stderr every S seconds while it runs. Or `CERTO_HEARTBEAT_S` |
 | `--enumerate-timeout-s` | clock for an external enumeration (`geng`), separate from a solver's; default 120 |
 | `--max-output-mb` | how much an external enumeration may print before it is stopped; default 64 |
+
+**A run that dies or hangs leaves a trace.** A crash inside native code — z3,
+HiGHS, Clarabel, numpy, cddlib — prints the Python stack of every thread on
+stderr instead of ending silently, and `--deadline` does the same for a run
+that stops making progress. Neither fixes a cause; both say where it was.
+Neither can see a death BEFORE certo starts: a `.pth` hook runs at every
+interpreter start, and `pip_system_certs` was measured killing 7-12% of
+starts under load here. `certo doctor` names it; run certo from a venv
+without it, and set `PYTHONFAULTHANDLER=1` in a driver to get a stack even
+from there.
 
 **What the budget reaches.** `--timeout-ms` is handed to z3, to HiGHS and
 CBC, to Clarabel inside `sos`, to the SAT binaries, and to `drat-trim` when it

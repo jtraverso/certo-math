@@ -53,6 +53,16 @@ búsqueda suele venir con lo que la búsqueda sabía al parar: ver
 comprobación, `3` error. `lint` es distinto: `0` limpio o solo notas, `1`
 errores, `2` avisos. Los scripts deben decidir por estos, no por el texto.
 
+`--deadline` detiene una corrida con `2`, tras imprimir la pila de cada hilo.
+Cualquier OTRO código no es de certo: `-1073741819` (`0xC0000005`) o
+`-1073740022` (`0xC000070A`) en Windows, o un número de señal negativo en
+Linux, es el proceso muriendo en código nativo; un código grande o negativo
+sin nada en stderr suele ser una muerte desde fuera — el propio límite de
+tiempo de un driver. Una corrida que termina sin salida y funciona al
+relanzarla: corre `certo doctor`, cuya fila `startup` nombra los hooks de
+arranque que se sabe matan el intérprete antes de que corra certo. Con
+`PYTHONFAULTHANDLER=1` incluso esos imprimen una pila.
+
 ## Optimización: cuatro afirmaciones distintas
 
 Aquí es donde más importan las palabras, porque cuatro resultados se parecen

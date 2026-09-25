@@ -462,6 +462,14 @@ VALID  lp_dual certificate (verified without a solver)
 `--no-exact` skips the reconstruction; the certificate stays in floating point
 and `verify` flags it as **not citable**.
 
+**Which optimal dual.** A degenerate LP has many optimal duals and a solver
+returns one of them. `--dual-direction both=1,cap=2` (or
+`opt(spec, dual_direction={...})`) returns the optimal dual that maximises the
+weighted sum of those constraints' multipliers, found by a second exact LP
+over the optimal duals — and the certificate carries that second LP, which
+`verify` rebuilds from the certificate itself, so the choice is proved
+maximal, not only optimal.
+
 **A free variable** — `variable("x", None, None)` — is split as
 `x_pos − x_neg`, the split program is certified, and the certificate records
 the split so `verify` can check the two columns are exact negatives. A
@@ -485,6 +493,20 @@ those are different statements.
 
 `loads=[...]` declares named regions the design must respect, and the dual
 prices them: see [Local loads](CASES.md#local-loads).
+
+**What the rows are.** A packing built from a graph can say so:
+`graph=` (its edge list), `cliques={item: vertices}` and
+`edges={resource: (u, v)}`. certo then refuses a translation error when the
+spec is built: an item that is not a clique, a resource that is not an edge,
+two capacities on one edge, the same clique twice, or an item whose resources
+are not exactly its clique's edges. The map travels in the certificate, and
+`verify` checks it against the certificate's own **matrix**, not against the
+spec, so a row edited after the fact is caught. The three arguments come
+together or not at all, because half a map only checks half a translation.
+What it does **not** check is which cliques belong in the family, or the
+capacities. That is the job of your own reconstruction of the problem, and
+it is worth keeping independent of certo; `verify` repeats this limit in its
+warnings.
 
 `--gap` on a `PackingSpec` reports `mu*` (the relaxation), `nu` (the integer
 value achieved), and the distance between them, as **one** artefact rather
@@ -1165,6 +1187,14 @@ dual: its Bernstein coefficients are the unknowns of one exact LP whose
 constraints are the residuals' coefficients. `box` with `region` is refused
 for now. See `examples/parametric_box.py`.
 
+**One dual per box.** With `dual="bernstein"` and `subdivide=d`, certo finds a
+dual on the box and, where there is none — or it misses the `claim` — halves
+the box and finds one on each half, down to `d` levels. The certificate holds
+the split tree and one piece per leaf; `verify` recomputes that the leaves tile
+the box and verifies every piece on its own leaf. With `claim=T` the statement
+of the whole is `opt ≤ T` on the box; where no leaf can reach it, the boxes
+that fail are named and nothing is certified.
+
 ### `certo peak`
 
 **Question** — I solved it for `n = 1..40`. Which integer is best for EVERY
@@ -1659,6 +1689,14 @@ rederives most auxiliary lemmas by itself, and the ones that survive as
 Two *derived* lemmas can never contradict each other — both are true. Only
 **bridges** can, and two bridges that clash make the whole theorem vacuous,
 which is reported by name.
+
+**A lemma certo cannot recompute** — a section of a paper, a result proved in
+another tool — is `p.cite("sec16", states=G <= b*s, source="Section 16 of …")`.
+It enters the final step like any lemma, and the theorem is then true
+**relative** to it: the verdict says so, and every `verify` lists each cited
+lemma with its source and says whether the final step actually used it. A
+citation needs a source, and cannot carry a certificate of its own — if there
+is one, it is a `lemma(..., certificate=...)`.
 
 ### `certo verify`
 

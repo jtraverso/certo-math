@@ -50,6 +50,17 @@ class Poly:
             if c:
                 self.terms[tuple(e)] = c
 
+    @classmethod
+    def _exact(cls, variables, terms):
+        """From a dict already holding tuple keys and non-zero `Fraction`s --
+        what the arithmetic below produces -- without normalising it again.
+        Internal: re-running `Fraction()` over every coefficient of every
+        intermediate sum was most of the time a large verification took."""
+        out = cls.__new__(cls)
+        out.vars = variables
+        out.terms = terms
+        return out
+
     # --- construction -----------------------------------------------------
 
     @classmethod
@@ -96,7 +107,7 @@ class Poly:
             out[e] = out.get(e, Fraction(0)) + c
             if not out[e]:
                 del out[e]
-        return Poly(self.vars, out)
+        return Poly._exact(self.vars, out)
 
     def __sub__(self, other):
         return self + other.scaled(-1)
@@ -107,9 +118,7 @@ class Poly:
             for e2, c2 in other.terms.items():
                 e = tuple(a + b for a, b in zip(e1, e2))
                 out[e] = out.get(e, Fraction(0)) + c1 * c2
-                if not out[e]:
-                    del out[e]
-        return Poly(self.vars, out)
+        return Poly._exact(self.vars, {e: c for e, c in out.items() if c})
 
     def scaled(self, c):
         c = Fraction(c)
