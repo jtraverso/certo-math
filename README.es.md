@@ -117,11 +117,12 @@ en tu idioma.
 
 1. **Cada comando devuelve un certificado, o dice explícitamente por qué no.**
    Nunca un "sí" pelado.
-2. **Seis estados de resultado:** `unsat`, `sat`, `unknown_solver`, `timeout`,
-   `resource_exhausted`, `out_of_theory`. Solo los dos primeros son
-   concluyentes. Los otros cuatro significan "sin respuesta", pero por razones
-   distintas, y colapsarlos sale caro: un LLM que lee "unknown" escribe "no
-   existe solución".
+2. **Siete estados de resultado:** `unsat`, `sat`, `unknown_solver`, `timeout`,
+   `resource_exhausted`, `out_of_theory`, `explored`. Solo los dos primeros son
+   concluyentes. Los cuatro siguientes significan "sin respuesta", pero por
+   razones distintas, y colapsarlos sale caro: un LLM que lee "unknown" escribe
+   "no existe solución". `explored` es una mirada barata (`--explore`), no una
+   respuesta: no se certificó nada.
 3. **Determinismo por presupuesto de trabajo, no por reloj:** `rlimit` en Z3 y
    `conflict_budget` en SAT. *Esto cubre nuestros motores, no tu predicado:* si
    tu predicado de `sweep` llama a scipy o a CBC, esa parte queda fuera de la
@@ -254,8 +255,11 @@ res.certificate           # el artefacto que habría escrito `--cert`
 | `api.options(comando)` | lo que ese comando acepta, leído del motor |
 
 `run` **verifica lo que produjo** y levanta `api.SelfCheckFailed` antes que
-devolver un certificado que no pasa su propio verificador. Cuesta menos del 1%
-de un `opt`. Pon `self_check=False` solo después de medirlo.
+devolver un certificado que no pasa su propio verificador. Eso cubre los
+certificados sin solver; uno cuya comprobación vuelve a llamar a un solver
+(`unsat_core`, `model`, …) vuelve sin comprobar, sin `meta["self_check"]`:
+llama a `certo.verify` sobre él cuando importe. Cuesta menos del 1% de un
+`opt`. Pon `self_check=False` solo después de medirlo.
 
 Los módulos de `certo.engines` siguen siendo privados; la promesa son `run`,
 `runnable` y `options`. Los comandos que leen un directorio o el entorno

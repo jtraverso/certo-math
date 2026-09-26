@@ -48,7 +48,7 @@ abajo es el mapa; la cabecera es el territorio.
 | `orbit_witnesses` | cada miembro es el representante reetiquetado | **sí**, reaplicar la permutación |
 | `shrink_graph` | el contraejemplo es 1-minimal | sí, necesita el módulo del spec |
 | `shrink_domain` | el descenso, repetido por índice | sí, necesita el módulo del spec |
-| `bisect` | el par que acota el umbral | depende de sus hijos |
+| `bisect` | el par que acota el umbral: una demostración en el extremo bueno, un contraejemplo en el malo, cada uno sobre la consulta hecha en su t | depende de sus hijos |
 | `ideal` | `f = Σ hᵢgᵢ`, o `1 ∈ I` | **sí**, expandir un producto |
 | `resultant` | `Res = A·f + B·g` | **sí**, expandir dos productos |
 | `sos` | `p = Σ dᵢqᵢ²` en racionales exactos | **sí**, expandir un producto |

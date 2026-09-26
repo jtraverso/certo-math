@@ -146,6 +146,13 @@ El paso se demuestra con el índice **libre**, que es lo que lo hace
 universalmente válido: una demostración con una variable libre es una
 demostración para todo valor de ella.
 
+Lo que el paso debe demostrar no es lo que su spec suponga. certo lee `P(k)`
+del objetivo del paso `P(k+1)` y exige exactamente
+`(k ≥ step_from ∧ P(k)) → P(k+1)`: un paso demostrado bajo `k ≥ 10` no empieza
+en 0 porque `step_from` lo diga. Si el objetivo menciona más de un entero,
+nombra el índice con `InductSpec(k=...)`; si no, certo dice que no sabe cuál
+es, y no escribe nada.
+
 ---
 
 ## ¿Mi planteamiento es sano?

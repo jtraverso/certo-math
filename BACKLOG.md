@@ -110,6 +110,13 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | Forgeries written from scratch, per kind: empty lists, truncated lists, negative and duplicate indices, a valid sub-certificate swapped for another, several fields edited coherently (external audit of 0.20.0) | **M** | high | high | `tamper` mutates ONE field of an honest certificate and could not have found any of the audit's ten; each was a coherent forgery. A generator of structural forgeries per kind, run like the adversarial suite |
+| **P1** | Every composite kind re-derives the numbers it uses from the sub-certificates it verified, and ties each sub-certificate to ITS object (factor, value, problem, parameter, sense, domain) -- an audit of the kinds not yet covered by the 0.20.x fixes | **M** | high | high | the common cause of CM-03/04/05/06/08/09: a sub-certificate verified, then believed to be about something it never named |
+| **P2** | The degree of checking, explicit in every report: complete, partial, reproduced with a solver, assumed obligation -- not one `ok` | **M** | med | high | `ok=True` means different things across kinds (a bisect without its spec, an induction schema applied, a `model` re-solved), and warnings are where the difference hides |
+| **P2** | `api.run(..., self_check="all")`: also verify solver-backed certificates (`unsat_core`, `model`) before returning them | **S** | high | low | today only solver-free certificates are self-checked; CM-01 was one `verify` away from being caught |
+| **P2** | python-flint for the polynomial arithmetic behind the checks (`fmpq_mpoly`) | **M** | med | med | exact and much faster than `Poly` over `Fraction`, which is where a large parametric verification spends its time (19 s before the `shift` fix, 2.4 s after). Nothing changes in what is trusted: the same exact arithmetic, a faster implementation, `Poly` kept as the fallback when flint is absent |
+| **P2** | mpmath `identify` / `findpoly` (PSLQ) in `--explore`: guess a closed form for an explored constant, then certify THAT | **S-M** | med | low | exploration returns 0.6666667 or 1.618034; PSLQ proposes 2/3 or (1+sqrt5)/2; certo certifies the conjectured exact value. The library proposes, certo checks -- `explore -> promote` with the constant named |
+| **P3** | SageMath as an optional PROPOSER, through `sage -python`: automorphism groups (for orbital branching), large Groebner bases, exact real-root isolation, Normaliz/PPL | **M-L** | **low** | med | gigabytes, not pip-installable, no native Windows -- so never a dependency, an optional backend like `geng` or `cadical`. Every answer checked by certo: generators are automorphisms, cofactors multiply out, Sturm sequences, `check_hilbert`. CAD proposes only; it produces no certificate |
 | **P2** | Branch and bound at the size users bring: an external incumbent (a partition already verified by `cover`), a progress callback in the Python API, orbital branching with the group `reduce` certifies | **M-L** | **low** | med | a 100-edge template with ~400 binary columns ran over an hour where a float MILP closed it in a second. Joins the 1048-column row below |
 | **P2** | Many runs, cheaply: `parametric --batch specs.jsonl` | **S-M** | med | med | one process per box paid the start-up thousands of times. `certo.api.run(command, spec)` runs in-process and `verify family.zip --jobs N` verifies in parallel; the CLI still has no batch form for PRODUCING certificates |
 | **P2** | `--deadline` that ends certo's CHILDREN too (a Windows Job Object, a process group elsewhere) | **M** | med | med | `python -m certo` fixes the launcher half of a reported hang; a `geng`, `cbc` or `lake` child can still outlive a deadline |
@@ -1013,7 +1020,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.20.0**, with **53 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.20.1**, with **53 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

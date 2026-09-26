@@ -408,7 +408,8 @@ def mus_certificate(nvars, original, mus_indices, mus, proof,
 
 
 def bisect_certificate(direction, integer, tol, good_t, bad_t,
-                       good_cert, bad_cert, evaluations) -> Certificate:
+                       good_cert, bad_cert, evaluations, good_instance=None,
+                       bad_instance=None) -> Certificate:
     free = all(c is not None and c.get("solver_free", False)
                for c in (good_cert, bad_cert))
     return Certificate(
@@ -417,7 +418,12 @@ def bisect_certificate(direction, integer, tol, good_t, bad_t,
         payload={"direction": direction, "integer": integer, "tol": tol,
                  "good_t": good_t, "bad_t": bad_t,
                  "good_cert": good_cert, "bad_cert": bad_cert,
-                 "evaluations": evaluations},
+                 "evaluations": evaluations,
+                 # What each end ASKED, so its certificate is tied to it.
+                 **({"good_instance": good_instance}
+                    if good_instance is not None else {}),
+                 **({"bad_instance": bad_instance}
+                    if bad_instance is not None else {})},
         note_key="cert.note.bisect",
     )
 
@@ -641,7 +647,7 @@ def ball_certificate(describe, backend, prec, lo, hi, claim, spec_path="",
 
 
 def induction_certificate(k0, base_upto, step_from, base, step, step_smt2,
-                          conclusion, bridge="", title="") -> Certificate:
+                          conclusion, bridge="", title="", k=None) -> Certificate:
     """The induction schema, applied, with both halves attached.
 
     The schema itself is not a solver result and is not pretending to be one.
@@ -654,7 +660,10 @@ def induction_certificate(k0, base_upto, step_from, base, step, step_smt2,
         kind="induction", solver_free=False,
         payload={"k0": k0, "base_upto": base_upto, "step_from": step_from,
                  "base": base, "step": step, "step_smt2": step_smt2,
-                 "conclusion": conclusion, "bridge": bridge, "title": title},
+                 "conclusion": conclusion, "bridge": bridge, "title": title,
+                 # The induction variable, so `verify` can rebuild the step
+                 # the chain needs from the step's own goal.
+                 **({"k": k} if k is not None else {})},
         note_key="cert.note.induction",
     )
 
@@ -1442,7 +1451,8 @@ def mixed_design_certificate(assignment, continuous, kinds, system, objective,
                              sense, discrete_gain, conditional, achieved,
                              residual_cert, relaxation_cert, bound, target,
                              globally_optimal, level="conditional_optimum",
-                             skeleton_from="CBC", title="") -> Certificate:
+                             skeleton_from="CBC", title="",
+                             bounds=None) -> Certificate:
     """A discrete skeleton, the exact packing inside it, and what that reaches.
 
     Three numbers that are not the same number, kept apart on purpose:
@@ -1472,7 +1482,10 @@ def mixed_design_certificate(assignment, continuous, kinds, system, objective,
                  "bound": bound, "target": target,
                  "globally_optimal": bool(globally_optimal),
                  "level": level, "skeleton_from": skeleton_from,
-                 "title": title},
+                 "title": title,
+                 # The variables' bounds, which the relaxation also has: the
+                 # verifier rebuilds that relaxation from THIS payload.
+                 **({"bounds": bounds} if bounds is not None else {})},
         note_key="cert.note.mixed_design",
     )
 
@@ -2099,7 +2112,15 @@ def _verify_induction(cert, limits) -> VerifyReport:
                               why=p["bridge"]))
 
     # --- the step ----------------------------------------------------------
+    # The statement the chain NEEDS is rebuilt here from the step's own goal
+    # P(k+1): (k >= step_from and P(k)) -> P(k+1). Linking the step to the
+    # implication it happened to carry accepted a step proved under
+    # `k >= 10` as starting at 0. A certificate written before `k` was
+    # recorded has its variable read off the goal, the same way.
+    from .engines.induct import induction_var, required_step
+
     step = p.get("step")
+    pk = None
     if step is None:
         checks.append((t("verify.induction.step"), False,
                        t("verify.bisect.no_cert")))
@@ -2107,10 +2128,38 @@ def _verify_induction(cert, limits) -> VerifyReport:
         rep = verify(Certificate.from_dict(step), limits)
         checks.append((t("verify.induction.step"), rep.ok, rep.detail))
         phi = _parse_one(p["step_smt2"])
+        goal = phi.arg(1) if z3.is_implies(phi) else phi
+        k = None
+        if p.get("k"):
+            from . import z3util
+
+            k = next((c for c in z3util.free_consts(goal)
+                      if str(c) == p["k"]), None)
+        k = induction_var(goal) if k is None else k
         obl = obligations_of(step)
-        linked = bool(obl) and entails(z3.Not(phi), obl, limits)
+        if k is None:
+            linked = False
+        else:
+            needed = required_step(goal, k, step_from)
+            linked = bool(obl) and entails(z3.Not(needed), obl, limits)
+            pk = (k, goal)
         checks.append((t("verify.induction.step_link"), linked,
-                       t("verify.proof.link_detail", n=len(obl or []))))
+                       t("verify.induction.step_link_from", step=step_from)))
+
+    # --- a base case that is a proof is a proof of P(n) ---------------------
+    if pk is not None:
+        k, goal = pk
+        untied = []
+        for b in p["base"]:
+            sub = b.get("cert") or {}
+            obl_b = obligations_of(sub) if sub else None
+            if not obl_b:
+                continue                 # a sweep or a DRAT proof: the bridge
+            pn = z3.substitute(goal, (k, z3.IntVal(int(b["k"]) - 1)))
+            if not entails(z3.Not(pn), obl_b, limits):
+                untied.append(str(b["k"]))
+        checks.append((t("verify.induction.base_is_p"), not untied,
+                       ", ".join(untied[:4]) or "-"))
 
     warnings.append(t("verify.induction.schema"))
     return VerifyReport(
@@ -3956,6 +4005,27 @@ def _verify_resultant(cert, limits) -> VerifyReport:
     checks = [(t("verify.resultant.identity"), ok,
                t("verify.resultant.res", res=str(res) or "0"))]
 
+    # THE RESULTANT, BY DEFINITION: the determinant of the Sylvester matrix,
+    # recomputed. The identity above is necessary and not sufficient --
+    # `0 = 0*f + 0*g` satisfies it and its degree bounds for any f and g, so a
+    # "resultant 0" for `t` and `t - 1`, which have no common root anywhere,
+    # verified. The degrees come from f and g, not from the payload.
+    from . import resultants
+
+    try:
+        k0 = variables.index(p["eliminated"])
+        fc = resultants.coefficients_in(f, k0)
+        gc = resultants.coefficients_in(g, k0)
+        n0, m0 = len(fc) - 1, len(gc) - 1
+        is_res = (n0 >= 1 and m0 >= 1 and n0 == p["deg_f"] and m0 == p["deg_g"]
+                  and not (resultants.determinant(resultants.sylvester(fc, gc))
+                           - res))
+    except (ValueError, KeyError, resultants.Budget):
+        is_res = False
+    checks.append((t("verify.resultant.sylvester"), is_res,
+                   t("verify.resultant.sylvester_detail")))
+    ok = ok and is_res
+
     # The Bezout normalisation. Not needed for soundness -- the identity above
     # is the whole claim -- but a construction that broke it produced these
     # cofactors by some other route, and that is worth knowing.
@@ -4136,13 +4206,47 @@ def _verify_mixed_design(cert, limits) -> VerifyReport:
                              target=p["target"],
                              margin=exact.serialize(got - want))))
 
-    # 6. optimality: claimed only when the two bounds meet
+    # 6. the bound, DERIVED. It is the optimum of the relaxation carried in
+    #    the payload -- verified, and shown to be this problem with every
+    #    variable continuous and the same bounds. Comparing the declared
+    #    `bound` with `achieved` certified nothing: editing both fields made a
+    #    design worth 1 "globally optimal" where 3 was attainable.
+    derived = None
+    relax = p.get("relaxation")
+    if relax is not None:
+        rrep = verify(Certificate.from_dict(relax), limits)
+        rp = relax.get("payload") or {}
+        try:
+            var_names = list(kinds)
+            if p.get("bounds") is not None:
+                bounds = {v: (b[0], b[1]) for v, b in p["bounds"].items()}
+            else:
+                # Written before `bounds` was recorded: the kinds say only
+                # that a binary is at most 1, so that is all that is assumed.
+                bounds = {v: (0, 1 if kinds.get(v) == "binary" else None)
+                          for v in var_names}
+            A, b, c, names = _system_leq(p["system"], p["objective"],
+                                         p.get("sense", "max"), var_names,
+                                         bounds)
+            same = _lp_is(rp, A, b, c, names, var_names)
+        except (KeyError, TypeError, ValueError):
+            same = False
+        ok = rrep.ok and same and rp.get("exact") is True
+        checks.append((t("verify.mixed.relaxation"), ok,
+                       t("verify.mixed.relaxation_detail")))
+        if ok:
+            derived = _lp_value(rp)
+    if p.get("bound") is not None:
+        checks.append((t("verify.mixed.bound_derived"),
+                       derived is not None
+                       and exact.to_fraction(p["bound"]) == derived,
+                       t("verify.lp.declared", value=p.get("bound"))))
+    reached = derived is not None and derived == exact.to_fraction(p["achieved"])
+    if p.get("level") == "global_optimum" and not p.get("globally_optimal"):
+        checks.append((t("verify.mixed.optimal"), False, "level"))
     if p.get("globally_optimal"):
-        bound = p.get("bound")
-        checks.append((t("verify.mixed.optimal"),
-                       bound is not None
-                       and exact.to_fraction(bound) == exact.to_fraction(p["achieved"]),
-                       t("verify.lp.declared", value=bound or "-")))
+        checks.append((t("verify.mixed.optimal"), reached,
+                       t("verify.lp.declared", value=p.get("bound") or "-")))
     else:
         warnings.append(t("verify.mixed.not_optimal",
                           bound=p.get("bound") or "-"))
@@ -4232,6 +4336,19 @@ def _verify_gap(cert, limits) -> VerifyReport:
     checks.append((t("verify.gap.same"), same, ""))
 
     mu, nu = exact.to_fraction(p["mu"]), exact.to_fraction(p["nu"])
+    # mu and nu ARE the two halves' numbers, recomputed from what was
+    # verified. Checking only `mu - nu = gap` accepted a gap of 99 beside two
+    # sub-certificates that both said 1.
+    frac = (p.get("fractional") or {}).get("payload") or {}
+    whole = (p.get("integral") or {}).get("payload") or {}
+    try:
+        tied = (frac.get("exact") is True and _lp_value(frac) == mu
+                and exact.to_fraction(whole["achieved"]) == nu
+                and p.get("level") == whole.get("level"))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        tied = False
+    checks.append((t("verify.gap.tied"), tied,
+                   t("verify.gap.tied_detail", mu=p["mu"], nu=p["nu"])))
     checks.append((t("verify.gap.arithmetic"),
                    mu - nu == exact.to_fraction(p["gap"]),
                    "{} - {} = {}".format(p["mu"], p["nu"], p["gap"])))
@@ -4248,17 +4365,67 @@ def _verify_gap(cert, limits) -> VerifyReport:
     )
 
 
+def _system_leq(system, objective, sense, var_names, bounds=None):
+    """The `A x <= b` an `LPSpec` with these rows, this objective and these
+    variable bounds normalises to -- the same `as_leq_system` the producer
+    used, so a sub-certificate can be compared with it EXACTLY."""
+    from . import exact
+    from .spec import LPSpec
+
+    F = exact.to_fraction
+    s = LPSpec(sense=sense)
+    for v in var_names:
+        lo, hi = (bounds or {}).get(v, (0, None))
+        s.variable(v, F(0) if lo is None else F(lo),
+                   None if hi is None else F(hi))
+    s.objective({v: F(c) for v, c in dict(objective).items()})
+    for row in system:
+        s.constraint({v: F(c) for v, c in dict(row["coeffs"]).items()},
+                     row["sense"], F(row["rhs"]), name=row["name"])
+    return s.as_leq_system()
+
+
+def _lp_is(sub_payload, A, b, c, names, var_names) -> bool:
+    """Is this `lp_dual` payload about exactly this system?"""
+    from . import exact
+
+    try:
+        return ([exact.parse_all(r) for r in sub_payload["A"]] == A
+                and exact.parse_all(sub_payload["b"]) == list(b)
+                and exact.parse_all(sub_payload["c"]) == list(c)
+                and list(sub_payload.get("names") or []) == list(names)
+                and list(sub_payload.get("var_names") or []) == list(var_names))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
+def _lp_value(sub_payload):
+    """The optimum an exact `lp_dual` payload certifies, in its declared
+    sense -- the number a composite certificate may use, recomputed rather
+    than read from wherever else it was written down."""
+    from . import exact
+
+    v = exact.to_fraction(sub_payload["objective"])
+    return -v if sub_payload.get("sense") == "min" else v
+
+
 def _same_packing(p) -> bool:
-    """Both sides must carry the same constraint matrix and objective."""
+    """Both sides are about the same packing: the fractional LP IS the
+    integral side's system and objective, row for row and coefficient for
+    coefficient -- not merely the same row names, which was all this used to
+    compare."""
     frac = (p.get("fractional") or {}).get("payload") or {}
     whole = (p.get("integral") or {}).get("payload") or {}
     system = whole.get("system")
     if not system or not frac.get("names"):
         return False
-    # The mixed certificate keeps the original rows by name; the lp_dual one
-    # keeps them positionally. Same names, same count, is what can be checked
-    # from the two payloads alone.
-    return [r["name"] for r in system] == list(frac["names"])
+    try:
+        var_names = list(whole["kinds"])
+        A, b, c, names = _system_leq(system, whole["objective"],
+                                     whole.get("sense", "max"), var_names)
+    except (KeyError, TypeError, ValueError):
+        return False
+    return _lp_is(frac, A, b, c, names, var_names)
 
 
 
@@ -5297,11 +5464,26 @@ def _verify_mus(cert, limits) -> VerifyReport:
     checks.append((t("verify.mus.proof"), rep.ok and rep.derived_empty,
                    rep.detail))
 
-    # minimalidad: un modelo por clausula, que satisface el MUS sin ella
+    # minimalidad: un modelo por clausula, que satisface el MUS sin ella.
+    # ONE INDEX PER CLAUSE, each pointing at that clause of the original, and
+    # a witness for every one. The loop below walks `mus_indices`, so an empty
+    # list checked nothing and a redundant clause passed as minimal.
     bad = []
     idx_by_pos = list(p["mus_indices"])
+    witnesses = p.get("witnesses") or {}
+    original = p["original"]
+    shaped = (len(idx_by_pos) == len(p["mus"])
+              and len(set(idx_by_pos)) == len(idx_by_pos)
+              and all(isinstance(gi, int) and not isinstance(gi, bool)
+                      and 0 <= gi < len(original)
+                      and sorted(original[gi]) == sorted(p["mus"][pos])
+                      and str(gi) in witnesses
+                      for pos, gi in enumerate(idx_by_pos)))
+    checks.append((t("verify.mus.indexed"), shaped,
+                   t("verify.mus.indexed_detail", n=len(idx_by_pos),
+                     mus=len(p["mus"]))))
     for pos, gi in enumerate(idx_by_pos):
-        w = set(p["witnesses"].get(str(gi), []))
+        w = set(witnesses.get(str(gi), []))
         rest = [c for k, c in enumerate(p["mus"]) if k != pos]
         for c in rest:
             if not any((abs(l) in w) == (l > 0) for l in c):
@@ -5329,6 +5511,32 @@ def _verify_bisect(cert, limits) -> VerifyReport:
         free = free and rep.solver_free
         checks.append((label + " ({})".format(sub["kind"]), rep.ok, rep.detail))
 
+    # POLARITY AND INSTANCE. Each end verified on its own proved nothing
+    # about the threshold: the same proof of a tautology at both ends passed.
+    # The good end must be a PROOF and the bad end a COUNTEREXAMPLE, and each
+    # must be about the query its probe asked at its own t.
+    holds_kinds, fails_kinds = ("unsat_core", "farkas", "drat"), ("model",
+                                                                 "cnf_model")
+    good, bad = p.get("good_cert") or {}, p.get("bad_cert") or {}
+    checks.append((t("verify.bisect.polarity"),
+                   good.get("kind") in holds_kinds
+                   and bad.get("kind") in fails_kinds,
+                   "{} / {}".format(good.get("kind"), bad.get("kind"))))
+    warnings = []
+    gi, bi = p.get("good_instance"), p.get("bad_instance")
+    if gi is None or bi is None:
+        warnings.append(t("verify.bisect.untied"))
+    else:
+        checks.append((t("verify.bisect.tied_good", t=p["good_t"]),
+                       _bisect_holds(gi, good, limits), gi.get("kind")))
+        checks.append((t("verify.bisect.tied_bad", t=p["bad_t"]),
+                       _bisect_fails(bi, bad, limits), bi.get("kind")))
+        same, why = _bisect_same_family(cert, p, gi, bi)
+        if same is None:
+            warnings.append(t("verify.bisect.family_unchecked", why=why))
+        else:
+            checks.append((t("verify.bisect.family"), same, why))
+
     width = abs(p["good_t"] - p["bad_t"])
     tight = width <= p["tol"] + 1e-12
     checks.append((t("verify.bisect.brackets"), tight,
@@ -5341,8 +5549,76 @@ def _verify_bisect(cert, limits) -> VerifyReport:
                               bad=p["bad_t"])))
 
     ok = all(c[1] for c in checks)
-    return VerifyReport(ok, "bisect", free, checks=checks,
+    return VerifyReport(ok, "bisect", free, checks=checks, warnings=warnings,
                         detail=t("verify.bisect.detail"))
+
+
+def _bisect_holds(inst, sub, limits) -> bool:
+    """The good end's proof closes the query asked at the good end."""
+    import z3
+
+    try:
+        if inst.get("kind") == "cnf":
+            return sub.get("kind") == "drat" and \
+                sub["payload"]["dimacs"].strip() == inst["dimacs"].strip()
+        query = list(z3.parse_smt2_string(inst["query_smt2"]))
+        obl = obligations_of(sub)
+        return bool(obl) and entails(z3.And(*query) if len(query) > 1
+                                     else query[0], obl, limits)
+    except (KeyError, TypeError, z3.Z3Exception):
+        return False
+
+
+def _bisect_fails(inst, sub, limits) -> bool:
+    """The bad end's counterexample satisfies the query asked at the bad end
+    -- checked by the model verifier itself, on THAT query."""
+    try:
+        if inst.get("kind") == "cnf":
+            return sub.get("kind") == "cnf_model" and \
+                sub["payload"]["dimacs"].strip() == inst["dimacs"].strip()
+        if sub.get("kind") != "model":
+            return False
+        probe = Certificate(kind="model", solver_free=True, payload={
+            "smt2": inst["query_smt2"],
+            "assignment": sub["payload"]["assignment"]})
+        return _verify_model(probe, limits).ok
+    except (KeyError, TypeError):
+        return False
+
+
+def _bisect_same_family(cert, p, gi, bi):
+    """Both instances are the family at their t: rebuilt from the spec when
+    it is still there, and compared. `(None, why)` when it is not."""
+    path, why = _spec_from(cert)
+    if path is None:
+        return None, t("verify.sweep.replay." + (why or "no_path"))
+    try:
+        from .engines.bisect import instance
+        from .spec import load_spec
+
+        spec = load_spec(path)
+        same = (_same_instance(instance(spec.build(p["good_t"])), gi)
+                and _same_instance(instance(spec.build(p["bad_t"])), bi))
+        return same, str(path.name)
+    except Exception as e:  # noqa: BLE001 -- a spec that no longer builds
+        return None, "{}: {}".format(type(e).__name__, e)
+
+
+def _same_instance(a, b) -> bool:
+    """The same query, compared as formulas. z3 prints one formula with
+    different `let` sharing depending on how its terms were built, so the
+    text is no test; parsed, structurally equal terms are the same AST."""
+    import z3
+
+    if a.get("kind") != b.get("kind"):
+        return False
+    if a.get("kind") == "cnf":
+        return a["dimacs"].strip() == b["dimacs"].strip()
+    if a.get("kind") != "smt":
+        return False
+    fa = list(z3.parse_smt2_string(a["query_smt2"]))
+    fb = list(z3.parse_smt2_string(b["query_smt2"]))
+    return len(fa) == len(fb) and all(x.eq(y) for x, y in zip(fa, fb))
 
 
 def _verify_family(g6, n, filters, want_hash) -> list:

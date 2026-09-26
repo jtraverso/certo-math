@@ -99,16 +99,18 @@ def induct(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         return _fail(t("engine.induct.step_failed", status=step.status.value,
                        detail=step.detail), t0)
 
-    statement = _step_statement(spec, step_from)
+    statement, kvar = _step_statement(spec, step_from)
+    if statement is None:
+        return _fail(t("engine.induct.which_k"), t0, Status.OUT_OF_THEORY)
     obl = obligations_of(step.certificate.to_dict())
     if not obl or not entails(z3.Not(statement), obl, lim):
-        return _fail(t("engine.induct.step_link"), t0)
+        return _fail(t("engine.induct.step_link_from", step=step_from), t0)
 
     ms = (time.perf_counter() - t0) * 1000
     cert = induction_certificate(
         k0=spec.k0, base_upto=spec.base_upto, step_from=step_from,
         base=base, step=step.certificate.to_dict(),
-        step_smt2=z3util.smt2(statement),
+        step_smt2=z3util.smt2(statement), k=str(kvar),
         conclusion=spec.describe or t("engine.induct.conclusion", k0=spec.k0),
         bridge=spec.bridge, title=spec.title,
     ).stamp(spec_path or None)
@@ -142,10 +144,36 @@ def _run(sub, limits):
     raise TypeError(t("engine.induct.bad_base", got=type(sub).__name__))
 
 
+def induction_var(goal, declared=None):
+    """The induction variable: the one declared, or the only integer the
+    step's goal mentions. None when that is ambiguous."""
+    from .. import z3util
+
+    if declared is not None:
+        return declared
+    ints = [c for c in z3util.free_consts(goal) if c.sort() == z3.IntSort()]
+    return ints[0] if len(ints) == 1 else None
+
+
+def required_step(goal, k, step_from):
+    """`(k >= step_from and P(k)) -> P(k+1)`, with `P(k)` read off the goal
+    `P(k+1)` by substituting k -> k-1.
+
+    THIS is what the step has to prove -- not the implication from whatever
+    hypotheses the step spec happened to carry. A step proved under
+    `k >= 10`, filed with `step_from = 0`, used to join a base at 0 and
+    "prove" P(1) for `P(k) = (k = 0 or k >= 10)`, where P(1) is false: the
+    comparison `step_from <= base_upto` read a declared number, and the step
+    that was proved never mentioned it.
+    """
+    pk = z3.substitute(goal, (k, k - 1))
+    return z3.Implies(z3.And(k >= step_from, pk), goal)
+
+
 def _step_statement(spec, step_from):
-    """`P(k) and k >= step_from  ->  P(k+1)`, as one formula."""
-    hyps = [f for _, f in spec.step.assumptions]
-    if not hyps:
-        return spec.step.goal
-    return z3.Implies(z3.And(*hyps) if len(hyps) > 1 else hyps[0],
-                      spec.step.goal)
+    """The step as it must hold, or None when the induction variable cannot
+    be identified."""
+    k = induction_var(spec.step.goal, getattr(spec, "k", None))
+    if k is None:
+        return None, None
+    return required_step(spec.step.goal, k, step_from), k

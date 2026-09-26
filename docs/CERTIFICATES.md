@@ -48,7 +48,7 @@ answers"*. The table below is the map; the header is the territory.
 | `orbit_witnesses` | each member is the representative relabelled | **yes**, re-apply the permutation |
 | `shrink_graph` | the counterexample is 1-minimal | yes, needs the spec module |
 | `shrink_domain` | the descent, replayed by index | yes, needs the spec module |
-| `bisect` | the pair bracketing the threshold | depends on its children |
+| `bisect` | the pair bracketing the threshold: a proof at the good end, a counterexample at the bad one, each about the query asked at its own t | depends on its children |
 | `ideal` | `f = Σ hᵢgᵢ`, or `1 ∈ I` | **yes**, expand a product |
 | `resultant` | `Res = A·f + B·g` | **yes**, expand two products |
 | `sos` | `p = Σ dᵢqᵢ²` in exact rationals | **yes**, expand a product |

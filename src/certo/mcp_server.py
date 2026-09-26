@@ -493,11 +493,21 @@ def _guard(fn):
     """
     @functools.wraps(fn)
     async def wrapper(*a, **kw):
+        # Every spec any tool loads -- including one a certificate names in
+        # its payload, several calls deep -- stays inside the workspace, for
+        # the duration of the call.
+        before = os.environ.get("CERTO_SPEC_ROOT")
+        os.environ["CERTO_SPEC_ROOT"] = str(_workspace())
         try:
             return await fn(*a, **kw)
         except Exception as e:  # noqa: BLE001
             return {"ok": False, "error_type": type(e).__name__,
                     "error": str(e), "hint": _hint(e)}
+        finally:
+            if before is None:
+                os.environ.pop("CERTO_SPEC_ROOT", None)
+            else:
+                os.environ["CERTO_SPEC_ROOT"] = before
 
     return wrapper
 

@@ -538,6 +538,18 @@ def load_spec(path, expected=None, safe=False):
     if not p.exists():
         raise FileNotFoundError(t("spec.not_found", path=p))
 
+    # CONFINED, when a root is set: the MCP server sets it to its workspace.
+    # The workspace check used to apply to the path a tool was GIVEN, and not
+    # to a spec a certificate names inside its payload -- so verifying a
+    # certificate inside the workspace ran a spec outside it. Every load goes
+    # through here, so every load is confined.
+    root = os.environ.get("CERTO_SPEC_ROOT", "").strip()
+    if root:
+        r = Path(root).resolve()
+        if p != r and r not in p.parents:
+            raise PermissionError(t("spec.outside_root", path=str(p),
+                                    root=str(r)))
+
     if p.suffix.lower() == ".json":
         from .dataspec import load as _load_data
         return _load_data(p, expected)
@@ -923,6 +935,10 @@ class InductSpec:
     base: object                     # callable(k) -> spec | {k: spec} | path
     step: object                     # a Spec over a free k
     step_from: object = None         # defaults to k0
+    # The induction variable, when the step's goal mentions more than one
+    # integer: `P(k)` is read off the goal `P(k+1)` by substituting k -> k-1,
+    # so the step certo proves is exactly (k >= step_from and P(k)) -> P(k+1).
+    k: object = None
     bridge: str = ""                 # how a finite check becomes P(k)
     describe: str = ""               # the conclusion, in words
     title: str = ""

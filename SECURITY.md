@@ -67,7 +67,8 @@ correct".
 ## The MCP server confines paths, and is not a sandbox
 
 `certo-mcp` resolves every path inside `CERTO_WORKSPACE` and refuses to leave
-it. That stops a path traversal. It does **not** stop a spec that executes, so
+it -- including the spec a certificate names for replay, which since 0.20.1 is
+refused when it lies outside the workspace. That stops a path traversal. It does **not** stop a spec that executes, so
 an agent pointed at third-party specs is running third-party code with your
 privileges. Set `CERTO_NO_EXEC=1` in `.mcp.json` if the specs are not yours:
 
@@ -158,16 +159,17 @@ como «este spec es correcto».
 
 ## El servidor MCP confina rutas, y no es un sandbox
 
-`certo-mcp` resuelve toda ruta dentro de `CERTO_WORKSPACE` y se niega a salir.
-Eso detiene un path traversal. **No** detiene un spec que se ejecuta, así que
+`certo-mcp` resuelve toda ruta dentro de `CERTO_WORKSPACE` y se niega a salir
+-- también el spec que un certificado nombra para reproducirlo, que desde la
+0.20.1 se rechaza si está fuera del workspace. Eso detiene un path traversal. **No** detiene un spec que se ejecuta, así que
 un agente apuntado a specs de terceros está corriendo código de terceros con
 tus privilegios. Pon `CERTO_NO_EXEC=1` en `.mcp.json` si los specs no son
 tuyos.
 
 ## Versiones soportadas
 
-La última publicada en PyPI. El esquema de certificados está congelado en 4 y
-las cargas útiles no se mueven, así que un certificado emitido por un certo
+La última publicada en PyPI. El esquema de certificados está congelado en 5
+(desde la 0.20; antes en 4) y las cargas útiles no se mueven, así que un certificado emitido por un certo
 anterior sigue verificando — pero los arreglos aterrizan solo en la versión
 más nueva.
 

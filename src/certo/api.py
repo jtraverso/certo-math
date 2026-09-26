@@ -32,7 +32,10 @@ somebody else's problem rather than yours.
 
 SELF-CHECK. `run` verifies what it produced, the way the CLI does, and raises
 `SelfCheckFailed` rather than returning a certificate that fails its own
-verifier. It costs 0.7% of an `opt` and it is what caught the defects in
+verifier -- for SOLVER-FREE certificates only. One whose check calls a solver
+again (`unsat_core`, `model`, ...) is returned unchecked, and
+`res.meta["self_check"]` is absent rather than "ok"; call `verify` on it when
+that matters. It costs 0.7% of an `opt` and it is what caught the defects in
 0.11.3. Pass `self_check=False` in a hot loop if you have measured that it
 matters; you will be turning off the thing that reads certo's own output.
 """

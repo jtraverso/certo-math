@@ -6,6 +6,72 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.20.1] — 2026-09-26
+
+**Ten soundness fixes from an external audit of 0.20.0.** Nine let `verify`
+accept, or `PROVED` report, something false; the tenth let an MCP `verify`
+run a spec from outside the workspace. The common cause: a sub-certificate
+was verified and then believed to be about something it never named. Each
+case is now a test in `tests/test_adversarial.py` or `tests/test_mcp.py`,
+written as the forgery the audit wrote. The schema stays 5; the new payload
+fields are optional, and what an older certificate lacks is said, not
+assumed.
+
+### Soundness
+
+- **`prove`: a user's Bool named like certo's indicator** (`__p___goal__`)
+  collided with it, and a false claim came back `proved`. Indicators are
+  fresh constants now, and the core is read back by identity, not by name.
+- **`shrink` (MUS): `mus_indices: []` and no witnesses** passed a MUS that
+  was not minimal. Every clause kept must have a unique, in-range index into
+  the original, be that clause, and have its witness.
+- **`number`: a Pratt tree for 9**, with the factor 8 carrying a certificate
+  of 2, proved 9 prime; a factorisation of 9 as 9^1 did the same. Each
+  sub-certificate must be about the factor beside it; in a Pratt tree that
+  factor must divide n - 1, in a factorisation it must be at least 2 with an
+  exponent at least 1.
+- **`mixed`: `globally_optimal` was read, not derived.** Editing `bound`,
+  `globally_optimal` and `level` made a design worth 1 optimal where 3 is
+  attainable. The bound is now the certified optimum of the relaxation in the
+  payload, rebuilt from its rows, objective and variable bounds and compared
+  exactly. A new optional `bounds` field records the bounds; for an older
+  certificate a binary is taken to be at most 1, and nothing else is assumed.
+- **Integrality gap: `mu`, `nu` and `gap` were only checked against each
+  other.** They are now the numbers the two halves certify, and
+  `_same_packing` compares the fractional LP with the integral system
+  coefficient by coefficient, not by row names.
+- **`eliminate`: A = B = resultant = 0** is a Bezout identity (0 = 0) and was
+  accepted as the resultant. The Sylvester determinant is recomputed.
+- **`matrix`: a pivot of -1** let a non-Hermite matrix through with the wrong
+  determinant. Pivots must be integers in range.
+- **`induct`: a step proved under `k >= 10`, filed with `step_from = 0`**,
+  joined a base at 0 and "proved" P(1) for P(k) = (k = 0 or k >= 10). The
+  step certo requires is rebuilt from the step's own goal P(k+1):
+  (k >= step_from and P(k)) -> P(k+1). The induction variable is recorded
+  (`k`); when the goal mentions several integers, declare it with
+  `InductSpec(k=...)`, or certo says it cannot tell (`out_of_theory`). A base
+  case that is a proof must prove P(n).
+- **`bisect`: the same proof of `True` at both ends** certified a threshold.
+  The good end must be a proof and the bad end a counterexample, each about
+  the query asked at its own t (`good_instance` / `bad_instance`, new optional
+  fields), and both queries the spec's family at those t when the spec is
+  there. An older certificate verifies with a warning that this is not
+  checked.
+- **MCP: `verify` confined the certificate's path, not the spec its payload
+  names.** A certificate inside the workspace could name a spec outside it,
+  and the replay executed it. `load_spec` refuses paths outside
+  `CERTO_SPEC_ROOT`, which the MCP server sets to the workspace for each call.
+
+### Documentation
+
+- The README's second cross-cutting rule lists seven states, with
+  `explored`.
+- `api.run`'s self-check covers solver-free certificates only; the docstring
+  and README said more.
+- `docs/COMMANDS.md` says what the induction step must prove, and when to
+  name the index; `SECURITY.md` says the MCP confinement covers a replayed
+  spec. The Spanish `SECURITY.md` still said the schema was frozen at 4.
+
 ## [0.20.0] — 2026-09-26
 
 **One statement from N boxes, schema 5, and what thousands of runs needed.**

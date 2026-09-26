@@ -694,6 +694,34 @@ def test_every_answer_names_the_server_version():
     assert got["certo_version"] == __version__, got.get("certo_version")
 
 
+def test_verify_never_runs_a_spec_named_from_outside_the_workspace():
+    """CM-10: only the certificate's path was checked against the workspace.
+    A certificate inside it whose payload named a spec OUTSIDE was replayed,
+    and the spec -- Python -- ran."""
+    from certo import numerics
+    from certo.certificate import Certificate
+
+    outside = Path(tempfile.mkdtemp(prefix="certo_outside_"))
+    spec = outside / "outside.py"
+    marker = outside / "executed.txt"
+    spec.write_text(
+        "from pathlib import Path\nfrom certo import BoundSpec\n"
+        "Path(__file__).with_name('executed.txt').write_text('ran')\n"
+        "def spec():\n"
+        "    return BoundSpec(value=lambda m: m(0), claim=('<=', '1'))\n",
+        encoding="utf-8")
+    ball = Certificate("ball", True, {
+        "lo": "0", "hi": "0", "claim": ["<=", "1"], "prec": 128,
+        "backend": numerics.backend_name(), "spec_path": str(spec)})
+    ws = Path(os.environ["CERTO_WORKSPACE"])
+    (ws / "outside_ball.json").write_text(ball.to_json(), encoding="utf-8")
+    before = os.environ.get("CERTO_SPEC_ROOT")
+    got = run(call("verify", {"certificate_path": "outside_ball.json"}))
+    assert not marker.exists(), "the outside spec was executed"
+    assert any(spec.name in w for w in got.get("warnings", [])), got
+    assert os.environ.get("CERTO_SPEC_ROOT") == before
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

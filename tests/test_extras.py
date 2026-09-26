@@ -4601,6 +4601,11 @@ def test_otherwise_global_optimality_is_explicitly_not_claimed():
 
     cert = _roundtrip(mixed.mixed(_mixed_spec(), LIM).certificate)
     cert.payload["globally_optimal"] = False       # as it would be with a gap
+    # ... and the level with it, as the engine writes it. A level of
+    # `global_optimum` beside `globally_optimal: false` says two things and is
+    # refused (0.20.1).
+    assert not verify(cert, LIM).ok
+    cert.payload["level"] = "conditional_optimum"
     rep = verify(cert, LIM)
     assert rep.ok
     assert any("NOT CLAIMED" in w or "NO SE AFIRMA" in w for w in rep.warnings)

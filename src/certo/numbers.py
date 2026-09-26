@@ -115,6 +115,15 @@ def verify_pratt(cert: dict, checks=None) -> list:
     a = int(cert["witness"])
     qs = [int(f["q"]) for f in cert["factors"]]
 
+    # Every child certifies THE FACTOR IT SITS UNDER, and that factor is a
+    # prime divisor of n - 1 of the right size. A valid tree for 2, filed
+    # under the factor 8, used to make 9 prime: the child verified, and
+    # nothing asked which number it was about.
+    untied = [str(f["q"]) for f in cert["factors"]
+              if int((f.get("cert") or {}).get("n", -1)) != int(f["q"])
+              or int(f["q"]) < 2 or (n - 1) % int(f["q"]) != 0]
+    checks.append((t("verify.pratt.tied", n=n), n >= 2 and not untied,
+                   ", ".join(untied[:4]) or "-"))
     for f in cert["factors"]:
         verify_pratt(f["cert"], checks)
 
@@ -160,6 +169,13 @@ def verify_factorisation(cert: dict) -> list:
     checks = [(t("verify.factor.product", n=n), product == n,
                " * ".join("{}^{}".format(f["p"], f["e"])
                           for f in cert["factors"]) or "1")]
+    # Each prime's certificate is about THAT prime -- the same hole as the
+    # Pratt tree one level up: `9 = 9^1` with a certificate that 2 is prime.
+    untied = [str(f["p"]) for f in cert["factors"]
+              if int((f.get("cert") or {}).get("n", -1)) != int(f["p"])
+              or int(f["p"]) < 2 or int(f["e"]) < 1]
+    checks.append((t("verify.factor.tied", n=n), not untied,
+                   ", ".join(untied[:4]) or "-"))
     for f in cert["factors"]:
         sub = verify_pratt(f["cert"])
         checks.append((t("verify.factor.prime", p=f["p"]),

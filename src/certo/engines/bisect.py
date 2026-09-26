@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import time
 
+import z3
+
 from ..certificate import bisect_certificate
 from ..i18n import t
 from ..limits import Limits
@@ -55,6 +57,23 @@ def _probe(spec, t, lim):
         return UNKNOWN, r
 
     raise TypeError(t("engine.bisect.build_type", type=type(obj).__name__))
+
+
+def instance(obj) -> dict:
+    """What a probe at one t ASKED, recorded so `verify` can tie each end's
+    certificate to it: the query of a `Spec` (its hypotheses and the negated
+    claim), or the DIMACS of a CNF."""
+    from .. import z3util
+    from ..cnf import CNF, CNFSpec
+    from ..spec import Spec
+
+    if isinstance(obj, Spec):
+        query = [f for _n, f in obj.assumptions] + [z3.Not(obj.goal)]
+        return {"kind": "smt", "query_smt2": z3util.smt2(*query)}
+    if isinstance(obj, (CNF, CNFSpec)):
+        cnf = obj.cnf if isinstance(obj, CNFSpec) else obj
+        return {"kind": "cnf", "dimacs": cnf.to_dimacs()}
+    return {"kind": "unknown"}
 
 
 def bisect(spec, limits: Limits | None = None, on_probe=None) -> Result:
@@ -114,6 +133,8 @@ def bisect(spec, limits: Limits | None = None, on_probe=None) -> Result:
         good_t=good_t, bad_t=bad_t,
         good_cert=good_r.certificate.to_dict() if good_r.certificate else None,
         bad_cert=bad_r.certificate.to_dict() if bad_r.certificate else None,
+        good_instance=instance(spec.build(good_t)),
+        bad_instance=instance(spec.build(bad_t)),
         evaluations=evals,
     )
     width = abs(good_t - bad_t)

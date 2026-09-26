@@ -145,6 +145,13 @@ Forge one afterwards and verification catches it again:
 The step is proved with the index **free**, which is what makes it universally
 valid: a proof with a free variable is a proof for every value of it.
 
+What the step must prove is not whatever its spec happens to assume. certo
+reads `P(k)` off the step's goal `P(k+1)` and requires exactly
+`(k ≥ step_from ∧ P(k)) → P(k+1)`: a step proved under `k ≥ 10` does not
+start at 0 because `step_from` says so. When the goal mentions more than one
+integer, name the index with `InductSpec(k=...)`; otherwise certo says it
+cannot tell which one it is, and writes nothing.
+
 ---
 
 ## Is my setup sane?

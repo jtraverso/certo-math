@@ -28,10 +28,22 @@ def _tracked(spec, negate_goal: bool):
         items.append(("__goal__", z3.Not(spec.goal) if negate_goal else spec.goal))
     ind = {}
     for name, f in items:
-        p = z3.Bool("__p_" + name)
+        # FRESH, not named. `z3.Bool("__p_" + name)` was a name a spec could
+        # use too: a claim over the Boolean `__p___goal__` WAS the goal's
+        # indicator, the solver solved a different formula, and a free
+        # proposition came back PROVED. A fresh constant cannot be spelled by
+        # anyone, and the core is mapped back by identity, not by slicing a
+        # name.
+        p = z3.FreshBool("certo_ind")
         ind[name] = p
         s.add(z3.Implies(p, f))
     return s, ind, dict(items)
+
+
+def _core_names(core, ind):
+    """The hypothesis names of an unsat core, by indicator identity."""
+    back = {p.get_id(): name for name, p in ind.items()}
+    return {back[c.get_id()] for c in core if c.get_id() in back}
 
 
 def _outcome(r, s):
@@ -164,7 +176,7 @@ def prove(spec, limits: Limits | None = None) -> Result:
     ms = (time.perf_counter() - t0) * 1000
 
     if st is Status.UNSAT:
-        raw = {str(p)[4:] for p in s.unsat_core()}
+        raw = _core_names(s.unsat_core(), ind)
         core = _mus(s, ind, [n for n in all_names if n in raw] or all_names, lim)
         dropped = [n for n in all_names if n not in core]
         clash = _vacuous(s, ind, all_names, lim)
@@ -250,7 +262,7 @@ def check(spec, limits: Limits | None = None,
         return Result("check", st, Verdict.SATISFIABLE, ENGINE, ms, cert,
                       detail=t("engine.check.sat"), meta=meta)
     if st is Status.UNSAT:
-        raw = {str(p)[4:] for p in s.unsat_core()}
+        raw = _core_names(s.unsat_core(), ind)
         core = _mus(s, ind, [n for n in all_names if n in raw] or all_names, lim)
         cert = _with_farkas(
             unsat_core_certificate(

@@ -194,6 +194,11 @@ def mixed(spec, limits: Limits | None = None, spec_path: str = "",
         target=None if want is None else exact.serialize(want),
         globally_optimal=globally_optimal, level=level,
         title=spec.title,
+        bounds={v: [None if spec.bounds[v][0] is None
+                    else exact.serialize(exact.to_fraction(spec.bounds[v][0])),
+                    None if spec.bounds[v][1] is None
+                    else exact.serialize(exact.to_fraction(spec.bounds[v][1]))]
+                for v in spec.var_names},
     ).stamp(spec_path or None)
 
     if want is not None:

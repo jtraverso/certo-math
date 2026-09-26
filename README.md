@@ -116,11 +116,12 @@ your terminal, in your language.
 
 1. **Every command returns a certificate, or says explicitly why not.**
    Never a bare "yes".
-2. **Six result states:** `unsat`, `sat`, `unknown_solver`, `timeout`,
-   `resource_exhausted`, `out_of_theory`. Only the first two are conclusive.
-   The other four all mean "no answer", but for different reasons, and
-   collapsing them is expensive: an LLM that reads "unknown" writes "no
-   solution exists".
+2. **Seven result states:** `unsat`, `sat`, `unknown_solver`, `timeout`,
+   `resource_exhausted`, `out_of_theory`, `explored`. Only the first two are
+   conclusive. The next four all mean "no answer", but for different reasons,
+   and collapsing them is expensive: an LLM that reads "unknown" writes "no
+   solution exists". `explored` is a cheap look (`--explore`), not an answer:
+   nothing was certified.
 3. **Determinism by work budget, not by clock:** `rlimit` in Z3 and
    `conflict_budget` in SAT. *This covers our engines, not your predicate:* if
    your `sweep` predicate calls scipy or CBC, that part is outside the
@@ -253,8 +254,11 @@ res.certificate           # the artefact `--cert` would have written
 | `api.options(command)` | what that command accepts, read off the engine |
 
 `run` **verifies what it produced** and raises `api.SelfCheckFailed` rather
-than hand back a certificate that fails its own verifier. It costs under 1% of
-an `opt`. Pass `self_check=False` only after measuring.
+than hand back a certificate that fails its own verifier. That covers
+solver-free certificates; one whose check calls a solver again (`unsat_core`,
+`model`, …) comes back unchecked, with no `meta["self_check"]` — call
+`certo.verify` on it when it matters. It costs under 1% of an `opt`. Pass
+`self_check=False` only after measuring.
 
 The engine modules under `certo.engines` stay private; `run`, `runnable` and
 `options` are the promise. Commands that read a directory or the environment

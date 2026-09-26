@@ -651,6 +651,214 @@ def test_proof():
     _report("proof (cited)", probe(_chain(cite=True)))
 
 
+# ---------------------------------------------------------------------------
+# certificates written by hand, not mutated: the external audit of 0.20.0
+# ---------------------------------------------------------------------------
+#
+# Mutating one field of a valid certificate cannot find a sub-certificate that
+# verifies but is about something else, nor an empty list the verifier walks
+# over without complaint. The audit wrote such certificates from scratch; each
+# one below verified in 0.20.0 and states something false.
+
+
+def _refused(cert):
+    rep = verify(cert, LIM)
+    assert not rep.ok, [c for c in rep.checks]
+    return rep
+
+
+def test_a_prime_tree_is_about_the_factors_it_names():
+    """CM-03: 9 'prime', its one factor q=8 carried a certificate of 2."""
+    _refused(Certificate("number", True, {
+        "n": 9, "question": "prime", "tree": {"n": 9, "witness": 8, "factors": [
+            {"q": 8, "cert": {"n": 2, "base_case": True}}]}}))
+    _refused(Certificate("number", True, {
+        "n": 9, "question": "factor", "tree": {"n": 9, "factors": [
+            {"p": 9, "e": 1, "cert": {"n": 2, "base_case": True}}]}}))
+
+
+def test_a_global_optimum_is_the_relaxation_it_carries():
+    """CM-04: editing `bound`, `globally_optimal` and `level` made a design
+    worth 1 globally optimal where 3 is attainable."""
+    from certo import LPSpec, api
+
+    s = LPSpec(sense="max")
+    s.variable("x", kind="binary")
+    s.variable("y", hi=1)
+    s.objective({"x": 2, "y": 1})
+    s.constraint({"x": 1, "y": 1}, "<=", 2, name="cap")
+    r = api.run("mixed", s, freeze={"x": 0})
+    assert verify(r.certificate, LIM).ok
+    d = r.certificate.to_dict()
+    d["payload"].update(bound=d["payload"]["achieved"], globally_optimal=True,
+                        level="global_optimum")
+    _refused(Certificate.from_dict(d))
+
+
+def test_a_gap_is_the_difference_of_what_its_halves_certify():
+    """CM-05: mu=100, nu=1, gap=99 beside two halves that both said 1."""
+    from certo import PackingSpec, packing
+
+    gap, _meta = packing.gap(PackingSpec(items=[("item", {"r"}, 1)],
+                                         capacities=1))
+    assert verify(gap, LIM).ok
+    d = gap.to_dict()
+    d["payload"].update(mu="100", nu="1", gap="99")
+    _refused(Certificate.from_dict(d))
+
+
+def test_a_resultant_is_the_sylvester_determinant():
+    """CM-06: A = B = resultant = 0 is a Bezout identity, 0 = 0, and not the
+    resultant of t and t - 1, which is -1 or 1."""
+    import z3
+
+    from certo import EliminateSpec, api
+
+    t = z3.Real("t")
+    r = api.run("eliminate", EliminateSpec(variables=["t"],
+                                           equations=[t, t - 1], eliminate="t"))
+    assert verify(r.certificate, LIM).ok
+    d = r.certificate.to_dict()
+    for f in ("A", "B", "resultant"):
+        d["payload"][f] = {}
+    _refused(Certificate.from_dict(d))
+
+
+def test_a_hermite_pivot_is_a_row_of_the_matrix():
+    """CM-07: pivot -1 let [[0,1],[1,0]] pass as Hermite with det 0."""
+    base = {"question": "det", "matrix": [[0, 1], [1, 0]], "h": [[0, 1], [1, 0]],
+            "u": [[1, 0], [0, 1]], "u_inv": [[1, 0], [0, 1]],
+            "det_u": 1, "rank": 2, "det": 0}
+    for pivots in ([-1, 0], [0, 2], [True, 0], ["0", 1]):
+        _refused(Certificate("integer_matrix", True, dict(base, pivots=pivots)))
+
+
+def test_an_induction_step_holds_from_where_the_chain_needs_it():
+    """CM-08: a step proved under k >= 10 joined a base at 0 and 'proved'
+    P(1) for P(k) = (k = 0 or k >= 10)."""
+    import z3
+
+    from certo import InductSpec, Spec, api
+
+    k = z3.Int("k")
+
+    def pred(k):
+        return z3.Or(k == 0, k >= 10)
+
+    step = (Spec().assume("from10", k >= 10).assume("induction", pred(k))
+            .claim(pred(k + 1)))
+    r = api.run("induct", InductSpec(k0=0, base_upto=0, step_from=0,
+                                     base=lambda n: Spec().claim(pred(n)),
+                                     step=step))
+    assert r.verdict.value != "proved" and r.certificate is None
+
+    # and a true induction still proves, and still verifies
+    def double(k):
+        return 2 * k >= k + 3
+
+    n = z3.Int("n")
+    good = (Spec().assume("from", n >= 3).assume("ih", double(n))
+            .claim(double(n + 1)))
+    r = api.run("induct", InductSpec(k0=3, base_upto=4, step_from=3,
+                                     base=lambda m: Spec().claim(
+                                         double(z3.IntVal(m))),
+                                     step=good))
+    assert r.verdict.value == "proved", r.detail
+    assert verify(r.certificate, LIM).ok
+
+
+def test_a_bisection_has_a_proof_on_one_side_and_a_refutation_on_the_other():
+    """CM-09: the same proof of True at both ends certified a threshold."""
+    import z3
+
+    from certo import Spec, api
+    from certo.certificate import bisect_certificate
+
+    truth = api.run("prove", Spec().claim(z3.BoolVal(True))).certificate.to_dict()
+    _refused(bisect_certificate("min_true", True, 1, 5, 4, truth, truth, []))
+
+
+def test_a_bisection_end_is_about_its_own_query():
+    """CM-09: a proof and a counterexample, each of the wrong question."""
+    import z3
+
+    from certo import Spec, api
+    from certo.certificate import bisect_certificate
+    from certo.engines.bisect import instance
+
+    x = z3.Real("x")
+
+    def at(c):
+        return Spec().assume("dom", z3.And(x >= 0, x <= 2)).claim(x * x <= c)
+
+    proof = api.run("prove", at(4)).certificate.to_dict()
+    cex = api.run("prove", at(1)).certificate.to_dict()
+    assert proof["kind"] == "unsat_core" and cex["kind"] == "model"
+    # the ends as asked at 4 and 1, but filed as if asked at 0 and 5
+    forged = bisect_certificate("min_true", False, 3.5, 4, 1, proof, cex, [],
+                                good_instance=instance(at(0)),
+                                bad_instance=instance(at(5)))
+    _refused(forged)
+    honest = bisect_certificate("min_true", False, 3.5, 4, 1, proof, cex, [],
+                                good_instance=instance(at(4)),
+                                bad_instance=instance(at(1)))
+    assert verify(honest, LIM).ok
+
+
+def test_a_bisection_end_is_the_family_at_its_t_when_the_spec_is_there():
+    """CM-09: a proof at t=4 still closes the query at t=5, so only the
+    family, rebuilt from the spec, says that the end was not asked at 5.
+    And z3 prints one formula differently depending on how it was built:
+    the rebuilt query is compared as a formula, not as text."""
+    import tempfile
+    from pathlib import Path
+
+    from certo import api
+    from certo.engines.bisect import instance
+    from certo.spec import load_spec
+
+    src = Path(tempfile.mkdtemp(prefix="certo_bisect_")) / "family.py"
+    src.write_text(
+        "import z3\nfrom certo import BisectSpec, Spec\n"
+        "def build(c):\n"
+        "    x = z3.Real('x')\n"
+        "    s = Spec().assume('dom', z3.And(x >= 0, x <= 2))\n"
+        "    return s.claim(x * x <= z3.RealVal(c))\n"
+        "def spec():\n"
+        "    return BisectSpec(build=build, lo=0, hi=8, integer=True)\n",
+        encoding="utf-8")
+    r = api.run("bisect", load_spec(src), spec_path=str(src))
+    assert r.verdict.value == "proved", r.detail
+    rep = verify(r.certificate, LIM)
+    assert rep.ok and not rep.warnings, (rep.checks, rep.warnings)
+    d = r.certificate.to_dict()
+    p = d["payload"]
+    p["good_instance"] = instance(load_spec(src).build(p["good_t"] + 1))
+    _refused(Certificate.from_dict(d))
+
+
+def test_the_solver_s_indicator_names_cannot_collide_with_a_user_s():
+    """CM-01: a Bool named like certo's own indicator was 'proved', and the
+    claim is false."""
+    import z3
+
+    from certo import Spec, api
+
+    q = z3.Bool("__p___goal__")
+    r = api.run("prove", Spec().claim(q))
+    assert r.verdict.value != "proved", r.verdict
+    # the same name in a TRUE claim still proves, and verifies
+    r = api.run("prove", Spec().assume("h", q).claim(q))
+    assert r.verdict.value == "proved" and verify(r.certificate, LIM).ok
+
+
+def test_a_mus_names_every_clause_it_keeps():
+    """CM-02: `mus_indices: []` and no witnesses passed a non-minimal MUS."""
+    _refused(Certificate("mus", True, {
+        "original": [[1], [-1], [2]], "mus": [[1], [-1], [2]], "proof": ["0"],
+        "mus_indices": [], "witnesses": {}}))
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

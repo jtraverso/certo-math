@@ -281,6 +281,13 @@ def hermite(A) -> dict:
 def is_hermite(H, pivots) -> bool:
     """The shape, as a check and not as a promise."""
     n, m = shape(H)
+    # Each pivot a column index IN RANGE. Python reads -1 as the last column,
+    # so [-1, 0] passed as "strictly increasing" and let a matrix that is not
+    # triangular through -- and the determinant was then read off its
+    # diagonal as 0 for a matrix whose determinant is -1.
+    if any(not isinstance(c, int) or isinstance(c, bool) or not 0 <= c < m
+           for c in pivots):
+        return False
     if len(pivots) > min(n, m) or sorted(set(pivots)) != list(pivots):
         return False
     for r, c in enumerate(pivots):
