@@ -12748,6 +12748,11 @@ READS_THE_REAL_MACHINE = {
     "test_doctor_names_a_half_finished_install":
         "it runs the real leftovers probe to check the probe's shape; the "
         "assertions are about the report, not about this machine's contents",
+    "test_the_mcp_server_can_be_registered_with_a_venv_that_can_run_it":
+        "checking a venv means STARTING its interpreter -- here a link to the "
+        "one running the test -- to see it import certo; the assertions are "
+        "that a non-venv is refused and that the entry written names the "
+        "interpreter checked, whichever machine that is",
 }
 
 
