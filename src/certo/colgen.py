@@ -46,11 +46,23 @@ search is complete. The verifier runs the same search, with the certificate's
 one to rerun. On a chordal graph the cliques number at most `2^w n` for
 clique number `w`, and in practice the bound prunes most of that.
 
-THE LIMITS, stated. `partition` needs `min_size <= 2`, so the edges
-themselves are columns and the program is feasible; with only larger cliques
-it may not be, and proving that needs a Farkas certificate over implicit
-columns, which this does not produce. A `cover` edge that lies in no allowed
-clique makes the program infeasible, and that is reported with the edge.
+BOUNDED SIZE. `max_size` limits the family from above -- only edges and
+triangles, say -- and the pricing search simply stops growing a clique at
+that size. The bound stays valid: it is over every extension, and dropping
+extensions only lowers the maximum.
+
+INFEASIBLE, WITH A CERTIFICATE. A `partition` whose smallest clique has three
+vertices need not be feasible at all. Phase one decides it with the same
+machinery: an artificial column per edge, cost 1, every clique cost 0, and
+columns generated until none prices in. If that optimum is positive, its dual
+`y` has `sum_{e in Q} y_e <= 0` for EVERY allowed clique -- the pricing search
+says so, over the whole family -- and `r.y > 0`, which is Farkas's lemma: no
+`x >= 0` partitions the edges. The verifier reruns the search with that `y`.
+When the optimum is zero, the columns phase one generated start the real
+program, which is then feasible.
+
+A `cover` edge that lies in no allowed clique makes the program infeasible,
+and that is reported with the edge.
 """
 from __future__ import annotations
 
@@ -176,7 +188,7 @@ def weight(Q, g: Graph, alpha, beta, gamma) -> Fraction:
 
 
 def price(g: Graph, z, sgn, alpha, beta, gamma, min_size, threshold=0,
-          collect=0, max_nodes=MAX_NODES) -> dict:
+          collect=0, max_nodes=MAX_NODES, max_size=None) -> dict:
     """The largest reduced cost over every clique of size >= `min_size`.
 
     `z` is the exact dual, one entry per edge in `g.edges` order. Returns
@@ -213,7 +225,7 @@ def price(g: Graph, z, sgn, alpha, beta, gamma, min_size, threshold=0,
             raise PricingBudget("pricing")
         if len(R) >= min_size:
             consider(value, R)
-        if not P:
+        if not P or (max_size is not None and len(R) >= max_size):
             return
         bound = value + sum(max(Fraction(0), gain[v]) for v in P)
         for a_i, a in enumerate(P):
@@ -254,9 +266,29 @@ def _params(spec):
     m = int(getattr(spec, "min_size", 2))
     if m < 1:
         raise NotACliqueLP(_t("colgen.bad_min_size", got=m))
-    if problem == "partition" and m > 2:
-        raise NotACliqueLP(_t("colgen.partition_min_size", got=m))
-    return problem, alpha, beta, gamma, m
+    M = getattr(spec, "max_size", None)
+    if M is not None:
+        M = int(M)
+        if M < max(m, 2):
+            raise NotACliqueLP(_t("colgen.bad_max_size", got=M, min=max(m, 2)))
+    return problem, alpha, beta, gamma, m, M
+
+
+def _starting(g, m, M):
+    """Every maximal clique large enough; one too large is cut down to a
+    clique of `M` vertices around each of its edges, so every edge an allowed
+    clique can cover is covered by a starting column."""
+    out = set()
+    for Q in maximal_cliques(g):
+        if len(Q) < m:
+            continue
+        if M is None or len(Q) <= M:
+            out.add(tuple(Q))
+            continue
+        for a, b in ((a, b) for x, a in enumerate(Q) for b in Q[x + 1:]):
+            rest = [v for v in Q if v not in (a, b)][:M - 2]
+            out.add(tuple(sorted([a, b] + rest)))
+    return [list(Q) for Q in sorted(out)]
 
 
 def rhs_of(spec, g: Graph):
@@ -281,7 +313,7 @@ def solve(spec, limits=None, max_rounds=500, per_round=40) -> dict:
 
     lim = limits or Limits()
     g = graph_of(spec)
-    problem, alpha, beta, gamma, m = _params(spec)
+    problem, alpha, beta, gamma, m, M = _params(spec)
     sense, row_sense = PROBLEMS[problem]
     sgn = 1 if sense == "max" else -1
     rhs = rhs_of(spec, g)
@@ -289,10 +321,18 @@ def solve(spec, limits=None, max_rounds=500, per_round=40) -> dict:
         raise NotACliqueLP(_t("colgen.negative_rhs"))
 
     # Starting columns: every maximal clique that is large enough, and for a
-    # partition every edge as well, which is what makes it feasible.
-    cols = [Q for Q in maximal_cliques(g) if len(Q) >= m]
-    if problem == "partition":
+    # partition every edge as well when edges are allowed -- which is what
+    # makes it feasible. When they are not, phase one decides feasibility.
+    cols = _starting(g, m, M)
+    if problem == "partition" and m <= 2:
         cols += [[i, j] for (i, j) in g.edges]
+    if problem == "partition" and m > 2:
+        phase = _phase_one(g, cols, rhs, m, M, lim, max_rounds, per_round)
+        if "farkas" in phase:
+            return dict(phase, graph=g, problem=problem, alpha=alpha,
+                        beta=beta, gamma=gamma, min_size=m, max_size=M,
+                        rhs=rhs)
+        cols = phase["cols"]
     if problem == "cover":
         covered = {k for Q in cols for k in g.clique_edges(Q)}
         missing = [k for k in range(len(g.edges))
@@ -308,7 +348,7 @@ def solve(spec, limits=None, max_rounds=500, per_round=40) -> dict:
         z, x, objective = _master(g, cols, rhs, row_sense, sense, alpha, beta,
                                   gamma, lim, lp_engine, LPSpec)
         got = price(g, z, sgn, alpha, beta, gamma, m, threshold=0,
-                    collect=per_round)
+                    collect=per_round, max_size=M)
         new = [Q for _v, Q in got["found"] if tuple(Q) not in seen]
         if not new:
             break
@@ -320,9 +360,62 @@ def solve(spec, limits=None, max_rounds=500, per_round=40) -> dict:
 
     support = [(Q, x[k]) for k, Q in enumerate(cols) if x[k] != 0]
     return {"graph": g, "problem": problem, "alpha": alpha, "beta": beta,
-            "gamma": gamma, "min_size": m, "rhs": rhs, "z": z,
+            "gamma": gamma, "min_size": m, "max_size": M, "rhs": rhs, "z": z,
             "support": support, "objective": objective,
             "pricing": got, "rounds": rounds, "generated": len(cols)}
+
+
+def _phase_one(g, cols, rhs, m, M, lim, max_rounds, per_round) -> dict:
+    """Is the partition feasible at all? `min sum a_e` with an artificial
+    column per edge, every clique free, columns generated as in phase two.
+    Returns `{"cols": [...]}` when the optimum is zero, or the Farkas vector
+    `y = -z` and its pricing when it is not."""
+    from .engines import lp as lp_engine
+    from .spec import LPSpec
+
+    seen = {tuple(Q) for Q in cols}
+    cols = [list(Q) for Q in sorted(seen)]
+    rounds = 0
+    while True:
+        rounds += 1
+        s = LPSpec(sense="min", title="phase one")
+        names = ["q{}".format(k) for k in range(len(cols))]
+        for v in names:
+            s.variable(v)
+        for e in range(len(g.edges)):
+            s.variable("a{}".format(e))
+        s.objective({"a{}".format(e): 1 for e in range(len(g.edges))})
+        rows = [{"a{}".format(e): 1} for e in range(len(g.edges))]
+        for k, Q in enumerate(cols):
+            for e in g.clique_edges(Q):
+                rows[e][names[k]] = 1
+        for e in range(len(g.edges)):
+            s.constraint(rows[e], "==", rhs[e], name="e{}".format(e))
+        res = lp_engine.opt(s, lim)
+        cert = res.certificate
+        if cert is None or not res.meta.get("exact"):
+            raise ArithmeticError(_t("colgen.master_inexact",
+                                     detail=res.detail or res.status.value))
+        p = cert.payload
+        y = dict(zip(p["names"], (Fraction(v) for v in p["dual"])))
+        z = [y.get("e{}_le".format(e), Fraction(0))
+             - y.get("e{}_ge".format(e), Fraction(0))
+             for e in range(len(g.edges))]
+        value = Fraction(res.meta["objective"])
+        got = price(g, z, -1, Fraction(0), Fraction(0), Fraction(0), m,
+                    threshold=0, collect=per_round, max_size=M)
+        new = [Q for _v, Q in got["found"] if tuple(Q) not in seen]
+        if not new:
+            break
+        if rounds >= max_rounds:
+            raise PricingBudget("rounds")
+        for Q in new:
+            seen.add(tuple(Q))
+            cols.append(Q)
+    if value == 0:
+        return {"cols": cols}
+    return {"farkas": [-v for v in z], "farkas_value": value, "pricing": got,
+            "rounds": rounds, "generated": len(cols)}
 
 
 def _master(g, cols, rhs, row_sense, sense, alpha, beta, gamma, lim,
@@ -367,8 +460,46 @@ def _master(g, cols, rhs, row_sense, sense, alpha, beta, gamma, lim,
 # --- the check, shared with the verifier -------------------------------------
 
 
+def check_farkas(payload, max_nodes=MAX_NODES) -> list:
+    """An infeasible partition's certificate, recomputed: `r.y > 0`, and --
+    by the pricing search over EVERY allowed clique -- no clique has
+    `sum_{e in Q} y_e > 0`. Together, Farkas: no `x >= 0` partitions."""
+    out = []
+    g = Graph(payload["vertices"], payload["edges"])
+    m = int(payload["min_size"])
+    M = payload.get("max_size")
+    M = None if M is None else int(M)
+    rhs = [Fraction(v) for v in payload["rhs"]]
+    y = [Fraction(v) for v in payload["farkas"]]
+    shaped = len(rhs) == len(y) == len(g.edges) and \
+        payload.get("problem") == "partition"
+    out.append(("shape", shaped, len(g.edges)))
+    if not shaped:
+        return out
+    value = sum((r * v for r, v in zip(rhs, y)), Fraction(0))
+    out.append(("farkas_value", value > 0 and
+                value == Fraction(payload["farkas_value"]), str(value)))
+    try:
+        got = price(g, [-v for v in y], 1, Fraction(0), Fraction(0),
+                    Fraction(0), m, threshold=0, max_nodes=max_nodes,
+                    max_size=M)
+    except PricingBudget:
+        out.append(("farkas_pricing", False, "budget"))
+        return out
+    best = got["best"]
+    claimed = payload.get("pricing") or {}
+    same = (claimed.get("max_reduced") == (None if best is None else str(best))
+            and claimed.get("nodes") == got["nodes"])
+    out.append(("farkas_pricing", (best is None or best <= 0) and same,
+                "{} ({} nodes)".format("-" if best is None else best,
+                                       got["nodes"])))
+    return out
+
+
 def check(payload, max_nodes=MAX_NODES) -> list:
     """Every claim in a `clique_lp` payload, recomputed. `(label, ok, detail)`."""
+    if "farkas" in payload:
+        return check_farkas(payload, max_nodes)
     out = []
     g = Graph(payload["vertices"], payload["edges"])
     problem = payload["problem"]
@@ -378,6 +509,8 @@ def check(payload, max_nodes=MAX_NODES) -> list:
     alpha, beta, gamma = (Fraction(w["edges"]), Fraction(w["vertices"]),
                           Fraction(w["constant"]))
     m = int(payload["min_size"])
+    M = payload.get("max_size")
+    M = None if M is None else int(M)
     rhs = [Fraction(v) for v in payload["rhs"]]
     z = [Fraction(v) for v in payload["dual"]]
     shaped = len(rhs) == len(z) == len(g.edges)
@@ -396,7 +529,8 @@ def check(payload, max_nodes=MAX_NODES) -> list:
         except (KeyError, TypeError, ValueError, ZeroDivisionError):
             bad_cols.append(str(col.get("clique")))
             continue
-        if len(set(Q)) != len(Q) or len(Q) < m or not g.is_clique(Q) or xq < 0:
+        if (len(set(Q)) != len(Q) or len(Q) < m or not g.is_clique(Q)
+                or xq < 0 or (M is not None and len(Q) > M)):
             bad_cols.append(str(col["clique"]))
             continue
         for e in g.clique_edges(Q):
@@ -430,7 +564,7 @@ def check(payload, max_nodes=MAX_NODES) -> list:
 
     try:
         got = price(g, z, sgn, alpha, beta, gamma, m, threshold=0,
-                    max_nodes=max_nodes)
+                    max_nodes=max_nodes, max_size=M)
     except PricingBudget:
         out.append(("pricing", False, "budget"))
         return out

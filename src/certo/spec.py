@@ -391,6 +391,43 @@ class Outcome:
     errored: bool = False
     value: object = None        # value to collect (Fraction, int or float)
 
+    @classmethod
+    def clique_partition(cls, graph, parts, at_most=None, limits=None):
+        """A predicate's YES, certified in one line: `parts` (vertex sets)
+        partition the edges of `graph` into cliques, and -- with `at_most` --
+        there are no more than `at_most` of them.
+
+            def pred(g):
+                return Outcome.clique_partition(g, my_partition(g), at_most=k)
+
+        `cover` checks it, the certificate travels with the item, and `verify`
+        checks it is about THIS graph. A partition that fails -- a part that
+        is no clique, an edge missed or doubled, too many parts -- is NOT a
+        counterexample: another partition might do, so the answer is "did not
+        conclude" (`ok=None`), and the reason is the detail. Only ever a YES:
+        a partition bounds the minimum from above and refutes nothing.
+        """
+        from .engines import algebra
+
+        universe = [tuple(e) for e in graph.edges()]
+        spec = CoverSpec(universe=universe, parts=[list(p) for p in parts],
+                         cliques=True, exact=True)
+        res = algebra.cover(spec, limits)
+        cert = res.certificate
+        if cert is None:
+            return cls(None, detail=t("outcome.partition.failed",
+                                      detail=res.detail))
+        size = cert.payload["size"]
+        if at_most is not None:
+            cert.payload["at_most"] = int(at_most)
+            if size > int(at_most):
+                return cls(None, detail=t("outcome.partition.too_many",
+                                          size=size, at_most=int(at_most)))
+        return cls(True, cert=cert,
+                   detail=t("outcome.partition.ok", size=size,
+                            bound="" if at_most is None
+                            else " <= {}".format(int(at_most))))
+
 
 @dataclass
 class SweepSpec:
@@ -1334,6 +1371,8 @@ class CliqueLPSpec:
     rhs: object = 1
     vertices: object = None
     title: str = ""
+    # The family bounded from above too -- only edges and triangles, say.
+    max_size: object = None
 
 
 @dataclass

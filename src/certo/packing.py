@@ -134,6 +134,13 @@ class PackingSpec:
     graph: object = None
     cliques: dict = None
     edges: dict = None
+    # The part that is NOT the graph, named rather than left out: items that
+    # are no clique (a radial, a vertex set with its own rule) and resources
+    # that are no edge (a vertex capacity). Declared, they are excused from
+    # the map and every verification says how many were; undeclared, an item
+    # outside `cliques` is refused exactly as before.
+    not_cliques: list = None
+    not_edges: list = None
     _kinds: dict = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
@@ -175,8 +182,21 @@ class PackingSpec:
         if any(declared):
             if not all(declared):
                 raise ValueError(t("packing.map.partial"))
-            problems = check_map(self.graph, self.cliques, self.edges,
-                                 {n: r for n, r, _g, _k in norm})
+            outside_i = {str(x) for x in (self.not_cliques or [])}
+            outside_r = {str(x) for x in (self.not_edges or [])}
+            names = {n for n, _r, _g, _k in norm}
+            used = {str(r) for _n, rs, _g, _k in norm for r in rs}
+            problems = [t("packing.map.outside_unknown", name=x)
+                        for x in sorted(outside_i - names)]
+            problems += [t("packing.map.outside_unknown", name=x)
+                         for x in sorted(outside_r - used)]
+            problems += [t("packing.map.both", name=x) for x in sorted(
+                (outside_i & {str(k) for k in self.cliques})
+                | (outside_r & {str(k) for k in self.edges}))]
+            problems += check_map(
+                self.graph, self.cliques, self.edges,
+                {n: [r for r in rs if str(r) not in outside_r]
+                 for n, rs, _g, _k in norm if n not in outside_i})
             if problems:
                 raise ValueError(t("packing.map.refused", n=len(problems),
                                    problems="; ".join(problems[:5])))
@@ -185,11 +205,17 @@ class PackingSpec:
         """The declaration, as the certificate carries it. None when absent."""
         if self.graph is None:
             return None
-        return {"graph": sorted(sorted(map(str, e)) for e in self.graph),
-                "cliques": {str(k): sorted(map(str, v))
-                            for k, v in sorted(self.cliques.items())},
-                "edges": {str(k): sorted(map(str, v))
-                          for k, v in sorted(self.edges.items())}}
+        out = {"graph": sorted(sorted(map(str, e)) for e in self.graph),
+               "cliques": {str(k): sorted(map(str, v))
+                           for k, v in sorted(self.cliques.items())},
+               "edges": {str(k): sorted(map(str, v))
+                         for k, v in sorted(self.edges.items())}}
+        # Only when there is any, so a map with no outside reads as before.
+        if self.not_cliques:
+            out["not_cliques"] = sorted(map(str, self.not_cliques))
+        if self.not_edges:
+            out["not_edges"] = sorted(map(str, self.not_edges))
+        return out
 
     # -- structure ---------------------------------------------------------
 
@@ -253,7 +279,11 @@ class PackingSpec:
                           cliques={n: v for n, v in self.cliques.items()
                                    if str(n) in alive},
                           edges={r: e for r, e in self.edges.items()
-                                 if str(r) in used})
+                                 if str(r) in used},
+                          not_cliques=[n for n in self.not_cliques or []
+                                       if str(n) in alive] or None,
+                          not_edges=[r for r in self.not_edges or []
+                                     if str(r) in used] or None)
         return PackingSpec(
             items=kept,
             capacities=self.capacities, sense=self.sense,

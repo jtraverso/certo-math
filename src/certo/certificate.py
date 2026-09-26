@@ -968,6 +968,37 @@ def clique_lp_certificate(out, title="") -> Certificate:
         "rounds": out["rounds"], "generated": out["generated"],
         "title": title,
     }
+    # Optional, so a family bounded by nothing reads as it always did.
+    if out.get("max_size") is not None:
+        payload["max_size"] = out["max_size"]
+    return Certificate(kind="clique_lp", solver_free=True, payload=payload,
+                       note_key="cert.note.clique_lp")
+
+
+def clique_lp_farkas_certificate(out, title="") -> Certificate:
+    """A partition over every allowed clique that CANNOT exist: the Farkas
+    vector `y` on the edges, `r.y > 0`, and the pricing search showing no
+    allowed clique has `sum y_e > 0`. The verifier reruns the search."""
+    g = out["graph"]
+    pr = out["pricing"]
+    payload = {
+        "problem": out["problem"],
+        "vertices": list(g.labels),
+        "edges": [[g.labels[i], g.labels[j]] for i, j in g.edges],
+        "min_size": out["min_size"],
+        # No weight: whether a partition EXISTS does not depend on what it
+        # would cost, and a field nothing checks is not carried.
+        "rhs": [str(r) for r in out["rhs"]],
+        "farkas": [str(v) for v in out["farkas"]],
+        "farkas_value": str(out["farkas_value"]),
+        "pricing": {"max_reduced": (None if pr["best"] is None
+                                    else str(pr["best"])),
+                    "nodes": pr["nodes"]},
+        "rounds": out["rounds"], "generated": out["generated"],
+        "title": title,
+    }
+    if out.get("max_size") is not None:
+        payload["max_size"] = out["max_size"]
     return Certificate(kind="clique_lp", solver_free=True, payload=payload,
                        note_key="cert.note.clique_lp")
 
@@ -1902,6 +1933,18 @@ def _verify_proof(cert, limits) -> VerifyReport:
     # The final step: the lemmas and the theorem's own hypotheses close it.
     ambient = list(z3.parse_smt2_string(p["assumptions_smt2"])) \
         if p.get("assumptions_smt2") else []
+    # ONE NAME PER HYPOTHESIS. The names are what a reader sees and the
+    # formulas are what the final step uses; only the declared-names check
+    # below read the list, and only for names the step itself carries. So a
+    # hypothesis the step never names could lose its name -- the formula
+    # still in `assumptions_smt2`, still entering the final step -- and the
+    # certificate listed one hypothesis fewer than it rests on. Found by
+    # putting `proof` through the tamper battery for the first time.
+    names = list(p.get("assumptions") or [])
+    checks.append((t("verify.proof.assumptions_named"),
+                   len(names) == len(ambient) and len(set(names)) == len(names),
+                   t("verify.proof.assumptions_count", names=len(names),
+                     formulas=len(ambient))))
     theorem = _parse_one(p["theorem_smt2"])
     step = p.get("step")
     if step is None:
@@ -2105,6 +2148,12 @@ def _verify_exact_cover(cert, limits) -> VerifyReport:
     checks.append((t("verify.cover.size"), out["parts"] == p["size"],
                    t("verify.cover.size_detail", n=out["parts"],
                      declared=p["size"])))
+    # A bound on the number of parts, when one was claimed (a sweep predicate
+    # asking "at most k cliques"): recounted, never read.
+    if p.get("at_most") is not None:
+        checks.append((t("verify.cover.at_most"), out["parts"] <= int(p["at_most"]),
+                       t("verify.cover.at_most_detail", n=out["parts"],
+                         at_most=p["at_most"])))
 
     # A clique partition's parts have to BE cliques, and that is a statement
     # about the graph, not about the cover. Re-derived rather than trusted.
@@ -2732,13 +2781,18 @@ def _verify_clique_lp(cert, limits) -> VerifyReport:
               "objective": "verify.colgen.objective",
               "dual_sign": "verify.colgen.dual_sign",
               "strong": "verify.colgen.strong",
-              "pricing": "verify.colgen.pricing"}
+              "pricing": "verify.colgen.pricing",
+              "farkas_value": "verify.colgen.farkas_value",
+              "farkas_pricing": "verify.colgen.farkas_pricing"}
     checks = [(t(labels[k]), ok, str(detail)) for k, ok, detail in rows]
+    infeasible = "farkas" in p
     return VerifyReport(
         all(c[1] for c in checks), "clique_lp", True, checks=checks,
         warnings=[t("verify.colgen.scope")],
         method_key="verify.colgen.method",
-        detail=t("verify.colgen.detail", n=len(p.get("vertices") or []),
+        detail=t("verify.colgen.detail_infeasible" if infeasible
+                 else "verify.colgen.detail",
+                 n=len(p.get("vertices") or []),
                  m=len(p.get("edges") or []), problem=p.get("problem")),
     )
 
@@ -3587,11 +3641,18 @@ def _param_nonneg(p, ring, lows, terms):
     if set(box) != set(ring):
         return lambda kind, name, poly: False
     trees = p.get("box_trees") or {}
+    # A box cut by a region: the conditions, unshifted, with their products
+    # -- rebuilt from the payload's own `region`, never read from a leaf.
+    from .polynomials import Poly
+
+    cut = dict(bernstein.region_terms(
+        [(n, Poly.parse(ring, g))
+         for n, g in sorted((p.get("region") or {}).items())])) or None
 
     def nn(kind, name, poly):
         tree = (trees.get("claim") if kind == "claim"
                 else (trees.get(kind) or {}).get(name))
-        return bernstein.check(poly, box, tree)
+        return bernstein.check(poly, box, tree, terms=cut)
     return nn
 
 
@@ -4839,7 +4900,9 @@ def _check_packing_map(p, A):
         cols = list(p.get("var_names") or [])
         loads = {ld.get("name") for ld in p.get("loads") or []}
         edges = m["edges"]
-        item_resources = {v: [] for v in cols}
+        outside_i = set(m.get("not_cliques") or [])
+        outside_r = set(m.get("not_edges") or [])
+        item_resources = {v: [] for v in cols if v not in outside_i}
         index = {v: j for j, v in enumerate(cols)}
         for i, r in enumerate(names):
             if r in loads:
@@ -4856,10 +4919,14 @@ def _check_packing_map(p, A):
                 if support == [index[bound]] and \
                         abs(exact.to_fraction(A[i][index[bound]])) == 1:
                     continue
+            if r in outside_r and r not in edges:
+                continue                  # declared outside the graph
             if r not in edges:
                 problems.append(t("packing.map.row_unmapped", row=r))
                 continue
             for j, v in enumerate(cols):
+                if v in outside_i:
+                    continue              # declared no clique
                 a = exact.to_fraction(A[i][j])
                 if a == 1:
                     item_resources[v].append(r)
@@ -4873,8 +4940,12 @@ def _check_packing_map(p, A):
     except (KeyError, TypeError, ValueError, IndexError, AttributeError):
         problems.append(t("packing.map.malformed"))
         detail = problems[-1]
-    return ([(t("verify.lp.map"), not problems, detail)],
-            [t("verify.lp.map_scope")])
+    warnings = [t("verify.lp.map_scope")]
+    if m.get("not_cliques") or m.get("not_edges"):
+        warnings.append(t("verify.lp.map_outside",
+                          items=len(m.get("not_cliques") or []),
+                          rows=len(m.get("not_edges") or [])))
+    return ([(t("verify.lp.map"), not problems, detail)], warnings)
 
 
 def _check_dual_selection(A, b, c, y, p, sel):
@@ -5457,6 +5528,31 @@ def _verify_entries_and_stats(p, limits) -> list:
     checks = []
     entries = p.get("entries", [])
     with_cert = [e for e in entries if e.get("cert")]
+    # A certificate stored for an item has to be ABOUT that item. Verifying
+    # it alone checks that it is a true statement about something; for a
+    # cover of a graph's edges the something is recoverable -- the entry's id
+    # is the graph -- so it is compared, and a partition of another graph
+    # stored under this one fails here instead of passing.
+    about = [e for e in with_cert
+             if (e["cert"].get("kind") == "exact_cover"
+                 and (e["cert"].get("payload") or {}).get("cliques"))]
+    if about and "family_graph6" in p:
+        from .cover import _key
+        from .graphs import Graph
+
+        wrong = []
+        for e in about:
+            try:
+                g = Graph.from_graph6(_entry_id(e))
+                want = {_key(x) for x in g.edges()}
+                got = {_key(x) for x in e["cert"]["payload"]["universe"]}
+                if want != got:
+                    wrong.append(_entry_id(e))
+            except (ValueError, KeyError, TypeError, IndexError):
+                wrong.append(_entry_id(e))
+        checks.append((t("verify.sweep.entry_subject"), not wrong,
+                       t("verify.sweep.entry_subject_detail", n=len(about),
+                         names=", ".join(wrong[:3]) or "-")))
     if with_cert:
         bad = [_entry_id(e) for e in with_cert
                if not verify(Certificate.from_dict(e["cert"]), limits).ok]

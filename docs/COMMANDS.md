@@ -352,6 +352,7 @@ mathematically false, say so with `--wrong`.
     certo report opt spec.py --target 5
     certo report --wrong --certificate out/claim.json
     certo report --coverage cases spec.py
+    certo report --stderr run.err parametric spec.py
 
 **The triage is the point.** Almost every report this project received could
 not say whose fault a failure was: an adapter's error that was certo's, a
@@ -372,6 +373,15 @@ away, and concludes, with the evidence for each:
 to the spec, **skipping library frames**: if certo hands numpy something
 malformed and numpy raises, that is certo's; if the spec calls a library that
 raises, that is the spec's.
+
+**A run that already died.** A native crash takes the process with it, and a
+hang stopped by `--deadline` cannot be re-run in-process, so for those two the
+evidence is the stderr they left. `--stderr FILE` reads the stack dump
+(`faulthandler` prints one for both) and says what kind of stop it was: a
+native crash, a `--deadline` stop, or the C-level watchdog behind it. It then
+labels every frame as certo's, the spec's, a library's, or the interpreter's
+**start-up**. A death in the start-up, in a `.pth` hook before any certo code
+ran, is triaged `environment`, and the file goes into the folder.
 
 **Nothing is sent.** The folder includes your spec, which may be unpublished
 mathematics, so what gets shared is your decision after reading it. Home paths
@@ -414,7 +424,17 @@ between `certo --version` and the version `pip` has recorded.
 
 `certo doctor --register-mcp` registers the MCP server in `.mcp.json`, merging
 rather than replacing, and checks that it starts. It writes the one in the
-current directory unless `--mcp-path FILE` names another.
+current directory unless `--mcp-path FILE` names another. With `--venv DIR`
+the server starts with that virtual environment's interpreter. Before writing
+anything, certo checks that the venv can import `certo` and `mcp`, and that it
+runs no start-up hook known to kill interpreters (`pip_system_certs` among
+them), whether its own or inherited through `--system-site-packages`. It
+creates nothing: the venv is yours to make. The path it writes is absolute, so
+that `.mcp.json` becomes this machine's.
+
+The `cbc` row matters with PuLP 4, which no longer bundles CBC. Without
+`pulp[cbc]`, integer solves fall to HiGHS if it is installed and are refused
+otherwise, and `pulp` alone never said so.
 
 ---
 
@@ -507,6 +527,12 @@ What it does **not** check is which cliques belong in the family, or the
 capacities. That is the job of your own reconstruction of the problem, and
 it is worth keeping independent of certo; `verify` repeats this limit in its
 warnings.
+
+Items that are not cliques, or resources that are not edges (a radial item, a
+vertex capacity), are declared with `not_cliques=[...]` and `not_edges=[...]`.
+Declared, they are left out of the map, the rest is checked exactly as
+strictly, and every verification says how many were left out. Undeclared, they
+are refused exactly as before.
 
 `--gap` on a `PackingSpec` reports `mu*` (the relaxation), `nu` (the integer
 value achieved), and the distance between them, as **one** artefact rather
@@ -849,15 +875,24 @@ spec's claim.
     CliqueLPSpec(edges=[(0, 1), (0, 2), (1, 2), (2, 3)],
                  problem="partition", weight={"constant": 1}, min_size=2)
 
-One column per clique `Q` with `|Q| >= min_size`, one row per edge, and a
-weight linear in the counts: `w(Q) = a|E(Q)| + b|Q| + c` from `weight`
+One column per clique `Q` with `|Q| >= min_size` (and `|Q| <= max_size` when
+given: only edges and triangles, say), one row per edge, and a weight linear
+in the counts: `w(Q) = a|E(Q)| + b|Q| + c` from `weight`
 `{edges, vertices, constant}`.
+
+**A partition that cannot exist is certified too.** With `min_size > 2` the
+edges are no longer columns, and a partition may not exist. A phase one
+decides it: one artificial column per edge, and columns generated the same
+way. If its optimum is positive, its dual is a Farkas vector `y` with
+`r·y > 0` and no allowed clique summing above zero on it. The verifier
+checks that second part by rerunning the pricing search over the whole
+family, and the answer is `UNSATISFIABLE` with that certificate.
 
 | `problem` | Program |
 |---|---|
 | `packing` | max `Σ w(Q) x_Q`, each edge's load `<= rhs` |
 | `cover` | min, each edge's load `>= rhs` |
-| `partition` | min, each edge's load `= rhs` (needs `min_size <= 2`) |
+| `partition` | min, each edge's load `= rhs`; with `min_size > 2` it may be infeasible, and that is certified |
 
 **Why it needs its own certificate.** `opt` certifies an LP whose columns it
 was given. Here the columns are implicit, and the LP that gets solved holds
@@ -1184,8 +1219,18 @@ exactly — no reparametrisation of a bounded interval into a ray.
 not enough; the certificate records the splits and `verify` recomputes every
 leaf. `dual="bernstein"` with `dual_degree=k` has certo **find** a polynomial
 dual: its Bernstein coefficients are the unknowns of one exact LP whose
-constraints are the residuals' coefficients. `box` with `region` is refused
-for now. See `examples/parametric_box.py`.
+constraints are the residuals' coefficients. See `examples/parametric_box.py`.
+
+**A box cut by a region.** With `region=[(name, g), ...]` as well, a residual
+only has to be non-negative where every `g ≥ 0`. certo writes it as
+`Σ λ·g + s`, where the `λ ≥ 0` are constants on the conditions and their
+pairwise products, and `s` has non-negative Bernstein coefficients on the
+box. The `λ` are found by an exact LP and stored in the leaf, and `verify`
+subtracts them and reads the signs. With `dual="bernstein"` the same `λ`
+join the dual's own LP, so certo finds a dual that leans on the region. The
+multipliers are constants, not polynomials, and a region leaf is not
+subdivided. The region is still scope, not something proved, and every
+verification repeats it.
 
 **One dual per box.** With `dual="bernstein"` and `subdivide=d`, certo finds a
 dual on the box and, where there is none — or it misses the `claim` — halves
@@ -1328,6 +1373,19 @@ Those two caveats are independent, and the banner names which level you got:
 
 A green banner over eleven thousand unchecked booleans is where the old
 phrasing did the most damage: there is no counterexample to go and look at.
+
+**Certified in one line, for a clique partition.** A predicate whose YES is
+"these vertex sets split the edges into at most `k` cliques" returns
+
+    return Outcome.clique_partition(g, parts, at_most=k)
+
+and `cover` checks it. The certificate travels with the item, and `verify`
+checks that each stored cover is a cover of **its own** graph's edges, so a
+partition filed under the wrong graph fails. A partition that does not work
+(a part that is not a clique, a missed edge, too many parts) makes that item
+**inconclusive**, not a counterexample: another partition might work, and a
+partition refutes nothing. With `--cert-all` every YES keeps its certificate,
+and the sweep reaches the **certified** level.
 
 `--witnesses` decomposes the counterexamples into orbits under a symmetry you
 declare. `--collect` measures instead of refuting, in exact rationals.

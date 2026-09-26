@@ -251,14 +251,23 @@ def certify(spec) -> dict:
     depth = int(getattr(spec, "subdivide", 0) or 0)
     trees = {"dual": {}, "columns": {}, "primal": {}, "rows": {}, "claim": None}
     terms_box = []
+    # A box CUT by the region: its conditions, unshifted, for multipliers in
+    # the Bernstein basis.
+    cut = []
+    if box is not None and getattr(spec, "region", None):
+        from . import bernstein as _B
+        cut = _B.region_terms([(str(n), P(g)) for n, g in spec.region])
 
     def nn(poly, degrees=None):
         """`(ok, shifted, used, remainder, tree)` -- on the box when there is
         one, by the shift test otherwise."""
         if box is not None:
             from . import bernstein
-            ok, tree = bernstein.nonneg(poly, box, depth, degrees)
-            return ok, poly, {}, poly, tree
+            ok, tree = bernstein.nonneg_region(poly, box, cut, depth, degrees)
+            used = {k: Fraction(v) for k, v in
+                    ((tree or {}).get("region") or {}).items()} \
+                if isinstance(tree, dict) else {}
+            return ok, poly, used, poly, tree
         ok, sh, used, rem = nonneg_on_region(poly, spec.parameters,
                                              terms_box[0] if terms_box else [])
         return ok, sh, used, rem, None
@@ -279,7 +288,8 @@ def certify(spec) -> dict:
             # each half. `subdivide` with a GIVEN dual halves where that one
             # dual's coefficients fall short; here each leaf gets its own.
             return _certify_pieces(spec, box, depth)
-        y, hints = _find_dual_bernstein(spec, P, ring, box, minimising, free)
+        y, hints = _find_dual_bernstein(spec, P, ring, box, minimising, free,
+                                        cut)
     else:
         y = {n: P(v) for n, v in spec.dual.items()}
     senses = {n: s for n, _, s, _ in spec.constraints}
@@ -464,8 +474,6 @@ def _box_of(spec, ring):
         return None
     from . import bernstein
 
-    if getattr(spec, "region", None):
-        raise NotParametric(_t("param.box_region"))
     try:
         return bernstein.parse_box(raw, ring)
     except bernstein.NotABox as e:
@@ -491,7 +499,7 @@ def _trees_text(trees):
     return out
 
 
-def _find_dual_bernstein(spec, P, ring, box, minimising, free):
+def _find_dual_bernstein(spec, P, ring, box, minimising, free, cut=()):
     """A polynomial dual of degree `dual_degree` per parameter, found by ONE
     exact LP over its Bernstein coefficients on the box.
 
@@ -532,7 +540,17 @@ def _find_dual_bernstein(spec, P, ring, box, minimising, free):
         deg_a = [B.degrees_of(a) for _i, a in entries] or [(0,) * len(ring)]
         top = tuple(max(d[j] for d in deg_a) + k[j] for j in range(len(ring)))
         D = tuple(max(t, o) for t, o in zip(top, B.degrees_of(obj)))
+        # With a region the column may lean on its conditions: one more
+        # non-negative unknown per term, and the degree high enough for them.
+        lean = cut if var not in free else ()
+        for _tn, g in lean:
+            D = tuple(max(a, b) for a, b in zip(D, B.degrees_of(g)))
         hints[("column", var)] = list(D)
+        lam = {}
+        for j, (_tn, g) in enumerate(lean):
+            lname = "lam_{}_{}".format(var, j)
+            L.variable(lname, 0, None)
+            lam[lname] = B.coefficients(g, box, D)
         acc = {}
         for i, a in entries:
             da = tuple(D[j] - k[j] for j in range(len(ring)))
@@ -545,6 +563,12 @@ def _find_dual_bernstein(spec, P, ring, box, minimising, free):
         oc = B.coefficients(obj, box, D)
         for gamma in product(*(range(Dj + 1) for Dj in D)):
             coeffs = dict(acc.get(gamma, {}))
+            # A^T y - c - sum lambda g >= 0 (the other way for a minimisation)
+            for lname, gc in lam.items():
+                w = gc.get(gamma, 0)
+                if w:
+                    coeffs[lname] = coeffs.get(lname, 0) + (w if minimising
+                                                            else -w)
             c0 = oc.get(gamma, 0)
             name = "col_{}_{}".format(var, "_".join(map(str, gamma)))
             if var in free:

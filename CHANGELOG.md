@@ -6,6 +6,137 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-09-25
+
+**PuLP 4 supported, a sweep predicate certified in one line, a box cut by a
+region, and a partition that cannot exist proved to be one.** A minor: still
+50 commands and 52 kinds. The additions are optional fields: `max_size` and
+`farkas` on `clique_lp`, `at_most` on `exact_cover`, `not_cliques` and
+`not_edges` inside `lp_dual`'s `map`, and multipliers in a Bernstein leaf.
+On Python 3.12+ the dependency is now `pulp[cbc]`. No existing payload changes
+shape, and certificates from 0.18 verify unchanged.
+
+Checked the other way, against the installed 0.18.0:
+- **It accepts** a `columns` certificate with `max_size`, but only when its
+  dual also closes the unbounded family, so what it reads is true. It also
+  accepts a sweep of clique partitions, without comparing each cover with its
+  graph, which is the check 0.19 adds.
+- **It refuses** the Farkas certificate, a box cut by a region, and a map with
+  declared outside parts. That is the safe direction.
+
+### PuLP 3 and PuLP 4
+
+PuLP 4.0.0 appeared the morning 0.18.0 was tagged, rebuilt in Rust and for
+Python 3.12 and later only, and 0.18.0 bounded it out. It is supported now,
+beside PuLP 3, through five helpers in `engines/lp.py`, the only place either
+is spoken to. Five things changed shape at once:
+- a variable is made by the problem;
+- constraints are looked up by a method;
+- `solve` returns a stats object whose status is an enum;
+- the `LpStatus` table is gone;
+- CBC is no longer bundled.
+
+On Python 3.12+ certo requires `pulp[cbc]`, which brings CBC back through the
+`cbcbox` wheel, and 3.11 keeps PuLP 3. Without CBC, integer solves fall to
+HiGHS, or are refused with a message saying why, and `doctor` has a `cbc` row
+because `pulp` importing no longer means CBC is there.
+
+Two differences only showed up by running the suite on PuLP 4:
+- **"Optimal (within gap tolerance)"**, CBC's own line, is `Optimal` in PuLP 3
+  and `GapLimit` in PuLP 4, so `mixed` reported "no design" for an example that
+  has one. A gap stop *with a solution* keeps PuLP 3's name. Nothing takes a
+  solver's word for optimality anyway; the exact route and branch and bound
+  decide that.
+- **The sign of the duals.** On `max a+b+c` over three `<= 1` rows, whose duals
+  are all +1/2, PuLP 3 gave CBC +1/2 and HiGHS -1/2, and PuLP 4 gives -1/2 for
+  both. The sign is now read from that measurement. Only speed depended on it,
+  since the exact route tries both signs, but a wrong guess sent every solve
+  past its cheapest pass.
+
+And one test was wrong. It called an LP non-degenerate while three of its rows
+were tight at the optimal vertex in the plane. PuLP 3's two solvers happened to
+return the same optimal dual; PuLP 4's return two different ones, both optimal.
+
+The whole suite passes on both versions: 786 tests and 73 examples on PuLP
+3.3.2 in the global Python, and the same on PuLP 4.0.0 in a venv built from
+wheels.
+
+### A sweep predicate certified in one line
+
+`return Outcome.clique_partition(g, parts, at_most=k)`. `cover` checks that
+the vertex sets partition the graph's edges into cliques, and that there are
+no more than `k`. The certificate travels with the item, and with `--cert-all`
+the sweep reaches the certified level. A user had covered their predicate with
+another tool because building this by hand was too much. A partition that does
+not work leaves the item **inconclusive**, never a counterexample: another
+partition might work.
+
+It closed a hole on the way. A certificate stored for a sweep item was verified
+on its own terms, as a true statement about *something*, and never compared
+with the item. A partition of one graph filed under another verified. `verify`
+now checks that every stored cover is a cover of its own entry's graph.
+
+### A box cut by a region
+
+`box` and `region` together were refused. Now a residual only has to be
+non-negative where the conditions hold, and certo writes it as `Σ λ·g + s`:
+constant `λ ≥ 0` on the conditions and their pairwise products, and `s` with
+non-negative Bernstein coefficients on the box. The `λ` come from an exact LP
+and are stored in the leaf, and `verify` subtracts and reads signs. With
+`dual="bernstein"`, the same `λ` become unknowns of the dual's own LP, so certo
+finds a dual that leans on the region. The multipliers are constants, and a
+region leaf is not subdivided.
+
+### `columns`: bounded families, and infeasibility proved
+
+- **`max_size`** limits the cliques from above, for example to edges and
+  triangles only. The pricing search stops growing a clique at that size, and
+  its bound stays valid.
+- **A partition that cannot exist is certified.** With `min_size > 2` a
+  partition need not exist, and that used to be refused. A phase one now
+  decides it with the same column generation. When the answer is no, its dual
+  is a Farkas vector with `r·y > 0` and no allowed clique summing above zero on
+  it, and the verifier reruns the pricing search over the whole family to
+  confirm that second part. K4 minus an edge cannot be split into triangles,
+  and the certificate for that has 12 nodes.
+
+### The part of a packing that is not the graph
+
+A map (`graph=`/`cliques=`/`edges=`) used to be all or nothing, so a packing
+with radial items or vertex capacities could not declare the part that *was* a
+graph. `not_cliques=[...]` and `not_edges=[...]` now name what is outside. The
+rest is checked as strictly as before, and every verification says how much
+was left out.
+
+### Smaller ones
+
+- **`certo report --stderr FILE`** reads the stack dump of a run that already
+  died and says what kind of stop it was: a native crash, a `--deadline` stop,
+  or the C-level watchdog behind it. It labels every frame as certo's, the
+  spec's, a library's, or the interpreter's **start-up**, and a death in the
+  start-up, before any certo code ran, is triaged `environment`.
+- **`certo doctor --register-mcp --venv DIR`** registers the MCP server with
+  that venv's interpreter. Before writing anything it checks that the venv can
+  import `certo` and `mcp` (with `PYTHONPATH` cleared, since the client will
+  not have it) and that it runs no known start-up hook. It creates nothing.
+- **The `proof` kind in the tamper battery**, for the first time. Its first run
+  found a hole: a hypothesis the final step does not name could lose its name,
+  while its formula still entered the step, and the certificate then listed one
+  hypothesis fewer than it rests on. Names and formulas are now tied one to
+  one.
+
+### Read, and measured, rather than built
+
+- **The coverage map, read again.** It holds three lines on this machine, all
+  from before `why` existed, and the users' own maps are on their machines.
+  There is nothing to read yet. The next step is to ask a user for their
+  summary (`certo report --coverage`, or the `coverage` section of
+  `doctor --json`).
+- **Does the support pass help branch and bound?** No. Over about 6 000 node
+  certifications on triangle packings of dense graphs, it ran zero times: the
+  reconstruction ladder or complementary slackness closed every node first.
+  The cost of the 1048-column case is on the ladder.
+
 ## [0.18.0] — 2026-09-25
 
 **Parametric certificates that verify in seconds, a packing that says what

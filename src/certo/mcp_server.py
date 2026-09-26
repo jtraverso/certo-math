@@ -1340,7 +1340,8 @@ async def repro(directory: str | None = None, out: str | None = None,
 async def report(command_line: str | None = None,
                  certificate_path: str | None = None,
                  wrong: bool = False, include_coverage: bool = False,
-                 out: str | None = None) -> dict:
+                 out: str | None = None,
+                 stderr_path: str | None = None) -> dict:
     import shlex
 
     from . import report as _report
@@ -1350,7 +1351,9 @@ async def report(command_line: str | None = None,
         argv = argv[1:]
     dest = str(_resolve(out)) if out else None
     cert = str(_resolve(certificate_path)) if certificate_path else None
-    info = await _off(_report.build, argv, cert, wrong, include_coverage, dest)
+    err = str(_resolve(stderr_path)) if stderr_path else None
+    info = await _off(_report.build, argv, cert, wrong, include_coverage, dest,
+                      err)
     info["note"] = ("nothing has been sent; the folder includes the spec, "
                     "so ask the person before sharing any of it")
     return info
@@ -1629,7 +1632,9 @@ async def semigroup(spec_path: str | None = None, spec_source: str | None = None
     "which the verifier RERUNS, so there is no oracle to trust. Weak duality "
     "then proves the optimum over all cliques. Use it where listing the "
     "cliques for `opt` is too many; for a few hundred, `opt` is as fast. "
-    "partition needs min_size <= 2."))
+    "`max_size` bounds the family from above (only edges and triangles, "
+    "say). A partition with min_size > 2 may be infeasible: that is then "
+    "PROVED, by a Farkas vector whose pricing search the verifier reruns."))
 @_guard
 async def columns(spec_path: str | None = None, spec_source: str | None = None,
                   timeout_ms: int = 60_000) -> dict:

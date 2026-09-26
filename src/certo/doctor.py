@@ -520,6 +520,21 @@ def _installed_metadata():
                     versions=", ".join(leftover))
 
 
+def _cbc():
+    """CBC, which every INTEGER solve starts from. PuLP 3 bundles it; PuLP 4
+    does not, and finds it only through `pulp[cbc]` or the PATH -- so an
+    install that has PuLP can still have no CBC, which `pulp` alone never
+    said."""
+    import pulp
+
+    version = getattr(pulp, "__version__", "?")
+    if hasattr(pulp, "PULP_CBC_CMD"):
+        ok = bool(pulp.PULP_CBC_CMD(msg=0).available())
+    else:
+        ok = bool(pulp.COIN_CMD(msg=False).available())
+    return ok, "PuLP {}".format(version)
+
+
 CHECKS = [
     ("startup", False, _startup),
     ("install", False, _partial_install),
@@ -529,6 +544,7 @@ CHECKS = [
                               sys.version.split()[0])),
     ("z3", True, _z3_version),
     ("pulp", True, lambda: _module("pulp")),
+    ("cbc", False, _cbc),
     ("mcp", False, lambda: _module("mcp")),
     ("flint", False, _flint),
     ("mpmath", False, lambda: _module("mpmath")),
@@ -670,14 +686,87 @@ def mcp_entry(python=None) -> dict:
 MCP_ENTRY = mcp_entry()
 
 
-def register_mcp(path=None) -> dict:
+def venv_python(venv) -> Path:
+    """The interpreter of a virtual environment, by the layout each OS uses."""
+    import os
+
+    v = Path(venv)
+    return v / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def check_venv(venv) -> dict:
+    """Can this venv run certo's MCP server, and does it avoid the start-up
+    hooks this project measured killing interpreters? Nothing is installed or
+    created: a venv is the user's to make. Returns `{ok, python, problems,
+    warnings}`."""
+    import glob
+    import os
+    import subprocess
+
+    py = venv_python(venv)
+    out = {"ok": False, "python": str(py), "problems": [], "warnings": []}
+    if not py.exists():
+        out["problems"].append(t("doctor.venv.no_python", path=str(py)))
+        return out
+    try:
+        # Without PYTHONPATH: the client that starts the server will not
+        # have this shell's, and a check that imports certo from a checkout
+        # on the path would pass for a venv that cannot run it.
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        run = subprocess.run(
+            [str(py), "-c", "import certo, mcp; print(certo.__version__)"],
+            capture_output=True, text=True, timeout=120, env=env,
+            encoding="utf-8", errors="replace")
+        if run.returncode != 0:
+            out["problems"].append(t("doctor.venv.no_certo",
+                                     detail=((run.stderr or "").strip()
+                                             .splitlines() or ["?"])[-1]))
+        else:
+            out["version"] = run.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        out["problems"].append(t("doctor.venv.no_start", detail=str(e)))
+    # The hooks the venv would run: its own site-packages, and the global
+    # ones too if it was made with --system-site-packages.
+    cfg = Path(venv) / "pyvenv.cfg"
+    try:
+        inherits = "include-system-site-packages = true" in \
+            cfg.read_text(encoding="utf-8", errors="replace").lower()
+    except OSError:
+        inherits = False
+    own = [os.path.basename(f) for f in
+           glob.glob(str(Path(venv) / "Lib" / "site-packages" / "*.pth"))
+           + glob.glob(str(Path(venv) / "lib" / "python*" / "site-packages" / "*.pth"))]
+    risky = sorted(set(own) & KNOWN_START_HOOKS)
+    if risky:
+        out["warnings"].append(t("doctor.venv.hook", names=", ".join(risky)))
+    if inherits:
+        inherited = sorted(set(_startup_hooks()) & KNOWN_START_HOOKS)
+        if inherited:
+            out["warnings"].append(t("doctor.venv.inherits",
+                                     names=", ".join(inherited)))
+    out["ok"] = not out["problems"]
+    return out
+
+
+def register_mcp(path=None, venv=None) -> dict:
     """Write `.mcp.json`, merging rather than replacing.
 
     Replacing would drop every other server the project has registered, which
     is a rude thing for a diagnostic command to do.
+
+    With `venv`, the server starts with THAT interpreter -- an absolute path,
+    so the file becomes this machine's -- after checking it can: a server
+    registered with an interpreter that cannot import certo fails in the
+    client, far from the command that wrote it.
     """
     import json
 
+    checked = None
+    if venv is not None:
+        checked = check_venv(venv)
+        if not checked["ok"]:
+            return {"written": False, "path": str(path or ".mcp.json"),
+                    "detail": "; ".join(checked["problems"]), "venv": checked}
     p = Path(path or (Path.cwd() / ".mcp.json"))
     existing = {}
     if p.exists():
@@ -687,7 +776,7 @@ def register_mcp(path=None) -> dict:
             return {"written": False, "path": str(p),
                     "detail": t("doctor.mcp.bad_json", path=str(p))}
 
-    entry = mcp_entry()["mcpServers"]["certo"]
+    entry = mcp_entry(checked["python"] if checked else None)["mcpServers"]["certo"]
     servers = dict(existing.get("mcpServers") or {})
     already = servers.get("certo") == entry
     # An entry written by an older certo names the `certo-mcp` shim, which is
@@ -697,5 +786,8 @@ def register_mcp(path=None) -> dict:
     servers["certo"] = entry
     existing["mcpServers"] = servers
     p.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
-    return {"written": True, "path": str(p), "already": already,
-            "servers": sorted(servers)}
+    out = {"written": True, "path": str(p), "already": already,
+           "servers": sorted(servers)}
+    if checked is not None:
+        out["venv"] = checked
+    return out

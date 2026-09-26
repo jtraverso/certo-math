@@ -110,22 +110,16 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P1** | Port to PuLP 4 | **S-M** | **low** | med | 4.0.0 (2026-09-25, Python >= 3.12) removed `LpVariable(lowBound=)` and `PULP_CBC_CMD`; 0.18.0 bounds `pulp<4` so nothing broke on release. The port touches every PuLP call in `engines/lp.py`, `mixed`, `bb` and the HiGHS route's fallback. A bound is a date, not a fix: new Python versions will only get 4 |
+| **P2** | The coverage map, from a USER'S machine | **S** | **high** | low | read again in this cycle: three lines here, none with `why`, and the users' maps live on their machines. The step is asking for one -- `certo report --coverage` or `doctor --json` -- not code |
+| **P2** | Polynomial multipliers for a region on a box, and region leaves that subdivide | **M** | **low** | med | box + region landed with CONSTANT multipliers on the conditions and their products, on the whole box. A residual that needs `p * g` or a split first is not certified yet |
+| **P3** | Other implicit column families: stars, independent sets, and a generic pricing hook | **L** | **low** | med | `columns` gained `max_size` and a Farkas certificate for an infeasible partition; which OTHER family is wanted was never said, and the pricing bound is per family |
+| **P3** | The support pass FIRST on a branch-and-bound node? | **S** | **low** | low | measured: over ~6 000 node certifications it never ran -- the ladder closes every node. Whether two eliminations beat the ladder's 11 `check_lp` on the 1048-column case is the question left, and it belongs to the P2 row on that instance |
 | **P3** | A parametric row's polynomials by size, not in full | **S** | **high** | low | **a schema decision, not code**: `rows[*].residual`/`shifted` are most of a large `parametric_bound` once it is written compact, and no verifier -- 0.17 included -- reads them. Dropping them past a size is a REMOVAL under the freeze, so it was built, measured, and taken out of 0.18.0 before release. Needs either the freeze rule widened for never-read descriptive copies, or `SCHEMA_VERSION` 5 |
-| **P3** | The map for items that are not cliques | **S-M** | med | low | `graph=`/`cliques=`/`edges=` is all or nothing: every item must be a clique and every resource an edge. A packing that mixes cliques with other items (vertex resources, radials) cannot declare the part that is a graph yet |
-| **P3** | The `proof` kind in the adversarial suite | **S** | **high** | low | it is not in it, and a tamper of its `assumptions` goes uncaught. Found while adding cited lemmas; the verifier re-checks what it is given, but nothing mutates it systematically |
-| **P3** | Does the support pass help branch and bound? | **S** | **low** | low | `exact.certify` now solves on the float solution's support before the exact simplex -- 97 s to under 1 on a Bernstein dual. Not measured on the 1048-column tree, whose cost is 11 `check_lp` a node on the ladder, before that pass |
-| **P3** | `certo report` recognises a native-crash trace and a deadline dump in stderr, and triages them | **S** | med | low | both now print a stack; triage should say which frames are certo's, which a library's, and which the interpreter's start-up |
 | **P2** | Branch and bound on 1048 columns: the exact check's reconstruction ladder, and the frontier certificate | **M** | med | med | sparse end to end landed and the instance still does not finish in 20 minutes (99 nodes). Measured: `check_lp` runs 11 times a node -- every denominator rung times three sign variants of the dual, each checked in full -- about 3.5 s a node; and building the frontier certificate at the stop serialises the whole system, 40 million `serialize` calls, about 190 s |
-| **P3** | `doctor --register-mcp --venv`: register the MCP server with a venv's interpreter | **S** | med | low | the global interpreter on a machine with a start-up hook dies at 7-12% of starts under load; an MCP server started by it inherits that |
-| **P2** | `box` together with `region`: multipliers for Bernstein coefficients | **M** | **low** | med | refused for now; the region's multipliers are found for the shift test on a ray |
 | **P2** | Covering a parameter domain: N boxes cover a semialgebraic set, and N parametric certificates aggregate into one statement | **L** | **low** | med | coverage is audited by a user's own scripts today -- exact tiling, delta coverage, boundaries -- over ~2 000 boxes in THREE coordinate charts, plus regions covered by external lemmas. `CoverSpec` for parameter domains, with the charts and the cited lemmas as part of what is checked |
-| **P2** | A `sweep` predicate certified in one line: a partition returned by the predicate, checked by `cover`, and `predicate_certified` set | **M** | med | med | a user covered the predicate with another tool because building the certificate by hand was too much |
-| **P2** | Column generation beyond cliques: other implicit families, and a Farkas certificate for an infeasible partition | **L** | **low** | med | `columns` shipped for cliques; the pricing is the part that has to be exact for each family |
 | **P2** | A certified integer UPPER bound for packings -- **re-measure first** | **L** | **low** | med | branch and bound became 40 to 60 times faster on a user's instances; it may already be the answer |
 | **P2** | Branch-and-bound trees to Lean; a small finite `sweep` to Lean by `decide` | **L** | **low** | med | two users asked. The risk is the scaffolding, which is what removed the last structured exporter |
 | **P2** | Chvatal-Gomory cuts with their multipliers in the certificate; symmetry in branching; warm start | **L** | med | med | on small instances a node now costs ~30 ms; this is what is left of the throughput gap after the P1 row above |
-| **P2** | The coverage map, read again once `why` has accumulated | **S** | **high** | low | the first reading found the instrument could not say which gap; it now records the message key |
 | **P2** | Chow ring and toric intersection | **L** | **low** | none | route space, but depth-shaped: an engine, not a checker. See the breadth/depth split above |
 | **P3** | Semialgebraic regions: polynomial multipliers (bounded Putinar), equality constraints, and boxes whose boundary is a curve | **L** | **low** | med | `region` multipliers are constants and products of pairs. A user's parameters live on a surface and needed three rational charts found by hand -- a blow-up at the apex, a projection from a point of the conic -- and boxes cut by a curve (`k1 = 0`, `x1 = 0`, `gamma0 = 1/10`) still leave slivers |
 | **P3** | The minimum over a family of an arbitrary certified leaf -- an LP, an inertia, a count | **M-L** | **low** | med | `family` maximises over explicit LPs only |
@@ -401,6 +395,14 @@ the cost is being paid somewhere else.
 | Parametric certificates: size and verification time | **0.18.0** -- measured on synthetic instances: `verify` 19 s to 2.4 s (`shift` was quadratic), the Bernstein dual 101 s to 2.3 s (an exact solve on the float support), files past 1 MB written compact. The users' own instances were not at hand; re-measure on one |
 | Certify the map: which clique a row is, which edge a capacity is | **0.18.0** -- the narrow half: declared on `PackingSpec`, refused by name, rechecked against the certificate's matrix. The family and the capacities stay with the user's auditor |
 | `--gap` and `mixed` kept a packing's loads | **0.18.0** -- both copies had listed their fields and left `loads` out |
+| PuLP 3 and PuLP 4, behind five helpers; `pulp[cbc]` on Python 3.12+ | **0.19.0** -- two differences only the suite found: CBC's gap-tolerance line, and the sign of both solvers' duals |
+| A sweep predicate certified in one line: `Outcome.clique_partition` | **0.19.0** -- and stored covers are now checked against their own entry's graph, which was a hole |
+| `box` together with `region`: constant multipliers in the Bernstein basis | **0.19.0** -- also inside the `dual="bernstein"` LP |
+| `columns`: `max_size`, and a Farkas certificate for a partition that cannot exist | **0.19.0** |
+| The part of a packing that is not the graph: `not_cliques=`, `not_edges=` | **0.19.0** |
+| `certo report --stderr`: a native crash or deadline dump, frame by frame | **0.19.0** |
+| `doctor --register-mcp --venv DIR`, checked before written | **0.19.0** |
+| The `proof` kind in the tamper battery | **0.19.0** -- it found a hypothesis that could lose its name |
 | A GitHub Release per tag, from `publish.yml` | **0.15.0** -- the release job, and the ten missing ones created by hand |
 | The project page stating its version and naming new commands | **0.15.0** -- tied to `__version__` by a test |
 | **The facets of a cone behind `semigroup`** | pycddlib, `certo[polyhedra]`, **0.17.0** -- gradings for 140 of 140 pointed cones against 77, and `pointed: false` now needs a zero combination |
@@ -980,12 +982,13 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.18.0**, with **52 certificate kinds**. The certificate schema
+Current: **0.19.0**, with **52 certificate kinds**. The certificate schema
 has been **frozen** since 0.4.0 and `SCHEMA_VERSION` is still 4: everything
 since has been a new kind, an optional field, or a command that emits no
 certificate. Among the optional fields added under the freeze: `loads`,
-`declared` and `relative`, and in 0.18.0 `dual_selection`, `map` and a
-lemma's `cited`.
+`declared` and `relative`, in 0.18.0 `dual_selection`, `map` and a
+lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
+and `not_edges`.
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

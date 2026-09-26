@@ -118,6 +118,135 @@ def _origin(tb_frames, spec_path) -> str:
     return "other"
 
 
+# ---------------------------------------------------------------------------
+# a run that already died: its stderr, read
+# ---------------------------------------------------------------------------
+#
+# `rerun` reproduces a failure in-process, which is no use for the two that
+# matter most on a loaded machine: a NATIVE crash, which takes the process
+# with it, and a hang stopped by `--deadline`. Both now print every thread's
+# stack to stderr (`faulthandler`), and this reads that text back: what kind
+# of stop it was, and for each frame whose code it is -- certo's, the spec's,
+# a library's, or the interpreter's own START-UP, which is where the silent
+# deaths on this project's machine were, before any certo code ran.
+
+_FRAME = re.compile(r'^\s*File "(?P<file>[^"]+)", line (?P<line>\d+) in (?P<func>.+?)\s*$')
+_THREAD = re.compile(r"^(?P<current>Current thread|Thread) (?P<id>0x[0-9a-fA-F]+)")
+_FATAL = re.compile(r"^(Fatal Python error: .+|Windows fatal exception: .+)$")
+_DEADLINE = re.compile(r"--deadline .*\((exit|salida) 2")
+_WATCHDOG = re.compile(r"^Timeout \(\d+:\d\d:\d\d(\.\d+)?\)!")
+_STARTUP = re.compile(r"(^|[\\/])(site|sitecustomize|usercustomize)\.py$"
+                      r"|\.pth\b|pip_system_certs|truststore|<frozen site>")
+_LIBRARY = re.compile(r"[\\/](site|dist)-packages[\\/](?P<pkg>[^\\/]+)")
+_STDLIB = re.compile(r"[\\/]Lib[\\/][^\\/]+\.py$|[\\/]lib[\\/]python3[^\\/]*[\\/]"
+                     r"|^<frozen ")
+
+
+def _owner(path, spec_name=None) -> str:
+    """Whose code a frame is: `certo`, `spec`, `startup`, `library:<pkg>`,
+    `python`, or `other` -- read off the path, which may be another
+    machine's, so nothing here resolves it."""
+    if spec_name and path.replace("\\", "/").rsplit("/", 1)[-1] == spec_name:
+        return "spec"
+    if _STARTUP.search(path):
+        return "startup"
+    lib = _LIBRARY.search(path)
+    if lib and not lib.group("pkg").lower().startswith("certo"):
+        return "library:" + lib.group("pkg").split("-")[0].split(".")[0]
+    if re.search(r"[\\/]certo[\\/]", path):
+        return "certo"
+    if _STDLIB.search(path):
+        return "python"
+    return "other"
+
+
+def parse_trace(text, spec_name=None) -> dict:
+    """The stop a stderr describes, and every thread's frames with owners.
+
+    `kind` is `native_crash`, `deadline`, `watchdog` (the C-level timer
+    behind `--deadline`, for a native call that never gave the interpreter
+    back), or None when the text holds no dump at all. Frames are listed
+    innermost first, the order `faulthandler` prints them.
+    """
+    kind, fatal, threads, cur = None, None, [], None
+    for raw in (text or "").splitlines():
+        line = raw.rstrip()
+        m = _FATAL.match(line.strip())
+        if m:
+            kind, fatal = "native_crash", m.group(1)
+            continue
+        if kind is None and _DEADLINE.search(line):
+            kind = "deadline"
+            continue
+        if kind is None and _WATCHDOG.match(line.strip()):
+            kind = "watchdog"
+            continue
+        m = _THREAD.match(line.strip())
+        if m:
+            cur = {"id": m.group("id"),
+                   "current": m.group("current") == "Current thread",
+                   "frames": []}
+            threads.append(cur)
+            continue
+        m = _FRAME.match(line)
+        if m and cur is not None:
+            cur["frames"].append({"file": m.group("file"),
+                                  "line": int(m.group("line")),
+                                  "func": m.group("func"),
+                                  "owner": _owner(m.group("file"), spec_name)})
+    return {"kind": kind if threads or kind else None, "fatal": fatal,
+            "threads": threads}
+
+
+def _where(frames) -> str:
+    """`owner file:line in func` for the innermost frame, and the innermost
+    frame of certo's own beneath it when that is not the same one."""
+    if not frames:
+        return "no frames"
+
+    def one(f):
+        name = f["file"].replace("\\", "/").rsplit("/", 1)[-1]
+        return "{} {}:{} in {}".format(f["owner"], name, f["line"], f["func"])
+    out = one(frames[0])
+    mine = next((f for f in frames if f["owner"] == "certo"), None)
+    if mine is not None and mine is not frames[0]:
+        out += ", called from " + one(mine)
+    return out
+
+
+def trace_signal(trace):
+    """`(category, detail)` for a parsed stderr, or None when it has no dump."""
+    if not trace or not trace.get("kind"):
+        return None
+    threads = trace["threads"]
+    main = next((th for th in threads if th["current"]), None) \
+        or (threads[0] if threads else {"frames": []})
+    frames = main["frames"]
+    owners = {f["owner"] for th in threads for f in th["frames"]}
+    where = _where(frames)
+    in_startup = any(f["owner"] == "startup" for f in frames)
+    stop = {"native_crash": "a native crash ({})".format(trace.get("fatal") or "?"),
+            "deadline": "stopped by --deadline",
+            "watchdog": "stopped by the C-level watchdog behind --deadline: a "
+                        "native call never gave the interpreter back"}[trace["kind"]]
+    if in_startup and "certo" not in {f["owner"] for f in frames}:
+        return ("environment",
+                "{} in the interpreter's START-UP, before any certo code ran: "
+                "{}. A `.pth` hook runs at every start; `certo doctor` names "
+                "the ones known to do this".format(stop, where))
+    if frames and frames[0]["owner"] == "certo" and trace["kind"] == "native_crash":
+        return ("certo-bug?", "{} with certo's own code innermost: {}".format(
+            stop, where))
+    if frames and frames[0]["owner"] == "spec":
+        return ("spec", "{} in the spec's own code: {}".format(stop, where))
+    libs = sorted(o.split(":", 1)[1] for o in owners if o.startswith("library:"))
+    return ("undetermined",
+            "{}; the main thread was in {}{}".format(
+                stop, where,
+                " (libraries on the stack: {})".format(", ".join(libs))
+                if libs else ""))
+
+
 def rerun(argv) -> dict:
     """Run a certo command in-process and keep what `main` would throw away.
 
@@ -168,9 +297,12 @@ def rerun(argv) -> dict:
 
 
 def triage(run=None, cert=None, wrong=False, doctor_report=None,
-           lint_report=None) -> dict:
+           lint_report=None, trace=None) -> dict:
     """Every signal, then a headline. Evidence travels with each."""
     signals = []
+    sig = trace_signal(trace)
+    if sig is not None:
+        signals.append(sig)
 
     res = (run or {}).get("result")
     if res is not None and res.meta.get("self_check") == "FAILED":
@@ -285,11 +417,22 @@ def auto_dir() -> Path:
 
 
 def build(argv=None, cert_path=None, wrong=False, with_coverage=False,
-          out=None) -> dict:
-    """Run, triage, write the folder. Returns what it found and where it put it."""
+          out=None, stderr_path=None) -> dict:
+    """Run, triage, write the folder. Returns what it found and where it put it.
+
+    `stderr_path` is the stderr of a run that already died -- a native crash
+    or a `--deadline` stop cannot be reproduced in-process, and its dump is
+    the evidence."""
     from . import __version__, doctor
 
     run = rerun(argv) if argv else None
+    stderr_text, trace = None, None
+    if stderr_path:
+        stderr_text = Path(stderr_path).read_text(encoding="utf-8",
+                                                  errors="replace")
+        spec_arg = next((a for a in (argv or []) if a.endswith(".py")), None)
+        trace = parse_trace(stderr_text,
+                            Path(spec_arg).name if spec_arg else None)
     cert = None
     if cert_path:
         from .certificate import Certificate
@@ -307,7 +450,7 @@ def build(argv=None, cert_path=None, wrong=False, with_coverage=False,
             lint_report = None
 
     tri = triage(run=run, cert=cert, wrong=wrong, doctor_report=doc,
-                 lint_report=lint_report)
+                 lint_report=lint_report, trace=trace)
     command = (argv[0] if argv else "")
 
     folder = Path(out) if out else Path.cwd() / "certo-report-{}-{}".format(
@@ -343,6 +486,10 @@ def build(argv=None, cert_path=None, wrong=False, with_coverage=False,
     if cert is not None:
         write("certificate_given.json", json.dumps(cert.to_dict(), indent=2,
                                                    ensure_ascii=False))
+    if stderr_text is not None:
+        write("stderr_given.txt", redact(stderr_text))
+        write("trace.json", redact(json.dumps(trace, indent=2,
+                                              ensure_ascii=False)))
     spec_copied = None
     if spec and Path(spec).exists():
         spec_copied = "spec_" + Path(spec).name

@@ -34,6 +34,82 @@ from ..status import Result, Status, Verdict
 
 ENGINE = "pulp/CBC"
 
+
+# ---------------------------------------------------------------------------
+# PuLP 3 and PuLP 4, behind one surface
+# ---------------------------------------------------------------------------
+#
+# PuLP 4.0.0 (2026-09-25) rebuilt the modeller in Rust, and five things this
+# file used changed shape at once: a variable is made by the PROBLEM
+# (`prob.add_variable`), not by `LpVariable(...)`; `prob.constraints` is a
+# method returning a list, not a dict by name; `solve` returns a stats object
+# whose `status` is an enum, and the `LpStatus` table is gone; and CBC is no
+# longer bundled -- `PULP_CBC_CMD` is gone, `COIN_CMD` finds a binary from
+# the optional `cbcbox` wheel or the PATH. PuLP 4 needs Python 3.12, so 3.11
+# keeps PuLP 3, and both are supported rather than one pinned: these five
+# helpers are the only places either is spoken to.
+
+_STATUS_NAMES = {0: "Not Solved", 1: "Optimal", -1: "Infeasible",
+                 -2: "Unbounded", -3: "Undefined"}
+
+
+def _new_var(prob, name, lo=0, hi=None, cat=None):
+    cat = pulp.LpContinuous if cat is None else cat
+    if hasattr(prob, "add_variable"):                     # PuLP 4
+        return prob.add_variable(name, lowBound=lo, upBound=hi, cat=cat)
+    return pulp.LpVariable(name, lowBound=lo, upBound=hi, cat=cat)
+
+
+def _constraint(prob, name):
+    if hasattr(prob, "get_constraint_by_name"):           # PuLP 4
+        return prob.get_constraint_by_name(name)
+    return prob.constraints.get(name)
+
+
+def _solve(prob, solver) -> str:
+    """The solve, and why it stopped, as PuLP 3 named it. A stop PuLP 3 had
+    no name for -- a time or node limit -- keeps PuLP 4's, and is not
+    "Optimal", which is all the callers ask."""
+    out = prob.solve(solver)
+    code = getattr(out, "status", out)
+    # CBC's own line "Optimal (within gap tolerance)" is what PuLP 3 read as
+    # Optimal and PuLP 4 reports as GapLimit. Same solve, same point; and
+    # nothing here takes a solver's word for optimality -- the exact route,
+    # and branch and bound for an integer optimum, decide that. So a gap stop
+    # WITH a solution keeps PuLP 3's name. Found by `mixed` returning "no
+    # design" on PuLP 4 for an example that has one.
+    if getattr(code, "name", "") == "GapLimit" and getattr(out, "has_solution",
+                                                           False):
+        return "Optimal"
+    try:
+        return _STATUS_NAMES.get(int(code), getattr(code, "name", str(code)))
+    except (TypeError, ValueError):
+        return str(code)
+
+
+def _flips_duals(solver_name) -> bool:
+    """Does this solver, through this PuLP, report a maximisation's duals
+    with the opposite sign to `y >= 0`? Measured, not reasoned: on
+    `max a+b+c` over three `<= 1` rows, whose duals are all +1/2, PuLP 3
+    gave CBC +1/2 and HiGHS -1/2, and PuLP 4 gives -1/2 for both. Only
+    speed rides on it -- the exact route tries both signs -- but a wrong
+    guess sends every solve past its cheapest pass."""
+    if solver_name == "HiGHS":
+        return True
+    return not hasattr(pulp, "PULP_CBC_CMD")              # CBC on PuLP 4
+
+
+def _cbc(seconds):
+    """CBC, or None when there is none: PuLP 3 bundles it, PuLP 4 finds it
+    through `pulp[cbc]` (the `cbcbox` wheel) or the PATH."""
+    if hasattr(pulp, "PULP_CBC_CMD"):                     # PuLP 3
+        return pulp.PULP_CBC_CMD(msg=0, timeLimit=seconds)
+    try:
+        s = pulp.COIN_CMD(msg=False, timeLimit=seconds)
+        return s if s.available() else None
+    except Exception:  # noqa: BLE001 -- absent, or present and broken
+        return None
+
 #: HiGHS, in-process through highspy, for every CONTINUOUS solve -- an LP, and
 #: the relaxation of an ILP. CBC stays for the integral ones. Both measured
 #: before choosing: on LPs HiGHS took 1.3 ms where CBC took 258, nearly all of
@@ -58,7 +134,15 @@ def _solver(lim, integral: bool):
     seconds = max(1, lim.timeout_ms // 1000)
     if not integral and PREFER_HIGHS and _highs_available():
         return pulp.HiGHS(msg=False, timeLimit=seconds), "HiGHS"
-    return pulp.PULP_CBC_CMD(msg=0, timeLimit=seconds), "CBC"
+    cbc = _cbc(seconds)
+    if cbc is not None:
+        return cbc, "CBC"
+    # No CBC -- PuLP 4 without `pulp[cbc]` -- but HiGHS solves integer
+    # programs too, and the exact route checks whatever either returns.
+    if _highs_available():
+        return pulp.HiGHS(msg=False, timeLimit=seconds), "HiGHS"
+    raise RuntimeError(t("engine.opt.no_lp_solver",
+                         version=getattr(pulp, "__version__", "?")))
 
 
 def _load_report(spec, x, duals_by_name):
@@ -158,9 +242,9 @@ def _build(spec, A, b, c, cons_names, relax=False):
     # 17-column packing 175 of 177 seconds, where pass 1 would have needed
     # one. Two names that rewrite to the same one also made PuLP refuse the
     # rows, and CBC crash on the columns. Positions cannot collide.
-    x = {v: pulp.LpVariable("x{}".format(j), lowBound=0,
-                            upBound=(1 if _cat(v) is pulp.LpBinary else None),
-                            cat=_cat(v))
+    x = {v: _new_var(prob, "x{}".format(j), lo=0,
+                     hi=(1 if _cat(v) == pulp.LpBinary else None),
+                     cat=_cat(v))
          for j, v in enumerate(spec.var_names)}
     names = spec.var_names
     # Only the non-zeros. A packing's rows are almost all zeros, and adding a
@@ -198,7 +282,7 @@ def _duals(prob, cons_names, negate=False):
     """
     out = []
     for i, _name in enumerate(cons_names):
-        con = prob.constraints.get(_row(i))
+        con = _constraint(prob, _row(i))
         pi = getattr(con, "pi", None) if con is not None else None
         # HiGHS reports the duals of a maximisation with the opposite sign to
         # CBC's, on every problem measured. Every problem here is built as a
@@ -307,7 +391,7 @@ def _build_sparse(spec, rows, b, c):
     """The PuLP model from `{column: coefficient}` rows -- the same model
     `_build` makes, with positions for names, without touching a zero."""
     prob = pulp.LpProblem("node", pulp.LpMaximize)
-    x = [pulp.LpVariable("x{}".format(j), lowBound=0)
+    x = [_new_var(prob, "x{}".format(j), lo=0)
          for j in range(len(spec.var_names))]
     prob += pulp.lpSum(float(cj) * x[j] for j, cj in enumerate(c) if cj)
     for i, r in enumerate(rows):
@@ -331,7 +415,7 @@ def _opt_vectors(spec, lim, t0):
                       meta={"objective": "0", "exact": True,
                             "lp_solver": engine})
     prob, xs = _build_sparse(spec, rows, b, c)
-    st = pulp.LpStatus[prob.solve(solver)]
+    st = _solve(prob, solver)
     if st == "Infeasible":
         return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine, ms(),
                       None, detail=t("engine.opt.infeasible"),
@@ -342,7 +426,7 @@ def _opt_vectors(spec, lim, t0):
                       detail=t("engine.opt.cbc", status=st, solver=name),
                       meta={"lp_solver": engine})
     x_float = [float(v.value() or 0.0) for v in xs]
-    raw = _duals(prob, names, negate=name == "HiGHS")
+    raw = _duals(prob, names, negate=_flips_duals(name))
     have = all(v is not None for v in raw)
     y_float = [0.0 if v is None else v for v in raw]
     alts = ([[-v for v in y_float], [abs(v) for v in y_float]] if have else [])
@@ -494,8 +578,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     used = [main_name]
 
     prob, xvars = _build(spec, A, b, c, cons_names)
-    code = prob.solve(solver)
-    st_name = pulp.LpStatus[code]
+    st_name = _solve(prob, solver)
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
     engine = lambda: "pulp/" + "+".join(dict.fromkeys(used))  # noqa: E731
 
@@ -539,13 +622,13 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         rprob, rx = _build(spec, A, b, c, cons_names, relax=True)
         rsolver, dual_name = _solver(lim, integral=False)
         used.append(dual_name)
-        relax_status = pulp.LpStatus[rprob.solve(rsolver)]
+        relax_status = _solve(rprob, rsolver)
         dual_src = rprob
         relax_x = ([float(rx[v].value() or 0.0) for v in spec.var_names]
                    if relax_status == "Optimal" else sol_float)
     else:
         dual_src, relax_x, dual_name = prob, sol_float, main_name
-    dual_raw = (_duals(dual_src, cons_names, negate=dual_name == "HiGHS")
+    dual_raw = (_duals(dual_src, cons_names, negate=_flips_duals(dual_name))
                 if relax_status == "Optimal" else [None] * len(cons_names))
     have_duals = all(v is not None for v in dual_raw)
     dual_float = [0.0 if v is None else v for v in dual_raw]

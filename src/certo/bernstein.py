@@ -163,10 +163,97 @@ def nonneg(poly, box, depth=0, degrees=None):
     return True, [name, tl, tr]
 
 
-def check(poly, box, tree, max_depth=64):
-    """Recompute what `nonneg` claimed: every leaf's coefficients >= 0."""
+# --- a box cut by side conditions -----------------------------------------
+#
+# A box and a REGION `g_k(p) >= 0` inside it: the residual need only be
+# non-negative where the conditions hold. The certificate is the one the
+# shift test already gives on a ray, in this basis:
+#
+#     r  =  sum_j lambda_j t_j  +  s,     lambda_j >= 0,
+#
+# where the `t_j` are the conditions and their pairwise products -- derived,
+# since a product of non-negatives is non-negative -- and `s` has every
+# Bernstein coefficient >= 0 on the box. Finding the lambdas is an exact LP
+# (the coefficients of `s` are linear in them); checking them is subtracting
+# and reading signs. The multipliers are constants; polynomial multipliers
+# on a box are the next step and are not here.
+
+
+def region_terms(region):
+    """The conditions, UNSHIFTED -- a box needs no substitution -- with their
+    pairwise products, as `(name, poly)`."""
+    base = [(str(n), g) for n, g in region]
+    out = list(base)
+    for i, (n1, g1) in enumerate(base):
+        for n2, g2 in base[i:]:
+            out.append(("{}*{}".format(n1, n2), g1 * g2))
+    return out
+
+
+def _region_degrees(poly, terms, degrees):
+    d = _leaf_degrees(poly, degrees)
+    for _n, g in terms:
+        d = tuple(max(a, b) for a, b in zip(d, degrees_of(g)))
+    return d
+
+
+def nonneg_region(poly, box, terms, depth=0, degrees=None):
+    """`(ok, tree)`: `nonneg` first, and where that fails, multipliers for
+    the region's terms on the whole box. The leaf of a region certificate is
+    `{"deg": [...], "region": {term: lambda}}`."""
+    ok, tree = nonneg(poly, box, depth, degrees)
+    if ok or not terms:
+        return ok, tree
+    from fractions import Fraction
+
+    from .simplex import SimplexLimit, minimise
+
+    d = _region_degrees(poly, terms, degrees)
+    r = coefficients(poly, box, d)
+    gs = [(n, coefficients(g, box, d)) for n, g in terms]
+    cells = sorted(set(r) | {c for _n, g in gs for c in g})
+    # min sum(lambda) s.t. r[c] - sum_j lambda_j g_j[c] >= 0 for every cell.
+    A = [[-g.get(c, Fraction(0)) for c in cells] for _n, g in gs]
+    try:
+        lam = minimise(A, [Fraction(1)] * len(gs),
+                       [-r.get(c, Fraction(0)) for c in cells])
+    except SimplexLimit:
+        return False, None
+    used = {n: v for (n, _g), v in zip(gs, lam) if v}
+    leaf = {"deg": list(d), "region": {n: str(v) for n, v in used.items()}}
+    return _region_leaf_holds(poly, box, leaf, dict(terms)), leaf
+
+
+def _region_leaf_holds(poly, box, leaf, terms):
+    """The leaf's claim, recomputed: every multiplier a known term and >= 0,
+    and the remainder's coefficients >= 0 at the leaf's degree."""
+    from fractions import Fraction
+
+    try:
+        d = tuple(int(x) for x in leaf["deg"])
+        rest = poly
+        for name, v in (leaf.get("region") or {}).items():
+            lam = Fraction(v)
+            if lam < 0 or name not in terms:
+                return False
+            rest = rest - terms[name].scaled(lam)
+        if not rest.terms:
+            return True
+        if any(x < y for x, y in zip(d, degrees_of(rest))):
+            return False
+        return all(v >= 0 for v in coefficients(rest, box, d).values())
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
+def check(poly, box, tree, max_depth=64, terms=None):
+    """Recompute what `nonneg` claimed: every leaf's coefficients >= 0.
+    `terms` -- the region's, by name -- for a leaf that carries multipliers;
+    without them such a leaf does not verify."""
     if not poly.terms:
         return True
+    if isinstance(tree, dict) and tree.get("region"):
+        return terms is not None and _region_leaf_holds(poly, box, tree, terms)
     if tree is None or isinstance(tree, dict):
         try:
             d = (degrees_of(poly) if tree is None
@@ -180,8 +267,8 @@ def check(poly, box, tree, max_depth=64):
     if name not in box:
         return False
     left, right = halves(box, name)
-    return (check(poly, left, tl, max_depth - 1)
-            and check(poly, right, tr, max_depth - 1))
+    return (check(poly, left, tl, max_depth - 1, terms)
+            and check(poly, right, tr, max_depth - 1, terms))
 
 
 # --- the dual, found in the Bernstein basis --------------------------------

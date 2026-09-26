@@ -348,7 +348,7 @@ def clique_lp(spec, limits: Limits | None = None,
     """An LP over every clique of a graph, by column generation, with the
     pricing search that proves no other clique would enter."""
     from .. import colgen
-    from ..certificate import clique_lp_certificate
+    from ..certificate import clique_lp_certificate, clique_lp_farkas_certificate
 
     t0 = time.perf_counter()
     try:
@@ -372,6 +372,19 @@ def clique_lp(spec, limits: Limits | None = None,
                       detail=t("engine.colgen.no_clique_covers",
                                edge=out["infeasible_edge"],
                                m=getattr(spec, "min_size", 2)))
+    if "farkas" in out:
+        cert = clique_lp_farkas_certificate(out, title=spec.title).stamp(
+            spec_path or None)
+        return Result("columns", Status.UNSAT, Verdict.UNSATISFIABLE,
+                      ENGINE_COLGEN, ms, cert,
+                      detail=t("engine.colgen.infeasible_farkas",
+                               m=out["min_size"],
+                               value=str(out["farkas_value"]),
+                               nodes=out["pricing"]["nodes"]),
+                      meta={"problem": "partition", "infeasible": True,
+                            "generated": out["generated"],
+                            "rounds": out["rounds"],
+                            "nodes": out["pricing"]["nodes"], "exact": True})
     cert = clique_lp_certificate(out, title=spec.title).stamp(spec_path or None)
     p = cert.payload
     return Result(

@@ -11197,6 +11197,11 @@ def test_an_lp_is_solved_by_highs_and_certified_exactly_the_same():
         assert r.certificate.payload["exact"] is True
         assert verify(_roundtrip(r.certificate), LIM).ok
     # A non-degenerate LP has one optimum, and then the payloads agree whole.
+    # It used to carry a third row, `x <= 3`, which is ALSO tight at (3, 1):
+    # three tight rows at a vertex in the plane is a degenerate vertex, with
+    # a segment of optimal duals. PuLP 3's two solvers happened to return the
+    # same one; PuLP 4's do not ([0, 2/3, 7/3] and [2, 0, 1], both optimal).
+    # The test was claiming what the LP did not have.
     from certo import LPSpec
     s = LPSpec(sense="max", title="one vertex")
     s.variable("x")
@@ -11204,7 +11209,6 @@ def test_an_lp_is_solved_by_highs_and_certified_exactly_the_same():
     s.objective({"x": 3, "y": 2})
     s.constraint({"x": 1, "y": 1}, "<=", 4, name="a")
     s.constraint({"x": 1, "y": 3}, "<=", 6, name="b")
-    s.constraint({"x": 1}, "<=", 3, name="c")
     h = _with_lp_solver(True, lambda: engine.opt(s, LIM))
     c = _with_lp_solver(False, lambda: engine.opt(s, LIM))
     assert _without_backend(_lp_payload(h)) == _without_backend(_lp_payload(c))
@@ -11278,7 +11282,7 @@ def test_a_row_named_like_an_edge_keeps_its_dual():
             prob, _x = engine._build(s, A, b, c, names)
             solver, name = engine._solver(LIM, integral=False)
             prob.solve(solver)
-            return engine._duals(prob, names, negate=name == "HiGHS")
+            return engine._duals(prob, names, negate=engine._flips_duals(name))
         duals = _with_lp_solver(prefer, run)
         assert all(d is not None for d in duals), (prefer, duals)
         assert abs(sum(duals) - 1.5) < 1e-6, duals
@@ -11553,6 +11557,41 @@ def _explicit_clique_lp(edges, problem, weight, m):
     return Fraction(engine.opt(s, LIM).meta["objective"])
 
 
+def test_a_partition_into_triangles_that_cannot_exist_is_certified():
+    """K4 minus an edge: the two triangles share the edge 0-1, so no
+    fractional partition into triangles exists. Phase one finds the Farkas
+    vector; verify reruns the pricing search over EVERY triangle with it. K4
+    itself is partitioned by half of each triangle, and the max_size bound
+    keeps a K4 column out."""
+    from certo import CliqueLPSpec
+    from certo.engines import algebra
+
+    r = algebra.clique_lp(CliqueLPSpec(
+        edges=[(0, 1), (0, 2), (1, 2), (0, 3), (1, 3)], problem="partition",
+        min_size=3), LIM)
+    assert r.verdict is Verdict.UNSATISFIABLE and r.meta["infeasible"]
+    cert = _roundtrip(r.certificate)
+    assert verify(cert, LIM).ok
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    d["payload"]["farkas"] = ["0"] * len(d["payload"]["farkas"])
+    d["payload"]["farkas_value"] = "0"
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    # an extra edge whose triangles DO cover: 2-3 makes it K4, feasible
+    k4 = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+    r = algebra.clique_lp(CliqueLPSpec(edges=k4, problem="partition",
+                                       min_size=3, max_size=3), LIM)
+    assert r.verdict is Verdict.SATISFIABLE and r.meta["objective"] == "2"
+    assert all(len(c["clique"]) == 3
+               for c in r.certificate.payload["columns"])
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    # a column larger than max_size is refused by the verifier
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    d["payload"]["max_size"] = 2
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    r = algebra.clique_lp(CliqueLPSpec(edges=k4, max_size=1), LIM)
+    assert r.certificate is None and "max_size" in r.detail
+
+
 def test_column_generation_agrees_with_the_explicit_lp():
     """Measured before shipping on 84 random graphs; a smaller sweep here."""
     import random
@@ -11608,14 +11647,18 @@ def test_a_cover_with_an_edge_no_clique_can_reach_is_infeasible_and_says_which()
     assert "2-3" in r.detail
 
 
-def test_a_partition_that_might_be_infeasible_is_refused_not_guessed():
+def test_a_partition_that_might_be_infeasible_is_decided_not_guessed():
+    """It used to be refused: with only triangles, a partition may not exist.
+    Phase one decides it now. A triangle IS a partition of its own edges --
+    feasible, value 1 -- and the infeasible case carries a Farkas vector
+    (see the K4-minus-an-edge test)."""
     from certo import CliqueLPSpec
     from certo.engines import algebra
-    from certo.status import Status
 
     r = algebra.clique_lp(CliqueLPSpec(edges=[(0, 1), (1, 2), (0, 2)],
                                        problem="partition", min_size=3), LIM)
-    assert r.status is Status.OUT_OF_THEORY and r.certificate is None
+    assert r.verdict is Verdict.SATISFIABLE and r.meta["objective"] == "1"
+    assert verify(_roundtrip(r.certificate), LIM).ok
 
 
 def test_an_install_in_the_user_site_is_an_install():
@@ -12023,6 +12066,46 @@ def test_the_watch_leaves_nothing_behind_in_process():
                 if t.name in ("certo-deadline", "certo-heartbeat")
                 and t.is_alive()]
     faulthandler.cancel_dump_traceback_later()
+
+
+def test_a_box_cut_by_a_curve_is_certified_with_region_multipliers():
+    """`max x` with `(p - q + 1) x <= 1` on the box [0,1]^2, only where
+    `q <= p`. The dual 1 leaves the residual `p - q`: negative on the box, so
+    the box alone proves nothing, and non-negative on the region, which one
+    multiplier on `p - q >= 0` shows in the Bernstein basis."""
+    from certo.certificate import Certificate
+    from certo.polynomials import Poly
+
+    R = ("p", "q")
+    p, q = Poly.var(R, "p"), Poly.var(R, "q")
+    one = Poly.const(R, 1)
+    kw = dict(parameters={"p": 0, "q": 0}, objective={"x": one},
+              constraints=[("c", {"x": p - q + one}, "<=", one)],
+              dual={"c": Fraction(1)}, box={"p": (0, 1), "q": (0, 1)})
+    # residual (p - q + 1) - 1 = p - q: negative at p=0, q=1
+    assert _pmode(**kw).certificate is None
+    r = _pmode(**kw, region=[("below", p - q)])
+    assert r.verdict is Verdict.PROVED, r.detail
+    leaf = r.certificate.payload["box_trees"]["columns"]["x"]
+    assert leaf["region"] == {"below": "1"}
+    cert = _roundtrip(r.certificate)
+    rep = verify(cert, LIM)
+    assert rep.ok, rep.checks
+    assert any("p - q >= 0" in w for w in rep.warnings)
+    # the multiplier cannot be inflated past the residual, nor the region
+    # edited under it
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    d["payload"]["box_trees"]["columns"]["x"]["region"]["below"] = "2"
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    d["payload"]["region"]["below"] = {"1 0": "1"}
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    # and certo finds the dual itself on the cut box
+    kw.pop("dual")
+    r = _pmode(**kw, region=[("below", p - q)], dual="bernstein",
+               dual_degree=0)
+    assert r.verdict is Verdict.PROVED, r.detail
+    assert verify(_roundtrip(r.certificate), LIM).ok
 
 
 def test_one_dual_per_box_proves_what_one_dual_cannot():
@@ -13294,6 +13377,95 @@ def test_every_report_says_it_was_not_sent():
     assert info["sent"] is False
 
 
+def test_the_mcp_server_can_be_registered_with_a_venv_that_can_run_it():
+    """`--venv` writes that interpreter -- after checking it imports certo --
+    and refuses a directory that is no venv rather than writing a server
+    that will not start. The venv here is this interpreter's own prefix when
+    it is one, and otherwise a fake whose python is this one."""
+    import sys
+    import tempfile
+
+    from certo import doctor
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        rep = doctor.register_mcp(tmp / ".mcp.json", venv=tmp / "novenv")
+        assert rep["written"] is False and not (tmp / ".mcp.json").exists()
+        assert "novenv" in rep["detail"]
+        # a venv whose interpreter can import certo: point one at this one
+        fake = tmp / "venv"
+        py = doctor.venv_python(fake)
+        py.parent.mkdir(parents=True)
+        import os
+        import shutil
+        try:
+            os.symlink(sys.executable, py)
+        except (OSError, NotImplementedError):
+            shutil.copy(sys.executable, py)
+        env_ok = doctor.check_venv(fake)
+        if env_ok["ok"]:
+            rep = doctor.register_mcp(tmp / ".mcp.json", venv=fake)
+            written = json.loads((tmp / ".mcp.json").read_text(encoding="utf-8"))
+            assert written["mcpServers"]["certo"]["command"] == str(py)
+            assert written["mcpServers"]["certo"]["args"] == ["-m", "certo.mcp_server"]
+        else:
+            # a copied interpreter without its stdlib cannot start; the refusal
+            # must say so rather than write the entry
+            rep = doctor.register_mcp(tmp / ".mcp.json", venv=fake)
+            assert rep["written"] is False
+
+
+def test_a_dump_in_stderr_is_read_and_its_frames_are_owned():
+    """The three stops a run can leave behind, as `faulthandler` prints them:
+    a native crash in the interpreter's start-up hook, before certo ran; a
+    native crash inside a library certo called; and a --deadline stop."""
+    from certo import report
+    from certo.i18n import t as _t
+
+    startup = "\n".join([
+        "Windows fatal exception: code 0xc000070a",
+        "",
+        "Current thread 0x00001234 (most recent call first):",
+        '  File "C:\\Py\\Lib\\ssl.py", line 707 in create_default_context',
+        '  File "C:\\Py\\Lib\\site-packages\\pip_system_certs\\wrapt_requests.py", line 14 in inject',
+        '  File "C:\\Py\\Lib\\site.py", line 186 in addpackage',
+        '  File "<frozen site>", line 1 in <module>'])
+    tr = report.parse_trace(startup)
+    assert tr["kind"] == "native_crash" and tr["threads"][0]["current"]
+    assert [f["owner"] for f in tr["threads"][0]["frames"]][:2] == ["python", "startup"]
+    cat, detail = report.trace_signal(tr)
+    assert cat == "environment" and "START-UP" in detail
+
+    library = "\n".join([
+        "Fatal Python error: Segmentation fault",
+        "",
+        "Thread 0x00007f01 (most recent call first):",
+        '  File "/usr/lib/python3.12/threading.py", line 331 in wait',
+        "",
+        "Current thread 0x00007f00 (most recent call first):",
+        '  File "/venv/lib/python3.12/site-packages/highspy/highs.py", line 88 in run',
+        '  File "/venv/lib/python3.12/site-packages/pulp/apis/highs.py", line 500 in actualSolve',
+        '  File "/home/u/certo/src/certo/engines/lp.py", line 77 in _solve',
+        '  File "/home/u/work/myspec.py", line 3 in spec'])
+    tr = report.parse_trace(library, spec_name="myspec.py")
+    cat, detail = report.trace_signal(tr)
+    assert cat == "undetermined", (cat, detail)
+    assert "library:highspy" in detail and "certo lp.py:77" in detail
+    assert "highspy, pulp" in detail
+
+    stop = "\n".join([
+        _t("watch.deadline", seconds="60", command="parametric"),
+        "Thread 0x00000abc (most recent call first):",
+        '  File "C:\\x\\site-packages\\certo\\exact.py", line 300 in solve_exact',
+        '  File "C:\\x\\site-packages\\certo\\cli.py", line 90 in main'])
+    tr = report.parse_trace(stop)
+    assert tr["kind"] == "deadline"
+    cat, detail = report.trace_signal(tr)
+    assert "--deadline" in detail and "certo exact.py:300" in detail
+    assert report.parse_trace("an ordinary error message")["kind"] is None
+    assert report.trace_signal(report.parse_trace("")) is None
+
+
 def test_a_library_failure_is_charged_to_whoever_made_the_call():
     """The spec called a library and the library raised: the spec made the bad
     call, so it is the spec's -- not the library's, and not certo's."""
@@ -13488,6 +13660,95 @@ def test_verify_checks_the_map_against_the_matrix_not_the_spec():
     bad["payload"]["map"]["graph"] = [e for e in bad["payload"]["map"]["graph"]
                                       if e != ["0", "1"]]
     assert not verify(Certificate.from_dict(bad), LIM).ok
+
+
+def test_a_sweep_predicate_certified_by_a_clique_partition_in_one_line():
+    """"The edges of every graph on 4 vertices split into at most m
+    cliques" -- trivially, one clique per edge. Each YES
+    carries a cover certificate, verify checks each is about its own graph,
+    and a partition moved to another graph's entry fails."""
+    from certo import Outcome
+    from certo.engines import graphsearch
+
+    def pred(g):
+        return Outcome.clique_partition(g, [list(e) for e in g.edges()],
+                                        at_most=g.m)
+
+    spec = SweepSpec(n=4, predicate=pred)
+    r = graphsearch.sweep(spec, LIM, use_geng=False, cert_mode="all")
+    assert r.verdict is Verdict.PROVED, r.detail
+    assert r.meta["predicate_certified"] == r.meta["evaluations"] > 0
+    cert = _roundtrip(r.certificate)
+    rep = verify(cert, LIM)
+    assert rep.ok, rep.checks
+    assert any(c[0] == t("verify.sweep.entry_subject") and c[1]
+               for c in rep.checks)
+    # swap two entries' certificates: each is still a true cover, of the
+    # wrong graph
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    es = [e for e in d["payload"]["entries"]
+          if e["cert"]["payload"]["universe"]]
+    a, b = next((x, y) for x in es for y in es
+                if x["cert"]["payload"]["universe"]
+                != y["cert"]["payload"]["universe"])
+    a["cert"], b["cert"] = b["cert"], a["cert"]
+    rep = verify(Certificate.from_dict(d), LIM)
+    assert not rep.ok
+    assert any(c[0] == t("verify.sweep.entry_subject") and not c[1]
+               for c in rep.checks)
+
+
+def test_a_partition_that_fails_decides_nothing():
+    """Not a clique, or too many parts: undecided, never a counterexample."""
+    from certo import Outcome
+    from certo.graphs import Graph
+
+    path = Graph.from_edges(3, [(0, 1), (1, 2)])
+    out = Outcome.clique_partition(path, [[0, 1, 2]])
+    assert out.ok is None and out.cert is None
+    out = Outcome.clique_partition(path, [[0, 1], [1, 2]], at_most=1)
+    assert out.ok is None and "2" in out.detail
+    out = Outcome.clique_partition(path, [[0, 1], [1, 2]], at_most=2)
+    assert out.ok is True and out.cert.payload["at_most"] == 2
+    d = json.loads(json.dumps(out.cert.to_dict()))
+    d["payload"]["at_most"] = 1
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_the_part_that_is_not_the_graph_is_declared_and_said():
+    """A radial item and a vertex capacity beside the triangles: declared
+    outside, the map checks the rest as strictly as before, and verify says
+    how much it did not check. Left undeclared, the radial is refused."""
+    from certo.engines import lp
+
+    base = _k4_mapped()
+    items = [(n, list(r) + (["v0"] if n == "T012" else []), 1)
+             for n, r, _g, _k in base.items] + [("rad", ["e01", "v0"], 1)]
+    try:
+        _k4_mapped(items=items)
+    except ValueError as e:
+        assert "rad" in str(e)
+    else:
+        raise AssertionError("an undeclared radial was accepted")
+    spec = _k4_mapped(items=items, not_cliques=["rad"], not_edges=["v0"])
+    r = lp.opt(spec.to_lp(), LIM)
+    cert = _roundtrip(r.certificate)
+    rep = verify(cert, LIM)
+    assert rep.ok, rep.checks
+    assert t("verify.lp.map_outside", items=1, rows=1) in rep.warnings
+    # still strict inside: T013 losing its edge 0-1 is caught
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    i = d["payload"]["names"].index("e01")
+    j = d["payload"]["var_names"].index("T013")
+    d["payload"]["A"][i][j] = "0"
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    # and a name outside that is nothing is refused
+    try:
+        _k4_mapped(items=items, not_cliques=["rad", "ghost"], not_edges=["v0"])
+    except ValueError as e:
+        assert "ghost" in str(e)
+    else:
+        raise AssertionError("an unknown outside name was accepted")
 
 
 def test_the_gap_and_mixed_answer_the_packing_with_its_loads():

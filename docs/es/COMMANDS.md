@@ -359,6 +359,7 @@ el resultado es matemáticamente falso, dilo con `--wrong`.
     certo report opt spec.py --target 5
     certo report --wrong --certificate out/claim.json
     certo report --coverage cases spec.py
+    certo report --stderr run.err parametric spec.py
 
 **Lo importante es el triaje.** Casi todos los reportes que recibió este
 proyecto no sabían decir de quién era el fallo: un error de adaptador que era de
@@ -379,6 +380,16 @@ que el CLI descarta, y concluye, con la evidencia de cada cosa:
 al spec, **saltando los marcos de librerías**: si certo le pasa a numpy algo mal
 formado y numpy falla, es de certo; si el spec llama a una librería que falla,
 es del spec.
+
+**Una corrida que ya murió.** Una caída nativa se lleva el proceso, y un
+cuelgue detenido por `--deadline` no se puede repetir dentro del proceso, así
+que para esos dos la evidencia es el stderr que dejaron. `--stderr FICHERO` lee
+el volcado de pila (`faulthandler` imprime uno en ambos casos) y dice qué tipo
+de detención fue: una caída nativa, un corte por `--deadline` o el vigilante
+en C que lo respalda. Después etiqueta cada marco como de certo, del spec, de
+una librería o del **arranque** del intérprete. Una muerte en el arranque, en
+un hook `.pth` antes de que corriera código de certo, se clasifica como
+`environment`, y el fichero va a la carpeta.
 
 **No se envía nada.** La carpeta incluye tu spec, que puede ser matemática sin
 publicar, así que lo que se comparte lo decides tú después de leerla. Las rutas
@@ -421,7 +432,17 @@ entre `certo --version` y la versión que `pip` tiene registrada.
 
 `certo doctor --register-mcp` registra el servidor MCP en `.mcp.json`,
 fusionando en vez de reemplazar, y comprueba que arranca. Escribe el del
-directorio actual salvo que `--mcp-path ARCHIVO` indique otro.
+directorio actual salvo que `--mcp-path ARCHIVO` indique otro. Con `--venv DIR`
+el servidor arranca con el intérprete de ese entorno virtual. Antes de escribir
+nada, certo comprueba que el venv pueda importar `certo` y `mcp`, y que no
+ejecute ningún hook de arranque que se sepa que mata intérpretes
+(`pip_system_certs` entre ellos), propio o heredado con
+`--system-site-packages`. No crea nada: el venv lo haces tú. La ruta que
+escribe es absoluta, así que ese `.mcp.json` pasa a ser de esta máquina.
+
+La fila `cbc` importa con PuLP 4, que ya no trae CBC incluido. Sin
+`pulp[cbc]`, las resoluciones enteras pasan a HiGHS si está instalado y se
+rechazan si no, y `pulp` por sí solo nunca lo decía.
 
 ---
 
@@ -518,6 +539,12 @@ traducción. Lo que **no** comprueba es qué cliques deben estar en la
 familia, ni las capacidades. Eso corresponde a tu propia reconstrucción del
 problema, y conviene mantenerla independiente de certo; `verify` repite este
 límite en sus avisos.
+
+Los ítems que no son cliques, o los recursos que no son aristas (un ítem
+radial, una capacidad de vértice), se declaran con `not_cliques=[...]` y
+`not_edges=[...]`. Declarados, quedan fuera del mapa, el resto se comprueba
+con el mismo rigor, y cada verificación dice cuántos quedaron fuera. Sin
+declarar, se rechazan igual que antes.
 
 `--gap` sobre un `PackingSpec` reporta `mu*` (la relajación), `nu` (el valor
 entero alcanzado) y la distancia entre ambos, como **un** artefacto en vez de
@@ -861,15 +888,25 @@ columnas explícitas. Y que el grafo sea el que querías es afirmación del spec
     CliqueLPSpec(edges=[(0, 1), (0, 2), (1, 2), (2, 3)],
                  problem="partition", weight={"constant": 1}, min_size=2)
 
-Una columna por clique `Q` con `|Q| >= min_size`, una fila por arista, y un
+Una columna por clique `Q` con `|Q| >= min_size` (y `|Q| <= max_size` si se
+da: solo aristas y triángulos, por ejemplo), una fila por arista, y un
 peso lineal en los conteos: `w(Q) = a|E(Q)| + b|Q| + c` desde `weight`
 `{edges, vertices, constant}`.
+
+**También se certifica una partición que no puede existir.** Con
+`min_size > 2` las aristas ya no son columnas, y puede que no exista
+partición. Lo decide una fase uno: una columna artificial por arista, y
+columnas generadas de la misma manera. Si su óptimo es positivo, su dual es un
+vector de Farkas `y` con `r·y > 0` y ningún clique permitido que sume más de
+cero en él. El verificador comprueba esa segunda parte repitiendo la búsqueda
+de pricing sobre toda la familia, y la respuesta es `UNSATISFIABLE` con ese
+certificado.
 
 | `problem` | Programa |
 |---|---|
 | `packing` | max `Σ w(Q) x_Q`, la carga de cada arista `<= rhs` |
 | `cover` | min, la carga de cada arista `>= rhs` |
-| `partition` | min, la carga de cada arista `= rhs` (requiere `min_size <= 2`) |
+| `partition` | min, la carga de cada arista `= rhs`; con `min_size > 2` puede ser infactible, y eso se certifica |
 
 **Por qué necesita su propio certificado.** `opt` certifica un LP cuyas
 columnas recibió. Aquí las columnas son implícitas, y el LP que se resuelve
@@ -1199,8 +1236,18 @@ coeficientes no basta; el certificado registra las particiones y `verify`
 recalcula cada hoja. `dual="bernstein"` con `dual_degree=k` hace que certo
 **encuentre** un dual polinómico: sus coeficientes de Bernstein son las
 incógnitas de un único LP exacto cuyas restricciones son los coeficientes de
-los residuos. `box` con `region` se rechaza por ahora. Ver
-`examples/parametric_box.py`.
+los residuos. Ver `examples/parametric_box.py`.
+
+**Una caja cortada por una región.** Con `region=[(nombre, g), ...]` además,
+un residuo solo tiene que ser no negativo donde toda `g ≥ 0`. certo lo
+escribe como `Σ λ·g + s`, donde los `λ ≥ 0` son constantes sobre las
+condiciones y sus productos de a pares, y `s` tiene coeficientes de Bernstein
+no negativos en la caja. Los `λ` se encuentran con un LP exacto y quedan en
+la hoja, y `verify` los resta y lee los signos. Con `dual="bernstein"` esos
+mismos `λ` entran al LP del dual, así que certo encuentra un dual que se apoya
+en la región. Los multiplicadores son constantes, no polinomios, y una hoja
+con región no se subdivide. La región sigue siendo alcance, no algo
+demostrado, y cada verificación la repite.
 
 **Un dual por caja.** Con `dual="bernstein"` y `subdivide=d`, certo busca un
 dual en la caja y, donde no lo hay —o no alcanza el `claim`—, la parte en
@@ -1344,6 +1391,20 @@ Esas dos salvedades son independientes, y el banner nombra qué nivel obtuviste:
 
 Un banner verde sobre once mil booleanos sin comprobar es donde la formulación
 antigua hacía más daño: no hay contraejemplo al que ir a mirar.
+
+**Certificado en una línea, para una partición en cliques.** Un predicado
+cuyo SÍ es "estos conjuntos de vértices dividen las aristas en a lo más `k`
+cliques" devuelve
+
+    return Outcome.clique_partition(g, parts, at_most=k)
+
+y `cover` lo comprueba. El certificado viaja con el ítem, y `verify` comprueba
+que cada cover guardado sea un cover de las aristas de **su propio** grafo,
+así que una partición archivada bajo el grafo equivocado falla. Una partición
+que no funciona (una parte que no es clique, una arista que falta, demasiadas
+partes) deja ese ítem **no concluyente**, no como contraejemplo: otra
+partición podría funcionar, y una partición no refuta nada. Con `--cert-all`
+cada SÍ conserva su certificado, y el sweep llega al nivel **certificado**.
 
 `--witnesses` descompone los contraejemplos en órbitas bajo una simetría que
 declares. `--collect` mide en vez de refutar, en racionales exactos.

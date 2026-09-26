@@ -430,7 +430,8 @@ def cmd_report(args):
         argv = argv[1:]
     info = report.build(argv=argv or None, cert_path=args.certificate,
                         wrong=args.wrong, with_coverage=args.coverage,
-                        out=args.out)
+                        out=args.out,
+                        stderr_path=getattr(args, "stderr_file", None))
     if args.json:
         print(json.dumps(info, indent=2, ensure_ascii=False))
         return 0
@@ -898,7 +899,8 @@ def cmd_doctor(args):
     if args.json:
         rep["mcp"] = doctor.mcp_status()
         if args.register_mcp:
-            rep["registration"] = doctor.register_mcp(getattr(args, "mcp_path", None))
+            rep["registration"] = doctor.register_mcp(
+                getattr(args, "mcp_path", None), getattr(args, "mcp_venv", None))
         print(json.dumps(rep, indent=2, ensure_ascii=False))
         return 0 if rep["ok"] else 3
 
@@ -930,7 +932,13 @@ def cmd_doctor(args):
     m = doctor.mcp_status()
     print("    " + t("doctor.mcp.workspace", path=m["workspace"]))
     if args.register_mcp:
-        reg = doctor.register_mcp(getattr(args, "mcp_path", None))
+        reg = doctor.register_mcp(getattr(args, "mcp_path", None),
+                                  getattr(args, "mcp_venv", None))
+        for w in (reg.get("venv") or {}).get("warnings", []):
+            print("    !! " + w)
+        if reg.get("venv", {}).get("ok"):
+            print("    " + t("doctor.venv.using", python=reg["venv"]["python"],
+                             version=reg["venv"].get("version", "?")))
         if not reg["written"]:
             print("    !! " + reg["detail"])
         elif reg["already"]:
@@ -2435,6 +2443,11 @@ def build_parser():
                          "`opt spec.py --target 5`")
     sp.add_argument("--certificate", metavar="FILE",
                     help="a certificate to include and re-verify")
+    sp.add_argument("--stderr", metavar="FILE", dest="stderr_file",
+                    help="the stderr of a run that already died -- a native "
+                         "crash or a --deadline stop. Its stack dump is read, "
+                         "and each frame is triaged as certo's, the spec's, a "
+                         "library's or the interpreter start-up's")
     sp.add_argument("--wrong", action="store_true",
                     help="the result is mathematically FALSE. A certificate "
                          "that verifies and is false is the worst bug this "
@@ -2540,6 +2553,11 @@ def build_parser():
     sp.add_argument("--mcp-path", metavar="FILE", dest="mcp_path",
                     help="with --register-mcp: the .mcp.json to write "
                          "instead of the one in the current directory")
+    sp.add_argument("--venv", metavar="DIR", dest="mcp_venv",
+                    help="with --register-mcp: start the server with this "
+                         "virtual environment's interpreter, after checking "
+                         "it imports certo and mcp and runs no start-up hook "
+                         "known to kill interpreters. Creates nothing")
     sp.set_defaults(func=cmd_doctor)
 
     sp = add("ideal", "polynomial equations: refute them outright, or certify "

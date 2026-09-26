@@ -29,12 +29,18 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Operating System :: OS Independent",
 ]
-# pulp below 4: 4.0.0 (2026-09-25, Python >= 3.12 only) removed
-# `LpVariable(lowBound=...)` and `PULP_CBC_CMD`, and an unbounded `pulp>=2.7`
-# installed it the day it appeared -- every 3.12 and 3.13 job went red while
-# 3.11, which cannot have it, stayed green. The bound is the version the suite
-# ran against; porting to 4 is its own change, measured, in the backlog.
-dependencies = ["z3-solver>=4.12", "pulp>=2.7,<4"]
+# PuLP 3 or 4. 4.0.0 (2026-09-25, Python >= 3.12 only) rebuilt the modeller
+# and stopped bundling CBC; `engines/lp.py` speaks to both through five
+# helpers. 0.18.0 bounded it below 4 on the morning it appeared, when an
+# unbounded `pulp>=2.7` turned every 3.12 and 3.13 job red. On 3.12 and later
+# the `cbc` extra brings CBC back (the `cbcbox` wheel, for Linux, macOS and
+# Windows) -- without it the integer solves fall to HiGHS, or refuse. The
+# upper bound is the next major nobody has run the suite against yet.
+dependencies = [
+    "z3-solver>=4.12",
+    "pulp>=2.7,<4; python_version < '3.12'",
+    "pulp[cbc]>=2.7,<5; python_version >= '3.12'",
+]
 
 [project.urls]
 Homepage = "https://jtraverso.github.io/certo-math/"

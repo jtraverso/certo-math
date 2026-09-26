@@ -410,6 +410,23 @@ def test_clique_lp():
         _report("clique_lp", probe(cert))
 
 
+def test_clique_lp_bounded_and_infeasible():
+    """The two shapes 0.19 adds: a family bounded above by `max_size`, and an
+    infeasible partition carried by a Farkas vector and its pricing."""
+    from certo import CliqueLPSpec
+    from certo.engines import algebra
+
+    k4 = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+    cert = algebra.clique_lp(CliqueLPSpec(edges=k4, problem="packing",
+                                          weight={"edges": 1}, max_size=3),
+                             LIM).certificate
+    _report("clique_lp (max_size)", probe(cert))
+    cert = algebra.clique_lp(CliqueLPSpec(
+        edges=[(0, 1), (0, 2), (1, 2), (0, 3), (1, 3)], problem="partition",
+        min_size=3), LIM).certificate
+    _report("clique_lp (farkas)", probe(cert))
+
+
 def test_affine_semigroup():
     """The kind whose negatives are the expensive half.
 
@@ -583,6 +600,38 @@ def test_a_profile_cannot_be_widened_by_editing_its_domain():
     d = json.loads(json.dumps(cert.to_dict()))
     d["payload"]["domain"]["hi"] = "2"
     assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def _chain(cite):
+    """A composed proof: a derived lemma, a hypothesis the final step does
+    not use, and one more link -- assumed, or cited with a source."""
+    import z3
+
+    from certo.engines import compose
+    from certo.spec import ProofSpec, Spec
+
+    V, G, b, s = z3.Reals("V G b s")
+    p = ProofSpec(title="chain")
+    lem = Spec(title="V <= G")
+    lem.assume("h", V <= G - 1)
+    lem.claim(V <= G)
+    p.lemma("VG", proves=lem)
+    p.assume("VG_premise", V <= G - 1)
+    if cite:
+        p.cite("sec16", states=G <= b * s, source="Section 16")
+    else:
+        p.assume("sec16_h", G <= b * s)
+    p.assume("pos", s >= 0)
+    p.conclude(V <= b * s)
+    return compose.compose(p, LIM).certificate
+
+
+def test_proof():
+    """The kind was not in this suite, and its first run found a hole: a
+    hypothesis the final step does not name could lose its name while its
+    formula still went into the step."""
+    _report("proof", probe(_chain(cite=False)))
+    _report("proof (cited)", probe(_chain(cite=True)))
 
 
 if __name__ == "__main__":
