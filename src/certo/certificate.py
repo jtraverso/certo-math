@@ -29,11 +29,29 @@ from .i18n import t
 # What this buys: a certificate produced for a paper today still verifies
 # against a later certo, which is the only way "re-verifiable" survives
 # contact with time.
-SCHEMA_VERSION = 4
+#
+# 5 (0.20.0). The one change 4 could not make: a `parametric_bound` row whose
+# residual has more than 64 terms is recorded by its size, not written out --
+# copies no verifier has ever read, and most of a large certificate. Every
+# schema-4 certificate is read exactly as before; a schema-4 reader verifies
+# a schema-5 certificate too, because it never read those fields. And the
+# number is READ now: a certificate from a newer schema than this reader
+# knows is verified all the same, with a warning saying so.
+SCHEMA_VERSION = 5
 
 
 #: Characters of indented JSON past which a certificate is written compact.
 COMPACT_ABOVE = 1_000_000
+
+
+def _schema_of(d) -> int:
+    """The schema a serialised certificate declares; 4 for one that declares
+    none or something unreadable, which is what every certificate before 5
+    was, whatever it wrote."""
+    try:
+        return int(d.get("schema", 4))
+    except (TypeError, ValueError):
+        return 4
 
 
 def _without_provenance(value):
@@ -59,6 +77,9 @@ class Certificate:
     note_key: str = ""
     note_args: dict = field(default_factory=dict)
     provenance: dict = field(default_factory=dict)
+    # The schema the certificate was WRITTEN in, kept when it is read back, so
+    # a schema-4 certificate embedded in something new still says it is 4.
+    schema: int = SCHEMA_VERSION
 
     def __post_init__(self):
         # Version and date ALWAYS, whether issued from the CLI or the API.
@@ -78,7 +99,7 @@ class Certificate:
 
     def to_dict(self) -> dict:
         return {
-            "schema": SCHEMA_VERSION,
+            "schema": self.schema,
             "kind": self.kind,
             "solver_free": self.solver_free,
             "note_key": self.note_key,
@@ -114,6 +135,7 @@ class Certificate:
             note_key=d.get("note_key", ""),
             note_args=d.get("note_args", {}),
             provenance=d.get("provenance") or {"legacy": True},
+            schema=_schema_of(d),
         )
 
     def to_json(self) -> str:
@@ -975,6 +997,14 @@ def clique_lp_certificate(out, title="") -> Certificate:
                        note_key="cert.note.clique_lp")
 
 
+def atlas_certificate(payload) -> Certificate:
+    """A domain covered by boxes, each with its own parametric certificate,
+    and the one statement they make together. The pieces are embedded or
+    referenced by path and digest; the covering is recomputed, not read."""
+    return Certificate(kind="parametric_atlas", solver_free=True,
+                       payload=payload, note_key="cert.note.parametric_atlas")
+
+
 def clique_lp_farkas_certificate(out, title="") -> Certificate:
     """A partition over every allowed clique that CANNOT exist: the Farkas
     vector `y` on the edges, `r.y > 0`, and the pricing search showing no
@@ -1792,6 +1822,10 @@ def verify(cert, limits=None) -> VerifyReport:
         raise TypeError(t("verify.wrong_type", got=type(cert).__name__))
 
     fn = VERIFIERS.get(cert.kind)
+    if cert.kind == "exploration":
+        # What `--explore` found is a record of a cheap look, not a claim.
+        return VerifyReport(False, cert.kind, False,
+                            detail=t("verify.exploration"))
     if fn is None:
         return VerifyReport(
             False, cert.kind, cert.solver_free,
@@ -1800,6 +1834,9 @@ def verify(cert, limits=None) -> VerifyReport:
     try:
         rep = fn(cert, limits)
         rep.warnings = _provenance_warnings(cert) + list(rep.warnings)
+        if cert.schema > SCHEMA_VERSION:
+            rep.warnings.insert(0, t("verify.schema.newer", schema=cert.schema,
+                                     known=SCHEMA_VERSION))
         return rep
     except Exception as e:  # noqa: BLE001
         return VerifyReport(
@@ -2162,14 +2199,31 @@ def _verify_exact_cover(cert, limits) -> VerifyReport:
 
         present = {_key(e) for e in p["universe"]}
         bad = []
-        for entry in p.get("part_report") or []:
+        report = p.get("part_report") or []
+        # The report IS the parts: one vertex set per part, and that part's
+        # edges exactly the pairs of that set. Without this the cliques were
+        # checked and the parts were not -- a report of small cliques could
+        # sit beside parts that were anything at all.
+        tied = len(report) == len(p["parts"])
+        for k, entry in enumerate(report):
             own = edges_of(entry["vertices"])
             if any(_key(e) not in present for e in own):
                 bad.append(entry["vertices"])
             elif len(own) != entry["edges"]:
                 bad.append(entry["vertices"])
-        checks.append((t("verify.cover.cliques"), not bad,
-                       t("verify.cover.not_cliques", n=len(bad))))
+            elif tied and {_key(e) for e in own} != {_key(e) for e in p["parts"][k]}:
+                bad.append(entry["vertices"])
+        checks.append((t("verify.cover.cliques"), tied and not bad,
+                       t("verify.cover.not_cliques", n=len(bad) if tied
+                         else abs(len(report) - len(p["parts"])))))
+        # The cap on a part's ORDER, when one was claimed: recounted from the
+        # vertex sets, never read. It was stored and never checked.
+        if p.get("max_size") is not None:
+            big = [e["vertices"] for e in report
+                   if len(e["vertices"]) > int(p["max_size"])]
+            checks.append((t("verify.cover.max_size"), not big,
+                           t("verify.cover.max_size_detail", cap=p["max_size"],
+                             n=len(big))))
 
     ok = all(c[1] for c in checks)
     return VerifyReport(
@@ -2761,6 +2815,62 @@ def _zero_combination(A, c) -> bool:
         return False
     return all(sum(c[j] * A[j][r] for j in range(len(A))) == 0
                for r in range(len(A[0]) if A else 0))
+
+
+def _verify_parametric_atlas(cert, limits) -> VerifyReport:
+    """Every piece resolved and verified, all about one program and one
+    claim, and the covering of the domain recomputed cell by cell."""
+    from . import atlas as A
+
+    p = cert.payload
+    checks, warnings = [], []
+    try:
+        ring = tuple(p["parameters"])
+        domain = A._box(p["domain"], ring)
+        certs, missing = [], []
+        for k, rec in enumerate(p["pieces"]):
+            c, why = A.resolve(rec)
+            certs.append(c)
+            if c is None:
+                missing.append("{}: {}".format(k, why))
+        checks.append((t("verify.atlas.resolved"), not missing,
+                       "; ".join(missing[:3]) or str(len(certs))))
+        # Each piece's box as recorded must be the box its certificate is on.
+        boxes_ok = all(c is None or A._text(A.piece_box(c.payload, ring))
+                       == rec.get("box")
+                       for c, rec in zip(certs, p["pieces"]))
+        checks.append((t("verify.atlas.boxes"), boxes_ok, str(len(certs))))
+        labels = {"kind": "verify.atlas.kind", "verified": "verify.atlas.verified",
+                  "program": "verify.atlas.program", "claim": "verify.atlas.claim",
+                  "region": "verify.atlas.region"}
+        for label, ok, detail in A.check_pieces(p, certs, limits):
+            checks.append((t(labels[label]), ok, detail))
+        cov = A.cover(domain, A.boxes_of(p, certs), A.conditions_of(p))
+        declared = p.get("coverage") or {}
+        checks.append((t("verify.atlas.covered"),
+                       cov["gaps"] == 0 and declared.get("cells") == cov["cells"]
+                       and declared.get("excluded") == cov["excluded"],
+                       t("verify.atlas.cells", cells=cov["cells"],
+                         excluded=cov["excluded"], gaps=cov["gaps"])))
+    except (A.NotAnAtlas, KeyError, TypeError, ValueError,
+            ZeroDivisionError) as e:
+        return VerifyReport(False, "parametric_atlas", True, checks=checks + [(
+            t("verify.atlas.readable"), False,
+            "{}: {}".format(type(e).__name__, e))])
+    except A.CoverBudget:
+        checks.append((t("verify.atlas.covered"), False, "budget"))
+    for c in p.get("cited") or []:
+        warnings.append(t("verify.atlas.cited", box=json.dumps(c["box"]),
+                          source=c["source"]))
+    if p.get("region"):
+        warnings.append(t("verify.atlas.region_scope", n=len(p["region"])))
+    return VerifyReport(
+        all(c[1] for c in checks), "parametric_atlas", True, checks=checks,
+        warnings=warnings, method_key="verify.atlas.method",
+        detail=t("verify.atlas.detail", n=len(p.get("pieces") or []),
+                 relation=p["claim"]["relation"],
+                 domain=", ".join("{} in [{}, {}]".format(n, lo, hi)
+                                  for n, (lo, hi) in p["domain"].items())))
 
 
 def _verify_clique_lp(cert, limits) -> VerifyReport:
@@ -5767,6 +5877,7 @@ VERIFIERS = {
     "toric_cone": _verify_toric_cone,
     "affine_semigroup": _verify_affine_semigroup,
     "clique_lp": _verify_clique_lp,
+    "parametric_atlas": _verify_parametric_atlas,
     "capacity_profile": _verify_capacity_profile,
     "equitable_quotient": _verify_equitable_quotient,
     "linear_system": _verify_linear_system,

@@ -197,12 +197,10 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
     """Read every certificate under `where` and work out where things stand."""
     from .certificate import verify as verify_cert
 
+    from . import store
+
     root = Path(where)
-    if root.is_dir():
-        files = sorted(root.rglob("*.json"))
-    elif root.is_file():
-        files = [root]
-    else:
+    if not root.exists():
         raise FileNotFoundError(str(root))
 
     # Lean files are read whether or not there is a single certificate here:
@@ -211,10 +209,8 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
     lean_hollow = hollow_lean(root)
 
     nodes, embedded, broken, skipped = {}, set(), [], 0
-    for f in files:
-        try:
-            raw = json.loads(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+    for ref, rel, raw in store.walk(root):
+        if raw is None:
             skipped += 1
             continue
         data = Certificate.unwrap(raw) if isinstance(raw, dict) else None
@@ -229,7 +225,7 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
 
         prov = data.get("provenance") or {}
         entry = {
-            "path": str(f), "rel": _rel(f, root),
+            "path": ref, "rel": rel,
             "kind": data["kind"], "digest": cert.digest(),
             "headline": _headline(data),
             "solver_free": bool(data.get("solver_free")),
@@ -274,7 +270,7 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
                 # the thing that just failed.
                 failed = ["{}{}".format(name, ": " + d if d else "")
                           for name, ok, d in rep.checks if not ok]
-                broken.append({"path": str(f), "rel": entry["rel"],
+                broken.append({"path": ref, "rel": entry["rel"],
                                "kind": entry["kind"], "failed": failed,
                                "detail": "; ".join(failed) or rep.detail,
                                "claims": rep.detail})
@@ -352,13 +348,12 @@ def manifest(where=".", expect=None) -> dict:
     """
     from . import interchange
 
+    from . import store
+
     rows = []
     root = Path(where)
-    files = sorted(root.rglob("*.json")) if root.is_dir() else [root]
-    for f in files:
-        try:
-            raw = json.loads(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+    for _ref, rel, raw in store.walk(root):
+        if raw is None:
             continue
         data = Certificate.unwrap(raw) if isinstance(raw, dict) else None
         if not isinstance(data, dict) or "kind" not in data:
@@ -367,7 +362,7 @@ def manifest(where=".", expect=None) -> dict:
             cert = Certificate.from_dict(data)
         except (KeyError, TypeError):
             continue
-        rows.append({"rel": _rel(f, root), "kind": data["kind"],
+        rows.append({"rel": rel, "kind": data["kind"],
                      "headline": _headline(data), "digest": cert.digest(),
                      "payload": data.get("payload") or {}})
 

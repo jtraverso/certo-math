@@ -6,7 +6,7 @@ the claims that are false, measure what survives, reduce it to what it really
 is, and assemble the rest — and every step comes back with a **certificate
 anyone can re-check without trusting certo.**
 
-CLI and MCP. Fifty commands. Runs in milliseconds where a formalisation
+CLI and MCP. Fifty-four commands. Runs in milliseconds where a formalisation
 costs hours.
 
 *Español: [README.es.md](README.es.md) · run any command with `--lang es`.*
@@ -14,9 +14,9 @@ costs hours.
 | | |
 |---|---|
 | **[Project page →](https://jtraverso.github.io/certo-math/)** | the didactic introduction: what certo is for, in one page, in both languages |
-| **[Commands](docs/COMMANDS.md)** | all fifty, one entry each: the question, the spec, the certificate, and what it does not establish |
+| **[Commands](docs/COMMANDS.md)** | all fifty-four, one entry each: the question, the spec, the certificate, and what it does not establish |
 | **[Specs](docs/SPECS.md)** | the DSL: every spec type with a minimal working example, shared options, exit codes |
-| **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the fifty-two kinds, which re-check without a solver |
+| **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the fifty-three kinds, which re-check without a solver |
 | **[Worked cases](docs/CASES.md)** | real problems end to end: symmetry, sweeps, parametric bounds, packings, toric data |
 | **[What a result means](docs/VERDICTS.md)** | status against verdict, the four optimisation claims that look alike, `false` against `null`, exit codes |
 | **[Limits](docs/LIMITS.md)** | what it does not do, and the FAQ |
@@ -144,7 +144,7 @@ your terminal, in your language.
    dominates, and a fallback written to avoid it is a fallback in floating
    point.
 
-## The fifty commands
+## The fifty-four commands
 
 Grouped as [`certo commands`](docs/COMMANDS.md) groups them. Full entries,
 with what each one does **not** establish, in
@@ -174,6 +174,7 @@ with what each one does **not** establish, in
 | `quotient` | A partition of a program, and the equivalence it induces | exact counting | **the class data and both regularities**, solver-free |
 | `cone` | Local toric data: primitivity, multiplicity, the height functional, discrepancies | exact det and solve | **the numbers two geometric theorems consume**, solver-free |
 | `columns` | An LP over every clique of a graph, without listing the cliques: column generation with a pricing search the verifier reruns | exact rational arithmetic | solver-free |
+| `atlas` | A parameter domain covered by boxes, each certified by `parametric`, and ONE statement for the whole | every piece re-verified, the covering recomputed cell by cell | **names the uncovered sliver**, solver-free |
 | `semigroup` | Affine semigroups as a checker: pointedness, minimality, and membership of the cone, the group and the semigroup | exact integer and rational arithmetic | **refutes normality with a witness, never asserts it**, solver-free |
 | `profile` | How an optimum responds to ONE capacity across an interval: a piecewise-affine function, not a value | exact rational arithmetic | **decides `f` on its domain** — bound, attainment and coverage — solver-free |
 | `family` | The largest of ten thousand linear programs, and why nothing beats it | exact LP | **the winner and a dual for the rest**, solver-free |
@@ -199,6 +200,9 @@ with what each one does **not** establish, in
 | `ask` | One entry point: load a spec and run whatever it asks for (`what` is the same command) | — | whatever the command produces |
 | `commands` | Which command answers which question | — | — |
 | `repro` | Bundle spec, certificates, versions and hashes for a referee | — | the bundle |
+| `promote` | Run an `--explore` again, certified, and say whether the two agree | re-run certified | the certificate of the certified run |
+| `pack` | Thousands of certificates into one zip with a manifest, each member readable alone | — | the archive; `verify` checks every member |
+| `mcp` | Which certo MCP servers are running old code after a reinstall; `restart --yes` stops them | — | — |
 | `verify` | Re-verify a stored certificate | — | — |
 | `export` | Spec to SMT-LIB2/DIMACS, or a linear Farkas certificate to Lean | — | — |
 | `ledger` | Audit log of what was run | — | — |

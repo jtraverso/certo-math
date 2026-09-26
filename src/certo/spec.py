@@ -392,10 +392,14 @@ class Outcome:
     value: object = None        # value to collect (Fraction, int or float)
 
     @classmethod
-    def clique_partition(cls, graph, parts, at_most=None, limits=None):
+    def clique_partition(cls, graph, parts, at_most=None, max_size=None,
+                         limits=None):
         """A predicate's YES, certified in one line: `parts` (vertex sets)
         partition the edges of `graph` into cliques, and -- with `at_most` --
-        there are no more than `at_most` of them.
+        there are no more than `at_most` of them, and -- with `max_size` --
+        none has more than `max_size` vertices. Without `max_size` the ORDER
+        of a piece is not bounded: K5 as one part is a partition into one
+        clique.
 
             def pred(g):
                 return Outcome.clique_partition(g, my_partition(g), at_most=k)
@@ -411,7 +415,7 @@ class Outcome:
 
         universe = [tuple(e) for e in graph.edges()]
         spec = CoverSpec(universe=universe, parts=[list(p) for p in parts],
-                         cliques=True, exact=True)
+                         cliques=True, exact=True, max_size=max_size)
         res = algebra.cover(spec, limits)
         cert = res.certificate
         if cert is None:
@@ -1373,6 +1377,30 @@ class CliqueLPSpec:
     title: str = ""
     # The family bounded from above too -- only edges and triangles, say.
     max_size: object = None
+
+
+@dataclass
+class AtlasSpec:
+    """A parameter domain covered by boxes, each certified on its own, and
+    ONE statement for the whole.
+
+        AtlasSpec(domain={"p": (0, 1), "q": (0, 1)},
+                  region=[("below", p - q)],
+                  claim=T,
+                  pieces=["out/box1.json", ParametricSpec(...), ...])
+
+    `pieces` are parametric certificates: paths (referenced by digest, so a
+    large atlas need not carry them), Certificates or ParametricSpecs (run
+    and embedded). `cited` covers boxes by an external result instead:
+    `[({"p": (a, b), ...}, "source"), ...]`, and makes the statement relative.
+    """
+
+    domain: dict
+    pieces: list = field(default_factory=list)
+    region: list = field(default_factory=list)
+    claim: object = None
+    cited: list = field(default_factory=list)
+    title: str = ""
 
 
 @dataclass

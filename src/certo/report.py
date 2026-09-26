@@ -54,6 +54,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
+from .i18n import t
+
 #: Set while `rerun` is executing a command. A command whose self-check fails
 #: INSIDE a report would otherwise write a second report about itself.
 _IN_REPORT = False
@@ -390,6 +392,16 @@ def issue_link(category, command, version) -> str:
     return ISSUE_URL + "?" + urlencode(fields)
 
 
+def coverage_sentence(s) -> str:
+    """What a coverage summary says, including when it says nothing: only
+    INCONCLUSIVE results are recorded, so zero lines is what a run where
+    everything concluded looks like -- not a broken log."""
+    if not s.get("lines"):
+        return t("coverage.empty")
+    return t("coverage.summary", n=s["lines"], first=s.get("first") or "-",
+             last=s.get("last") or "-")
+
+
 def _coverage_summary() -> dict:
     """Sizes and counts only. The file's own path is left out: it names a user."""
     from . import coverage
@@ -436,8 +448,9 @@ def build(argv=None, cert_path=None, wrong=False, with_coverage=False,
     cert = None
     if cert_path:
         from .certificate import Certificate
-        cert = Certificate.from_dict(json.loads(
-            Path(cert_path).read_text(encoding="utf-8")))
+        from . import store
+
+        cert = Certificate.from_dict(store.read_json(cert_path))
 
     doc = doctor.report()
     lint_report = None

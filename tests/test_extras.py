@@ -11557,6 +11557,113 @@ def _explicit_clique_lp(edges, problem, weight, m):
     return Fraction(engine.opt(s, LIM).meta["objective"])
 
 
+def _atlas_piece(box, **kw):
+    from certo import ParametricSpec
+    from certo.polynomials import Poly
+
+    R = ("p", "q")
+    p, q = Poly.var(R, "p"), Poly.var(R, "q")
+    one = Poly.const(R, 1)
+    return ParametricSpec(parameters={"p": 0, "q": 0}, objective={"x": one},
+                          constraints=[("c", {"x": p - q + one.scaled(2)},
+                                        "<=", one)],
+                          dual={"c": Fraction(1)}, box=box, claim=one, **kw)
+
+
+def test_an_atlas_joins_boxes_into_one_statement_and_names_the_sliver():
+    """Four quadrants cover the square; three do not, and the fourth is named
+    with its coordinates; three do when the region excludes the fourth."""
+    from certo import AtlasSpec
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    R = ("p", "q")
+    p, q = Poly.var(R, "p"), Poly.var(R, "q")
+    one = Poly.const(R, 1)
+    H = Fraction(1, 2)
+    quads = [{"p": (0, H), "q": (0, H)}, {"p": (H, 1), "q": (0, H)},
+             {"p": (H, 1), "q": (H, 1)}, {"p": (0, H), "q": (H, 1)}]
+    dom = {"p": (0, 1), "q": (0, 1)}
+    r = algebra.atlas(AtlasSpec(domain=dom,
+                                pieces=[_atlas_piece(b) for b in quads]), LIM)
+    assert r.verdict is Verdict.PROVED, r.detail
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    r = algebra.atlas(AtlasSpec(domain=dom,
+                                pieces=[_atlas_piece(b) for b in quads[:3]]), LIM)
+    assert r.certificate is None and r.meta["gaps"] == 1
+    assert r.meta["uncovered"] == [{"p": ["0", "1/2"], "q": ["1/2", "1"]}]
+    r = algebra.atlas(AtlasSpec(
+        domain=dom, region=[("cut", p - q - one.scaled(Fraction(1, 4)))],
+        pieces=[_atlas_piece(b) for b in quads[:3]]), LIM)
+    assert r.verdict is Verdict.PROVED and r.meta["excluded"] == 1
+    # a region condition that only TOUCHES the missing cell does not exclude it
+    r = algebra.atlas(AtlasSpec(domain=dom, region=[("touch", p - q)],
+                                pieces=[_atlas_piece(b) for b in quads[:3]]), LIM)
+    assert r.certificate is None and r.meta["gaps"] == 1
+
+
+def test_an_atlas_refuses_pieces_that_are_not_one_statement():
+    """A different program, a different claim, a piece assuming a region the
+    domain does not: each stops the atlas, by name."""
+    from certo import AtlasSpec
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    R = ("p", "q")
+    p, q = Poly.var(R, "p"), Poly.var(R, "q")
+    one = Poly.const(R, 1)
+    dom = {"p": (0, 1), "q": (0, 1)}
+    a = _atlas_piece({"p": (0, 1), "q": (0, Fraction(1, 2))})
+    b = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)})
+    r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, b]), LIM)
+    assert r.verdict is Verdict.PROVED, r.detail
+    other = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)})
+    other.objective = {"x": one.scaled(Fraction(1, 2))}
+    r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, other]), LIM)
+    assert r.certificate is None and "program" in r.meta["failed"]
+    looser = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)})
+    looser.claim = one.scaled(2)
+    r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, looser]), LIM)
+    assert r.certificate is None and "claim" in r.meta["failed"]
+    assuming = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)},
+                            region=[("x", p - q + one)])
+    r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, assuming]), LIM)
+    assert r.certificate is None and "region" in r.meta["failed"]
+
+
+def test_an_atlas_references_pieces_by_path_and_digest():
+    """Written with `--cert`, listed by path: referenced, not copied. The
+    atlas verifies while the file is there and unchanged, and fails when it
+    is edited or gone. A cited box covers, and is said to."""
+    import tempfile
+
+    from certo import AtlasSpec
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+
+    dom = {"p": (0, 1), "q": (0, 1)}
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        piece = algebra.parametric(_atlas_piece({"p": (0, 1),
+                                                 "q": (0, Fraction(1, 2))}), LIM)
+        f = tmp / "lower.json"
+        f.write_text(piece.certificate.to_json(), encoding="utf-8")
+        r = algebra.atlas(AtlasSpec(domain=dom, pieces=[str(f)],
+                                    cited=[({"p": (0, 1), "q": (Fraction(1, 2), 1)},
+                                            "Lemma 3 of the manuscript")]), LIM)
+        assert r.verdict is Verdict.PROVED and "RELATIVE" in r.detail
+        rec = r.certificate.payload["pieces"][0]
+        assert "cert" not in rec and rec["digest"] == piece.certificate.digest()
+        rep = verify(_roundtrip(r.certificate), LIM)
+        assert rep.ok and any("Lemma 3" in w for w in rep.warnings)
+        d = json.loads(f.read_text(encoding="utf-8"))
+        d["payload"]["title"] = "edited"
+        f.write_text(json.dumps(d), encoding="utf-8")
+        assert not verify(_roundtrip(r.certificate), LIM).ok
+        f.unlink()
+        assert not verify(Certificate.from_dict(r.certificate.to_dict()), LIM).ok
+
+
 def test_a_partition_into_triangles_that_cannot_exist_is_certified():
     """K4 minus an edge: the two triangles share the edge 0-1, so no
     fractional partition into triangles exists. Phase one finds the Farkas
@@ -12877,6 +12984,329 @@ def _doctor_test_names():
     return out
 
 
+def test_doctor_finds_lean_without_asking_elan_to_install_anything():
+    """Reported: the Lean probe ran `lake --version` where no toolchain is
+    pinned, and elan began downloading one. The probe now asks elan what is
+    installed and runs `lake` only pinned to one of those -- faked here, so
+    the test itself cannot download anything either."""
+    import subprocess as sp
+
+    from certo import doctor
+
+    calls = []
+
+    class R:
+        def __init__(self, out, code=0):
+            self.stdout, self.stderr, self.returncode = out, "", code
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw.get("cwd")))
+        if cmd[1:] == ["toolchain", "list"]:
+            return R("leanprover/lean4:v4.28.0 (default)\n")
+        pinned = pathlib.Path(kw["cwd"], "lean-toolchain").read_text().strip()
+        assert pinned == "leanprover/lean4:v4.28.0"
+        return R("Lake version 5.0.0 (Lean version 4.28.0)\n")
+
+    real_which, real_run = doctor.shutil.which, doctor.subprocess.run
+    doctor.shutil.which = lambda n: "/fake/" + n
+    doctor.subprocess.run = fake_run
+    try:
+        ok, detail = doctor._lean()
+    finally:
+        doctor.shutil.which, doctor.subprocess.run = real_which, real_run
+    assert ok and "4.28.0" in detail
+    assert [c[0][1:] for c in calls] == [["toolchain", "list"], ["--version"]]
+    assert calls[1][1] is not None          # lake ran pinned, never from here
+    assert sp.run is real_run
+
+
+def test_python_dash_m_certo_is_an_entry_point():
+    """`python -m certo` starts one process and no launcher -- the entry
+    point to use from subprocess on Windows."""
+    import subprocess
+    import sys
+
+    out = subprocess.run([sys.executable, "-m", "certo", "--version"],
+                         capture_output=True, text=True, timeout=120,
+                         env=dict(os.environ, PYTHONPATH=str(
+                             pathlib.Path(__file__).resolve().parent.parent / "src")))
+    assert out.returncode == 0 and "certo" in out.stdout, out.stderr
+
+
+def test_json_mode_answers_in_json_even_when_certo_fails():
+    """A failure with --json printed nothing on stdout: empty output, which a
+    caller of thousands of runs cannot tell from a crash."""
+    import contextlib
+    import io
+
+    from certo import cli
+
+    # a refusal (exit 1, a sentence on stderr) and an exception (exit 3)
+    for body, want in (("def spec():\n    return 42\n", 1),
+                       ("def spec():\n    raise RuntimeError('boom')\n", 3)):
+        bad = _report_spec(body)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), \
+                contextlib.redirect_stderr(io.StringIO()):
+            code = cli.main(["opt", str(bad), "--json"])
+        assert code == want, (body, code)
+        got = json.loads(buf.getvalue())
+        assert got["status"] == "error" and got["exit"] == want
+        assert got["message"], got
+
+
+def test_coverage_alone_is_printed_not_reported():
+    """`report --coverage` with nothing to report wrote a bug-report folder
+    and a zip to show a summary. It prints it now, and says why an empty one
+    is empty."""
+    import contextlib
+    import io
+
+    from certo import cli
+
+    before = set(pathlib.Path.cwd().glob("certo-report-*"))
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = cli.main(["report", "--coverage"])
+    assert code == 0
+    assert set(pathlib.Path.cwd().glob("certo-report-*")) == before
+    text = buf.getvalue()
+    from certo import report as rp
+    assert rp.coverage_sentence(rp._coverage_summary()) in text
+
+
+def test_a_compressed_certificate_is_the_same_certificate():
+    """`--cert x.json.gz` writes gzip; everything that reads a certificate
+    reads it; the digest -- over the content -- does not move."""
+    import tempfile
+
+    from certo import LPSpec, store
+    from certo.engines import lp
+
+    s = LPSpec(sense="max")
+    s.variable("x")
+    s.objective({"x": 1})
+    s.constraint({"x": 1}, "<=", 3, name="cap")
+    cert = lp.opt(s, LIM).certificate
+    with tempfile.TemporaryDirectory() as tmp:
+        gz = pathlib.Path(tmp) / "c.json.gz"
+        store.write_certificate(cert, gz)
+        assert gz.read_bytes()[:2] == b"\x1f\x8b"
+        back = Certificate.from_dict(store.read_json(gz))
+        assert back.digest() == cert.digest() and verify(back, LIM).ok
+        from certo import status_report
+        got = status_report.scan(tmp)
+        assert got is not None
+
+
+def test_pack_puts_a_directory_in_one_archive_that_verifies_member_by_member():
+    """`pack` writes one zip with a manifest; `verify` checks every member
+    and the manifest; a member is addressed as `a.zip#name`; an edited member
+    is caught, and so is a manifest that no longer matches."""
+    import tempfile
+    import zipfile
+
+    from certo import LPSpec, cli, store
+    from certo.engines import lp
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = pathlib.Path(tmp)
+        (tmp / "certs").mkdir()
+        for k in (1, 2, 3):
+            s = LPSpec(sense="max")
+            s.variable("x")
+            s.objective({"x": 1})
+            s.constraint({"x": 1}, "<=", k, name="cap")
+            store.write_certificate(lp.opt(s, LIM).certificate,
+                                    tmp / "certs" / "c{}.json{}".format(
+                                        k, ".gz" if k == 3 else ""))
+        (tmp / "certs" / "notes.json").write_text('{"hello": 1}', encoding="utf-8")
+        out = store.pack(tmp / "certs", tmp / "family.zip")
+        assert out["count"] == 3 and out["skipped"] == ["notes.json"]
+        rep = store.verify_archive(tmp / "family.zip")
+        assert rep["valid"] == 3 and not rep["invalid"] and rep["manifest"] == "ok"
+        one = Certificate.from_dict(store.read_json(str(tmp / "family.zip") + "#c2.json"))
+        assert verify(one, LIM).ok
+        assert cli.main(["verify", str(tmp / "family.zip")]) == 0
+        # an edited member
+        with zipfile.ZipFile(tmp / "family.zip") as z:
+            members = {n: z.read(n) for n in z.namelist()}
+        d = json.loads(members["c2.json"])
+        d["payload"]["objective"] = "99"
+        members["c2.json"] = json.dumps(d).encode()
+        with zipfile.ZipFile(tmp / "bad.zip", "w") as z:
+            for n, b in members.items():
+                z.writestr(n, b)
+        rep = store.verify_archive(tmp / "bad.zip")
+        assert rep["invalid"] and rep["manifest"] == "differs"
+        assert cli.main(["verify", str(tmp / "bad.zip")]) == 1
+
+
+def test_a_failed_box_check_says_where_and_what_to_cut():
+    """A \"not proved\" used to say which column and no more. Now: at a
+    vertex -- negative there, no subdivision helps -- or inside, with the
+    coordinate and the point to split at."""
+    p, K = _pring()
+    r = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+               constraints=[("c", {"x": K(2) - p}, "<=", K(1))],
+               dual={"c": Fraction(1)}, box={"p": (0, 2)})
+    d = r.meta["diagnosis"][0]
+    assert d["corner"] and d["point"] == {"p": "2"} and d["coefficient"] == "-1"
+    assert "p = 2" in r.detail
+    r = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+               constraints=[("c", {"x": p * p - p + K(Fraction(13, 10))},
+                             "<=", K(1))],
+               dual={"c": Fraction(1)}, box={"p": (0, 1)})
+    d = r.meta["diagnosis"][0]
+    assert not d["corner"] and d["split"] == "p" and d["at"] == "1/2"
+    # and it was right: splitting there proves it
+    r = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+               constraints=[("c", {"x": p * p - p + K(Fraction(13, 10))},
+                             "<=", K(1))],
+               dual={"c": Fraction(1)}, box={"p": (0, 1)}, subdivide=2)
+    assert r.verdict is Verdict.PROVED, r.detail
+
+
+def test_mcp_status_names_the_servers_that_run_old_code():
+    """Faked process table: a server started before the install is stale, a
+    later one is not, and `restart` without --yes stops nothing."""
+    import contextlib
+    import io
+
+    from certo import cli, mcpctl
+
+    real = mcpctl.servers, mcpctl.install_time, mcpctl.stop
+    stopped = []
+    mcpctl.servers = lambda: [
+        {"pid": 11, "started": 100.0, "cmd": "python -m certo.mcp_server"},
+        {"pid": 12, "started": 300.0, "cmd": "python -m certo.mcp_server"}]
+    mcpctl.install_time = lambda: 200.0
+    mcpctl.stop = lambda pids: stopped.extend(pids) or [(p, True, "") for p in pids]
+    try:
+        st = mcpctl.status()
+        assert [r["stale"] for r in st["servers"]] == [True, False]
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            assert cli.main(["mcp", "restart"]) == 0
+        assert stopped == [] and "11" in buf.getvalue()
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.main(["mcp", "restart", "--yes"])
+        assert stopped == [11]
+    finally:
+        mcpctl.servers, mcpctl.install_time, mcpctl.stop = real
+    # a checkout on the path is never called stale
+    assert mcpctl.stale() is None or mcpctl.running_installed_copy()
+
+
+def test_an_exploration_is_never_proved_and_exits_as_inconclusive():
+    """`--explore` answers cheaply and says so: status `explored`, verdict
+    `likely`, no certificate, exit 2 -- a script branching on the code treats
+    it as the uncertified answer it is."""
+    import contextlib
+    import io
+
+    from certo import LPSpec, cli, explore
+    from certo.status import Status
+
+    s = LPSpec(sense="max")
+    s.variable("x")
+    s.variable("y")
+    s.objective({"x": 3, "y": 2})
+    s.constraint({"x": 1, "y": 1}, "<=", 4, name="a")
+    s.constraint({"x": 1, "y": 3}, "<=", 6, name="b")
+    r = explore.lp("opt", s, LIM)
+    assert r.status is Status.EXPLORED and r.verdict is Verdict.LIKELY
+    assert r.certificate is None and not r.status.conclusive
+    assert abs(r.meta["value"] - 12) < 1e-9      # at (4, 0)
+    f = _report_spec("from certo import LPSpec\n"
+                     "def spec():\n"
+                     "    s = LPSpec(sense='max')\n"
+                     "    s.variable('x')\n"
+                     "    s.objective({'x': 1})\n"
+                     "    s.constraint({'x': 1}, '<=', 3, name='cap')\n"
+                     "    return s\n")
+    with contextlib.redirect_stdout(io.StringIO()):
+        assert cli.main(["opt", str(f), "--explore"]) == 2
+        assert cli.main(["opt", str(f)]) == 0
+    # a command with no cheaper route runs certified, and says so
+    with contextlib.redirect_stdout(io.StringIO()), \
+            contextlib.redirect_stderr(io.StringIO()) as err:
+        cli.main(["prove", str(_report_spec(
+            "import z3\nfrom certo import Spec\n"
+            "def spec():\n    x = z3.Real('x')\n    s = Spec()\n"
+            "    s.assume('p', x >= 1)\n    s.claim(x >= 0)\n    return s\n")),
+            "--explore"])
+    assert "certified" in err.getvalue()
+
+
+def test_a_parametric_exploration_samples_and_certifies_a_counterexample():
+    """A true claim holds at every sampled point -- likely, not proved; a
+    false one fails at a sample, is re-solved EXACTLY there, and comes back
+    refuted with the certificate of that instance."""
+    from certo import ParametricSpec, explore
+
+    p, K = _pring()
+    base = dict(parameters={"p": 0}, objective={"x": K(1)},
+                constraints=[("c", {"x": K(2) - p}, "<=", K(1))],
+                box={"p": (0, 1)})
+    r = explore.parametric(ParametricSpec(**base, claim=K(1)))
+    assert r.verdict is Verdict.LIKELY and r.certificate is None
+    r = explore.parametric(ParametricSpec(**base, claim=K(Fraction(3, 4))))
+    assert r.verdict is Verdict.REFUTED
+    assert r.meta["point"] == {"p": "3/4"} and r.meta["value"] == "4/5"
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    # a region is respected: points where it fails are not sampled
+    pts = explore.points(ParametricSpec(**base, region=[("half", p - K(Fraction(1, 2)))]))
+    assert pts and all(pt["p"] >= Fraction(1, 2) for pt in pts)
+
+
+def test_a_sweep_exploration_is_a_seeded_sample():
+    """Not the whole family: a sample, the same sample for the same seed, and
+    a failure in it is named."""
+    from certo import SweepSpec, explore
+
+    spec = SweepSpec(n=5, predicate=lambda g: g.m <= 8)
+    a = explore.sweep(spec, Limits(seed=3), use_geng=False, sample=10)
+    b = explore.sweep(spec, Limits(seed=3), use_geng=False, sample=10)
+    assert a.verdict is Verdict.LIKELY and a.meta["sampled"] == 10
+    assert a.meta["failures"] == b.meta["failures"]
+    full = explore.sweep(spec, LIM, use_geng=False, sample=10_000)
+    assert full.meta["sampled"] == full.meta["family"] == 34
+    assert full.meta["failures"]          # K5 minus one edge has 9 edges
+
+
+def test_promote_runs_an_exploration_certified_and_compares():
+    """The record is not a certificate -- verify refuses it -- and promote
+    runs the same command certified and says whether they agree."""
+    import contextlib
+    import io
+    import tempfile
+
+    from certo import cli
+    from certo.certificate import Certificate
+
+    f = _report_spec("from certo import LPSpec\n"
+                     "def spec():\n"
+                     "    s = LPSpec(sense='max')\n"
+                     "    s.variable('x')\n"
+                     "    s.objective({'x': 1})\n"
+                     "    s.constraint({'x': 3}, '<=', 2, name='cap')\n"
+                     "    return s\n")
+    with tempfile.TemporaryDirectory() as tmp:
+        rec = pathlib.Path(tmp) / "rec.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            assert cli.main(["opt", str(f), "--explore", "--record", str(rec)]) == 2
+        data = json.loads(rec.read_text(encoding="utf-8"))
+        assert data["kind"] == "exploration" and "--explore" not in data["argv"]
+        assert not verify(Certificate.from_dict(data), LIM).ok
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = cli.main(["promote", str(rec), "--json"])
+        got = json.loads(buf.getvalue())
+        assert code == 0 and got["agrees"] is True
+        assert got["certified"]["meta"]["objective"] == "2/3"
+
+
 def test_doctor_tests_stay_hermetic():
     """A new doctor test may not quietly start reading this machine.
 
@@ -12968,6 +13398,10 @@ def test_no_spelled_number_on_the_page_is_a_stale_count():
     counts = catalogue.counts()
     words = {catalogue.WORDS_EN[counts["commands"]],
              catalogue.WORDS_ES[counts["commands"]]}
+    # Spanish shortens "uno" to "un" before a noun ("cincuenta y un comandos")
+    # and not when the number stands alone, as it does in these sentences
+    # ("los cincuenta y uno, cada uno..."). Both are the count.
+    words |= {re.sub(r" un$", " uno", w) for w in words}
     page = _page()
     wrong = []
     for lead in ("All ", "Los "):
@@ -13531,6 +13965,57 @@ def test_a_vertex_past_the_ladder_is_solved_on_its_support():
     assert rep["ok"] and x_ex == [Fraction(1, q + 1)] * 2
 
 
+def test_schema_5_records_a_large_row_by_its_size():
+    """The change schema 5 exists for: a row polynomial past the limit is
+    recorded by size -- verify rebuilds it and never read the copy -- and a
+    small one is written as before."""
+    from certo import parametric
+
+    p, K = _pring()
+    big, power = K(0), K(1)
+    for _k in range(parametric.ROW_TEXT_MAX + 5):
+        big, power = big + power, power * p
+    r = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+               constraints=[("c", {"x": big + K(1)}, "<=", K(1))],
+               dual={"c": Fraction(1)})
+    assert r.verdict is Verdict.PROVED, r.detail
+    row = r.certificate.payload["rows"][0]
+    assert "residual" not in row and row["recomputed"] is True
+    assert row["residual_terms"] == parametric.ROW_TEXT_MAX + 5
+    assert r.certificate.to_dict()["schema"] == 5
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    small = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+                   constraints=[("c", {"x": K(2) + p}, "<=", K(1))],
+                   dual={"c": Fraction(1)})
+    assert "residual" in small.certificate.payload["rows"][0]
+
+
+def test_a_certificate_keeps_its_schema_and_a_newer_one_is_said():
+    """Read back, a schema-4 certificate stays 4 -- embedded in something
+    new, it still says what it is -- and one from a schema this certo does
+    not know yet verifies with a warning, rather than silently."""
+    from certo.certificate import SCHEMA_VERSION
+
+    p, K = _pring()
+    r = _pmode(parameters={"p": 0}, objective={"x": K(1)},
+               constraints=[("c", {"x": K(2) + p}, "<=", K(1))],
+               dual={"c": Fraction(1)})
+    d = r.certificate.to_dict()
+    d4 = dict(d, schema=4)
+    back = Certificate.from_dict(d4)
+    assert back.schema == 4 and back.to_dict()["schema"] == 4
+    assert back.digest() == r.certificate.digest()
+    rep = verify(back, LIM)
+    assert rep.ok and not any("schema" in w for w in rep.warnings)
+    newer = Certificate.from_dict(dict(d, schema=SCHEMA_VERSION + 1))
+    rep = verify(newer, LIM)
+    assert rep.ok and rep.warnings[0] == t("verify.schema.newer",
+                                           schema=SCHEMA_VERSION + 1,
+                                           known=SCHEMA_VERSION)
+    del d4["schema"]
+    assert Certificate.from_dict(d4).schema == 4
+
+
 def test_a_large_certificate_is_written_small_and_still_verifies():
     """A file past a megabyte is written without indentation: the same
     content, the same digest, and it verifies. The payload is untouched --
@@ -13701,6 +14186,64 @@ def test_a_sweep_predicate_certified_by_a_clique_partition_in_one_line():
     assert not rep.ok
     assert any(c[0] == t("verify.sweep.entry_subject") and not c[1]
                for c in rep.checks)
+
+
+def test_the_order_of_a_piece_is_bounded_when_asked_and_rechecked():
+    """Reported: K5 as ONE part was accepted with `at_most=1` -- true, and
+    not the claim a cp<=4 partition makes. `max_size` bounds the order, and
+    the verifier rechecks it from the vertex sets."""
+    from certo import Outcome
+    from certo.graphs import Graph
+
+    k5 = Graph.from_edges(5, [(i, j) for i in range(5) for j in range(i + 1, 5)])
+    assert Outcome.clique_partition(k5, [[0, 1, 2, 3, 4]], at_most=1).ok is True
+    out = Outcome.clique_partition(k5, [[0, 1, 2, 3, 4]], at_most=1,
+                                   max_size=4)
+    assert out.ok is None and out.cert is None
+    parts = [[0, 1, 2, 3], [0, 4], [1, 4], [2, 4], [3, 4]]
+    out = Outcome.clique_partition(k5, parts, max_size=4)
+    assert out.ok is True and out.cert.payload["max_size"] == 4
+    assert verify(out.cert, LIM).ok
+    d = json.loads(json.dumps(out.cert.to_dict()))
+    d["payload"]["max_size"] = 3
+    rep = verify(Certificate.from_dict(d), LIM)
+    assert not rep.ok and any(c[0] == t("verify.cover.max_size") and not c[1]
+                              for c in rep.checks)
+
+
+def test_the_cover_report_is_tied_to_the_parts_it_describes():
+    """The verifier checked that each reported vertex set is a clique, and
+    never that it IS the part it sits beside. A report of small cliques next
+    to parts that were something else verified."""
+    from certo import Outcome
+    from certo.graphs import Graph
+
+    k4 = Graph.from_edges(4, [(i, j) for i in range(4) for j in range(i + 1, 4)])
+    out = Outcome.clique_partition(k4, [[0, 1, 2], [0, 3], [1, 3], [2, 3]])
+    assert out.ok is True and verify(out.cert, LIM).ok
+    d = json.loads(json.dumps(out.cert.to_dict()))
+    # swap two parts' edge lists: every report entry is still a clique
+    d["payload"]["parts"][0], d["payload"]["parts"][1] = \
+        d["payload"]["parts"][1], d["payload"]["parts"][0]
+    assert not verify(Certificate.from_dict(d), LIM).ok
+    d = json.loads(json.dumps(out.cert.to_dict()))
+    d["payload"]["part_report"].pop()
+    assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_the_pair_clique_parts_returns_is_refused_by_name():
+    """`check(universe, clique_parts(...))` answered "covered 0"."""
+    from certo.cover import check, clique_parts
+
+    edges = [(0, 1), (0, 2), (1, 2)]
+    pair = clique_parts(edges, [[0, 1, 2]])
+    try:
+        check(edges, pair)
+    except TypeError as e:
+        assert "clique_parts" in str(e)
+    else:
+        raise AssertionError("the pair was accepted")
+    assert check(edges, pair[0])["ok"]
 
 
 def test_a_partition_that_fails_decides_nothing():

@@ -6,7 +6,7 @@ romper las afirmaciones falsas, medir lo que sobrevive, reducirlo a lo que
 realmente es, y ensamblar el resto— y cada paso vuelve con un **certificado
 que cualquiera puede re-comprobar sin fiarse de certo.**
 
-CLI y MCP. Cincuenta comandos. Corre en milisegundos donde una
+CLI y MCP. Cincuenta y cuatro comandos. Corre en milisegundos donde una
 formalización cuesta horas.
 
 *English: [README.md](README.md) · cualquier comando acepta `--lang en`.*
@@ -14,9 +14,9 @@ formalización cuesta horas.
 | | |
 |---|---|
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
-| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
+| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta y cuatro, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
-| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cincuenta y dos tipos, cuáles se re-comprueban sin solver |
+| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cincuenta y tres tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
 | **[Qué significa un resultado](docs/es/VERDICTS.md)** | estado frente a veredicto, las cuatro afirmaciones de optimización que se parecen, `false` frente a `null`, códigos de salida |
 | **[Límites](docs/es/LIMITS.md)** | qué no hace, y las preguntas frecuentes |
@@ -144,7 +144,7 @@ en tu idioma.
    un bucle sobre la CLI: manda el arranque, y un apaño escrito para evitarlo
    es un apaño en punto flotante.
 
-## Los cincuenta comandos
+## Los cincuenta y cuatro comandos
 
 Agrupados como los agrupa [`certo commands`](docs/es/COMMANDS.md). Las entradas
 completas, con lo que cada uno **no** establece, en
@@ -174,6 +174,7 @@ completas, con lo que cada uno **no** establece, en
 | `quotient` | Una partición de un programa, y la equivalencia que induce | conteo exacto | **los datos de clase y ambas regularidades**, sin solver |
 | `cone` | Datos tóricos locales: primitividad, multiplicidad, funcional de altura, discrepancias | det y solve exactos | **los números que consumen dos teoremas geométricos**, sin solver |
 | `columns` | Un LP sobre todas las cliques de un grafo, sin listarlas: generación de columnas con una búsqueda de precios que el verificador repite | aritmética racional exacta | sin solver |
+| `atlas` | Un dominio de parámetros cubierto por cajas, cada una certificada por `parametric`, y UN enunciado para el todo | cada pieza re-verificada, el cubrimiento recalculado celda por celda | **nombra la franja sin cubrir**, sin solver |
 | `semigroup` | Semigrupos afines como comprobador: puntiagudez, minimalidad y pertenencia al cono, al grupo y al semigrupo | aritmética entera y racional exacta | **refuta la normalidad con un testigo, nunca la afirma**, sin solver |
 | `profile` | Cómo responde un óptimo a UNA capacidad en todo un intervalo: una función afín a trozos, no un valor | aritmética racional exacta | **decide `f` en su dominio** — cota, alcanzabilidad y cobertura — sin solver |
 | `family` | El mayor de diez mil programas lineales, y por qué nada lo supera | LP exacto | **el ganador y un dual para el resto**, sin solver |
@@ -199,6 +200,9 @@ completas, con lo que cada uno **no** establece, en
 | `ask` | Un único punto de entrada: carga un spec y corre lo que pida (`what` es el mismo comando) | — | lo que produzca el comando |
 | `commands` | Qué comando responde qué pregunta | — | — |
 | `repro` | Empaqueta spec, certificados, versiones y hashes para un árbitro | — | el paquete |
+| `promote` | Corre de nuevo un `--explore`, certificado, y dice si coinciden | se corre certificado | el certificado de la corrida certificada |
+| `pack` | Miles de certificados en un solo zip con manifiesto, cada miembro legible por separado | — | el archivo; `verify` comprueba cada miembro |
+| `mcp` | Qué servidores MCP de certo siguen con código viejo tras reinstalar; `restart --yes` los detiene | — | — |
 | `verify` | Re-verifica un certificado guardado | — | — |
 | `export` | Spec a SMT-LIB2/DIMACS, o un certificado de Farkas lineal a Lean | — | — |
 | `ledger` | Registro de auditoría de lo que se corrió | — | — |

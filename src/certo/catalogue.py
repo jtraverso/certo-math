@@ -100,6 +100,9 @@ WORDS_EN = {
     42: "forty-two", 43: "forty-three", 44: "forty-four", 45: "forty-five",
     46: "forty-six", 47: "forty-seven", 48: "forty-eight",
     49: "forty-nine", 50: "fifty", 51: "fifty-one", 52: "fifty-two",
+    53: "fifty-three", 54: "fifty-four", 55: "fifty-five",
+    56: "fifty-six", 57: "fifty-seven", 58: "fifty-eight",
+    59: "fifty-nine", 60: "sixty",
 }
 
 WORDS_ES = {
@@ -111,7 +114,10 @@ WORDS_ES = {
     43: "cuarenta y tres", 44: "cuarenta y cuatro",
     45: "cuarenta y cinco", 46: "cuarenta y seis", 47: "cuarenta y siete",
     48: "cuarenta y ocho", 49: "cuarenta y nueve", 50: "cincuenta",
-    51: "cincuenta y un", 52: "cincuenta y dos",
+    51: "cincuenta y un", 52: "cincuenta y dos", 53: "cincuenta y tres",
+    54: "cincuenta y cuatro", 55: "cincuenta y cinco",
+    56: "cincuenta y seis", 57: "cincuenta y siete",
+    58: "cincuenta y ocho", 59: "cincuenta y nueve", 60: "sesenta",
 }
 
 

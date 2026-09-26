@@ -73,7 +73,9 @@ def certify(spec, limits=None, root=".") -> dict:
     cert_path = pathlib.Path(root) / str(getattr(spec, "certificate", ""))
     if not cert_path.exists():
         raise NotBindable(_t("bind.no_certificate", path=str(cert_path)))
-    cert = json.loads(cert_path.read_text(encoding="utf-8"))
+    from . import store
+
+    cert = store.read_json(cert_path)
 
     prov = _provenance(cert)
     spec_path = prov.get("path")

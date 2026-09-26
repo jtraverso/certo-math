@@ -78,9 +78,9 @@ privileges. Set `CERTO_NO_EXEC=1` in `.mcp.json` if the specs are not yours:
 
 ## Supported versions
 
-The latest release on PyPI. The certificate schema is frozen at 4 and payloads
-do not move, so a certificate issued by an older certo still verifies — but
-fixes land on the newest version only.
+The latest release on PyPI. The certificate schema is frozen at 5 (since
+0.20; 4 before) and payloads do not move, so a certificate issued by an older
+certo still verifies — but fixes land on the newest version only.
 
 ## Out of scope
 

@@ -184,7 +184,9 @@ def emit(res: Result, args) -> int:
 
     out = getattr(args, "cert", None)
     if out and res.certificate is not None:
-        Path(out).write_text(res.certificate.to_json(), encoding="utf-8")
+        from . import store
+
+        store.write_certificate(res.certificate, out)
         if not getattr(args, "json", False):
             print("  " + t("cli.cert.written", path=out))
 
@@ -428,6 +430,19 @@ def cmd_report(args):
     argv = list(args.argv or [])
     if argv and argv[0] == "--":
         argv = argv[1:]
+    # Only the coverage, and nothing to report: print it, write nothing. It
+    # used to build a whole bug report -- folder, zip, a proposed issue --
+    # to show a summary.
+    if (getattr(args, "coverage", False) and not argv
+            and not args.certificate and not getattr(args, "stderr_file", None)):
+        s = report._coverage_summary()
+        if args.json:
+            print(json.dumps(s, indent=2, ensure_ascii=False))
+        else:
+            print("  " + report.coverage_sentence(s))
+            for cmd, n in sorted((s.get("by_command") or {}).items()):
+                print("    {:<12} {}".format(cmd, n))
+        return 0
     info = report.build(argv=argv or None, cert_path=args.certificate,
                         wrong=args.wrong, with_coverage=args.coverage,
                         out=args.out,
@@ -454,6 +469,100 @@ def cmd_report(args):
         print("  " + t("cli.report.file_it", link=info["link"]))
     print("  " + t("cli.report.nothing_sent"))
     return 0
+
+
+def cmd_atlas(args):
+    from .engines import algebra
+    from .spec import AtlasSpec, load_spec
+
+    spec = load_spec(args.spec, AtlasSpec)
+    res = algebra.atlas(spec, limits_from(args), spec_path=args.spec)
+    if res.certificate is None and res.meta.get("uncovered") \
+            and not getattr(args, "json", False):
+        print("  " + t("cli.atlas.uncovered", n=res.meta["gaps"]))
+        for cell in res.meta["uncovered"]:
+            print("    " + ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                                     for n, (lo, hi) in cell.items()))
+    return emit(res, args)
+
+
+def _verify_archive(args):
+    """Every member of a packed archive, and its manifest."""
+    from . import store
+
+    out = store.verify_archive(args.certificate,
+                               jobs=int(getattr(args, "jobs", 1) or 1),
+                               timeout_ms=limits_from(args).timeout_ms)
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+    else:
+        print(("VALID  " if not out["invalid"] and out["manifest"] == "ok"
+               else "INVALID  ") + t("cli.archive.summary", n=out["count"],
+                                     valid=out["valid"],
+                                     invalid=len(out["invalid"]),
+                                     manifest=out["manifest"]))
+        for row in out["invalid"][:20]:
+            print("  [XX] {}  ({}) {}".format(row["member"], row["kind"],
+                                              (row["detail"] or "")[:120]))
+        for name, digest in out["manifest_differs"]:
+            print("  [XX] " + t("cli.archive.manifest_differs", name=name,
+                                digest=digest))
+    return 0 if not out["invalid"] and out["manifest"] == "ok" else 1
+
+
+def cmd_mcp(args):
+    """Which certo MCP servers are running, which run old code, and -- with
+    `restart --yes` -- stop them so the client starts fresh ones."""
+    from . import mcpctl
+
+    st = mcpctl.status()
+    stop = []
+    if args.action == "restart":
+        stop = [r["pid"] for r in st["servers"]
+                if getattr(args, "all", False) or r["stale"]]
+    stopped = mcpctl.stop(stop) if stop and getattr(args, "yes", False) else []
+    if getattr(args, "json", False):
+        print(json.dumps(dict(st, would_stop=stop,
+                              stopped=[{"pid": p, "ok": ok, "detail": d}
+                                       for p, ok, d in stopped]),
+                         indent=2, ensure_ascii=False))
+        return 0
+    print("  " + t("cli.mcp.installed", version=st["installed"] or "-",
+                   when=st["installed_at"] or "-"))
+    if not st["servers"]:
+        print("  " + t("cli.mcp.none"))
+    for r in st["servers"]:
+        print("  {:>7}  {}  {}  {}".format(
+            r["pid"], r["started_iso"] or "?",
+            t("cli.mcp.stale") if r["stale"] else t("cli.mcp.current"),
+            r["cmd"][:90]))
+    if args.action == "restart":
+        if not stop:
+            print("  " + t("cli.mcp.nothing_to_stop"))
+        elif not getattr(args, "yes", False):
+            print("  " + t("cli.mcp.would_stop", pids=", ".join(map(str, stop))))
+        else:
+            for pid, ok, detail in stopped:
+                print("  {} {}  {}".format("[ok]" if ok else "[XX]", pid, detail))
+            print("  " + t("cli.mcp.reconnect"))
+    return 0
+
+
+def cmd_pack(args):
+    from . import store
+
+    out = store.pack(args.src, args.out)
+    if getattr(args, "json", False):
+        print(json.dumps(out, indent=2, ensure_ascii=False))
+        return 0 if out["count"] else 2
+    print("  " + t("cli.pack.written", n=out["count"], path=out["archive"],
+                   size="{:.1f}".format(out["bytes"] / 1e6),
+                   raw="{:.1f}".format(out["json_bytes"] / 1e6)))
+    if out["skipped"]:
+        print("  " + t("cli.pack.skipped", n=len(out["skipped"]),
+                       names=", ".join(out["skipped"][:4])))
+    print("  " + t("cli.pack.next", path=out["archive"]))
+    return 0 if out["count"] else 2
 
 
 def cmd_columns(args):
@@ -1162,11 +1271,33 @@ def cmd_peak(args):
     return rc
 
 
+def _explored(args, res):
+    """Print an exploration and keep its record when asked."""
+    rc = emit(res, args)
+    if not getattr(args, "json", False):
+        print("  !! " + t("cli.explore.banner"))
+    rec_path = getattr(args, "record", None)
+    if rec_path:
+        from . import explore
+
+        argv = explore.without_explore(getattr(args, "_argv", sys.argv[1:]))
+        Path(rec_path).write_text(json.dumps(
+            explore.record(res, argv, getattr(args, "spec", None)),
+            indent=2, ensure_ascii=False), encoding="utf-8")
+        if not getattr(args, "json", False):
+            print("  " + t("cli.explore.recorded", path=rec_path))
+    return rc
+
+
 def cmd_parametric(args):
     from .engines import algebra
     from .spec import ParametricSpec, load_spec
 
     spec = load_spec(args.spec, ParametricSpec)
+    if getattr(args, "explore", False):
+        from . import explore
+
+        return _explored(args, explore.parametric(spec, limits_from(args)))
     res = algebra.parametric(spec, limits_from(args), spec_path=args.spec)
     rc = emit(res, args)
     if not args.json and res.meta.get("bound"):
@@ -1242,6 +1373,34 @@ def cmd_number(args):
     return rc
 
 
+def cmd_promote(args):
+    """Run an exploration again, certified, and say whether they agree."""
+    from . import explore, report
+
+    rec = explore.load_record(args.record_file)
+    argv = list(rec["argv"])
+    if args.cert:
+        argv += ["--cert", args.cert]
+    run = report.rerun(argv)
+    res = run.get("result")
+    if res is None:
+        print(t("cli.promote.failed", detail=run.get("exception") or
+                run.get("stderr", "")[-300:]), file=sys.stderr)
+        return 3
+    agrees, why = explore.agreement(rec, res)
+    if args.json:
+        print(json.dumps({"explored": rec.get("answer"), "certified":
+                          res.to_dict(), "agrees": agrees, "why": why},
+                         indent=2, ensure_ascii=False, default=str))
+    else:
+        print(run.get("stdout", "").rstrip())
+        key = ("cli.promote.agree" if agrees else
+               "cli.promote.disagree" if agrees is False else
+               "cli.promote.incomparable")
+        print("  " + t(key, why=why))
+    return 0 if res.status.conclusive else 2
+
+
 def cmd_mixed(args):
     from .engines import mixed
     from .packing import PackingSpec
@@ -1268,6 +1427,11 @@ def cmd_mixed(args):
         # certo's limits in front of a construction that already exists.
         data = json.loads(Path(args.freeze).read_text(encoding="utf-8"))
         freeze = data.get("assignment", data)
+    if getattr(args, "explore", False):
+        from . import explore
+
+        return _explored(args, explore.lp("mixed", spec, limits_from(args),
+                                          target=target))
     if args.prove_optimal:
         from .engines import bb
 
@@ -1361,7 +1525,9 @@ def cmd_synth(args):
         universal_cert=uni.certificate.to_dict() if uni.certificate else None,
     ).stamp(args.spec)
     if args.cert:
-        Path(args.cert).write_text(combo.to_json(), encoding="utf-8")
+        from . import store
+
+        store.write_certificate(combo, args.cert)
         print("  " + t("cli.combined.written", path=args.cert))
     return rc if uni.verdict is Verdict.PROVED else 2
 
@@ -1395,6 +1561,11 @@ def cmd_opt(args):
               + type(spec).__name__, file=sys.stderr)
         return 1
 
+    if getattr(args, "explore", False):
+        from . import explore
+
+        return _explored(args, explore.lp("opt", spec, limits_from(args),
+                                          target=args.target))
     direction = None
     if getattr(args, "dual_direction", None):
         direction = {}
@@ -1490,6 +1661,12 @@ def cmd_sweep(args):
     spec = load_spec(args.spec)
     if args.n_range:
         return _sweep_range(args, spec, mode)
+    if getattr(args, "explore", False) and isinstance(spec, (DomainSpec,
+                                                              SweepSpec)):
+        from . import explore
+
+        return _explored(args, explore.sweep(spec, limits_from(args),
+                                             use_geng=not args.no_geng))
     if isinstance(spec, DomainSpec):
         res = domain.sweep_domain(spec, limits_from(args), cert_mode=mode,
                                   by_orbit=getattr(args, "by_orbit", False))
@@ -1829,7 +2006,12 @@ def _tamper(cert, args) -> int:
 
 
 def cmd_verify(args):
-    data = json.loads(Path(args.certificate).read_text(encoding="utf-8"))
+    from . import store
+
+    if (str(args.certificate).lower().endswith(".zip")
+            and store.split_ref(args.certificate)[1] is None):
+        return _verify_archive(args)
+    data = store.read_json(args.certificate)
     cert = Certificate.from_dict(data)
 
     # Tying the certificate to a file you are LOOKING at is a different check
@@ -2133,8 +2315,10 @@ def _export_lean(args):
                                    "graph6 " + args.graph)
         return _write_lean(text, args, [])
 
+    from . import store
+
     path = Path(args.spec)
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = store.read_json(args.spec)
     kind = data.get("kind")
     source = "{} (certificate {})".format(
         args.spec, Certificate.from_dict(data).digest())
@@ -2243,6 +2427,14 @@ def build_parser():
     common.add_argument("--lang", choices=available(),
                         help="output language (default: en, or $CERTO_LANG)")
     common.add_argument("--cert", metavar="FILE", help="write the certificate there")
+    common.add_argument("--explore", action="store_true",
+                        help="a CHEAP look before paying for a certificate: "
+                             "floating point, samples, no certificate. The "
+                             "verdict is `likely`, never `proved` (exit 2). "
+                             "For opt, mixed, parametric and sweep")
+    common.add_argument("--record", metavar="FILE",
+                        help="with --explore: keep what was asked and found, "
+                             "for `certo promote FILE` to run certified")
     # It guarantees exactly one thing: no code from the spec file runs. Not
     # that the spec means what you think -- `lint` and the scope warnings are
     # what work on that, and a mode that made people stop reading their own
@@ -2460,6 +2652,11 @@ def build_parser():
                     help="where to write the folder (default: "
                          "./certo-report-<time>-<triage>)")
     sp.set_defaults(func=cmd_report)
+    sp = add("atlas", "a parameter domain covered by boxes, each certified by "
+                      "`parametric`, and ONE statement for the whole: the "
+                      "covering and every piece rechecked")
+    sp.add_argument("spec", help=".py file returning an AtlasSpec")
+    sp.set_defaults(func=cmd_atlas)
     sp = add("columns", "an LP over EVERY clique of a graph, without listing "
                         "them: column generation, and a pricing search the "
                         "verifier reruns")
@@ -2513,6 +2710,34 @@ def build_parser():
     sp.add_argument("-q", "--quiet", action="store_true",
                     help="errors and warnings only, without the notes")
     sp.set_defaults(func=cmd_lint)
+
+    sp = add("promote", "run an exploration again, CERTIFIED, and say "
+                        "whether the certified answer agrees with what "
+                        "`--explore` found")
+    sp.add_argument("record_file", metavar="RECORD",
+                    help="the file `--explore --record FILE` wrote")
+    sp.set_defaults(func=cmd_promote)
+
+    sp = add("pack", "put a directory's certificates into ONE zip with a "
+                     "manifest: each member compressed and readable alone")
+    sp.add_argument("src", help="directory of certificates (searched "
+                                "recursively; .json and .json.gz)")
+    sp.add_argument("-o", "--out", required=True, metavar="FILE.zip",
+                    help="the archive to write")
+    sp.set_defaults(func=cmd_pack)
+
+    sp = add("mcp", "which certo MCP servers are running and which run old "
+                    "code; `restart --yes` stops the stale ones so the client "
+                    "starts fresh")
+    sp.add_argument("action", choices=["status", "restart"],
+                    help="status: list them. restart: stop the stale ones "
+                         "(only with --yes)")
+    sp.add_argument("--yes", action="store_true",
+                    help="with restart: actually stop them")
+    sp.add_argument("--all", action="store_true",
+                    help="with restart: every certo server, not only the "
+                         "stale ones")
+    sp.set_defaults(func=cmd_mcp)
 
     sp = add("repro", "bundle spec, certificates, versions and hashes into "
                       "one directory a referee can check")
@@ -2762,7 +2987,9 @@ def build_parser():
     sp.set_defaults(func=cmd_ledger)
 
     sp = add("verify", "re-verify a stored certificate")
-    sp.add_argument("certificate", help="the certificate .json file")
+    sp.add_argument("certificate",
+                    help="the certificate: .json, .json.gz, a packed .zip "
+                         "(every member and its manifest), or zip#member")
     sp.add_argument("--spec", metavar="FILE",
                     help="refuse unless this file is the one the certificate "
                          "was made from, by hash. Verifying an old "
@@ -2773,6 +3000,9 @@ def build_parser():
                          "and report which changes the verifier catches. A "
                          "report, not a verdict: an uncaught field either "
                          "carries no claim or carries one nobody checks")
+    sp.add_argument("--jobs", type=int, default=1, metavar="N",
+                    help="for a packed .zip: verify its members in N parallel "
+                         "processes")
     sp.add_argument("--tamper-all", action="store_true", dest="tamper_all",
                     help="with --tamper, probe every field including the ones "
                          "certo records as descriptive for its OWN kinds -- "
@@ -2869,6 +3099,9 @@ def installed_version():
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    # The command line as THIS call received it -- not `sys.argv`, which is
+    # the host's when certo runs in-process (a test, the API, `promote`).
+    args._argv = list(sys.argv[1:] if argv is None else argv)
 
     # One flag, one process-wide setting: every `load_spec` in every
     # engine reads it, so a command added later cannot forget to.
@@ -2886,15 +3119,66 @@ def main(argv=None) -> int:
     from . import watch
 
     watch.enable_crash_traces()
+    # WITH --json, STDOUT IS ALWAYS JSON. A caller parsing thousands of runs
+    # got EMPTY output on a failure -- an exception, or a refusal that exits 1
+    # with a sentence on stderr -- and could not tell it from a crash. Both
+    # streams are watched, and a failure that wrote nothing to stdout gets
+    # one JSON line: the status, the exit code and what stderr said. (A native
+    # death before Python runs cannot be caught here; `certo doctor` names the
+    # start-up hooks that cause those.)
+    if getattr(args, "explore", False):
+        from . import explore
+
+        if getattr(args, "cmd", "") not in explore.EXPLORABLE:
+            print(t("cli.explore.not_here", cmd=getattr(args, "cmd", "")),
+                  file=sys.stderr)
+            args.explore = False
+    json_mode = bool(getattr(args, "json", False))
+    if json_mode:
+        out_tap, err_tap = _Tap(sys.stdout), _Tap(sys.stderr)
+        sys.stdout, sys.stderr = out_tap, err_tap
+    rc, error = 3, None
     try:
         with watch.watched(command=getattr(args, "cmd", "") or "",
                            deadline=getattr(args, "deadline", None),
                            heartbeat=getattr(args, "heartbeat", None)):
-            return args.func(args)
+            rc = args.func(args)
     except Exception as e:  # noqa: BLE001
         print(t("cli.error", type=type(e).__name__, message=e),
               file=sys.stderr)
-        return 3
+        rc, error = 3, type(e).__name__
+    finally:
+        if json_mode:
+            sys.stdout, sys.stderr = out_tap.inner, err_tap.inner
+    if json_mode and rc not in (0, None) and not out_tap.wrote:
+        said = [ln for ln in err_tap.text().splitlines() if ln.strip()]
+        print(json.dumps({"command": getattr(args, "cmd", None),
+                          "status": "error", "verdict": "error",
+                          "error": error or "refused",
+                          "message": said[-1].strip() if said else "",
+                          "exit": rc}, ensure_ascii=False))
+    return rc
+
+
+class _Tap:
+    """A stream that writes through and remembers whether, and what, it was
+    given -- so `main` knows a failure left stdout empty."""
+
+    def __init__(self, inner):
+        self.inner, self.wrote, self._parts = inner, False, []
+
+    def write(self, s):
+        if s:
+            self.wrote = True
+            if len(self._parts) < 200:
+                self._parts.append(s)
+        return self.inner.write(s)
+
+    def text(self):
+        return "".join(self._parts)
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
 
 
 if __name__ == "__main__":

@@ -575,9 +575,11 @@ def test_every_command_is_reachable_over_mcp():
     root = Path(__file__).resolve().parent.parent / "src" / "certo"
     cli = set(re.findall(r'^    sp = add[(]"([a-z_-]+)"',
                          (root / "cli.py").read_text(encoding="utf-8"), re.M))
-    tools = set(re.findall(r"^async def ([a-z_]+)",
-                           (root / "mcp_server.py").read_text(encoding="utf-8"),
-                           re.M))
+    text = (root / "mcp_server.py").read_text(encoding="utf-8")
+    # A tool is a function, or a name given to one: `mcp` cannot be a
+    # function name in a module whose server object is called `mcp`.
+    tools = (set(re.findall(r"^async def ([a-z_]+)", text, re.M))
+             | set(re.findall(r'^@mcp\.tool\(name="([a-z_]+)"', text, re.M)))
     missing = sorted(cli - tools)
     assert not missing, (
         "these commands cannot be called by a model: " + ", ".join(missing))
@@ -656,6 +658,40 @@ def test_the_five_newest_tools_answer_over_mcp():
     ])
     got = run(call("family", {"spec_source": family_src}))
     assert got["verdict"] == "satisfiable" and got["meta"]["value"] == "3"
+
+
+def test_explore_is_a_flag_on_the_tools_that_have_a_cheaper_route():
+    """Over MCP the cheap look is `explore=true`, with the same labelling."""
+    src = chr(10).join([
+        "from certo import LPSpec",
+        "def spec():",
+        "    lp = LPSpec(sense='max')",
+        "    lp.variable('x', 0, None)",
+        "    lp.objective({'x': 1})",
+        "    lp.constraint({'x': 1}, '<=', 2, name='cap')",
+        "    return lp",
+    ])
+    got = run(call("opt", {"spec_source": src, "explore": True}))
+    assert got["verdict"] == "likely" and got["status"] == "explored"
+    assert got["conclusive"] is False and got["certificate"] is None
+
+
+def test_every_answer_names_the_server_version():
+    """A server started before a `pip install` keeps the old code, and
+    results from two versions mixed silently. Every answer says which."""
+    from certo import __version__
+
+    src = chr(10).join([
+        "from certo import LPSpec",
+        "def spec():",
+        "    lp = LPSpec(sense='max')",
+        "    lp.variable('x', 0, None)",
+        "    lp.objective({'x': 1})",
+        "    lp.constraint({'x': 1}, '<=', 2, name='cap')",
+        "    return lp",
+    ])
+    got = run(call("opt", {"spec_source": src}))
+    assert got["certo_version"] == __version__, got.get("certo_version")
 
 
 if __name__ == "__main__":

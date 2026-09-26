@@ -6,6 +6,185 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-09-26
+
+**One statement from N boxes, schema 5, and what thousands of runs needed.**
+There are 54 commands (`atlas`, `promote`, `pack`, `mcp`) and 53 kinds
+(`parametric_atlas`), a seventh status and verdict (`explored`, `likely`), and
+the certificate schema moves to 5 once, for one removal. A schema-4 certificate is read exactly as before, and the installed
+0.19.0 verifies a schema-5 one. Most of the rest answers three reports from
+users running certo at scale, one of them filed as a GitHub issue. The only
+soundness fix is in the cover verifier, which did not tie its report to its
+parts.
+
+### `--explore`: a cheap look before paying for a certificate
+
+While a route is being searched, most answers are thrown away, and paying for
+each certificate first is the wrong order. An LP takes 1.3 ms in floating point
+and seconds through exact reconstruction. An integer optimum HiGHS finds in a
+second took branch and bound over an hour.
+
+- **The same question, the cheap way,** for `opt`, `mixed`, `parametric` and
+  `sweep`: floating point, a grid of parameter points, a seeded sample of the
+  family. On MCP it is `explore=true` on those four tools.
+- **Labelled for what it is.** The seventh status is `explored` and the
+  seventh verdict `likely`, never `proved`. There is no certificate, and the
+  exit code is 2, so a script branching on it treats the answer as the
+  inconclusive one it is. Other commands have no cheaper route; they run
+  certified and say so.
+- **A counterexample is still certified.** A parametric claim that fails at a
+  sampled point is re-solved exactly at that point and comes back `refuted`,
+  with the exact certificate of that instance. A "no" is cheap to certify, and
+  the "yes" is what costs.
+- **`certo promote FILE`**, the 54th command, reruns an exploration (saved
+  with `--record FILE`) certified, and says whether the two agree. Floating
+  point can be wrong near a degenerate optimum, and that disagreement is
+  exactly what it reports.
+
+`verify` refuses a record by name: it claims nothing. Found on the way: the
+record needs the command line the call actually received, not `sys.argv`,
+which is the host's when certo runs in-process.
+
+### Where a box check failed, and what to cut
+
+A "not proved" named the column and no more, and a user running thousands of
+box certificates could not tell where to split. It now names the column, its
+most negative Bernstein coefficient, and what that means:
+- **at a vertex**, the coefficient is the polynomial's value there, so no
+  subdivision will show otherwise, and that box needs another dual, a smaller
+  box or a region;
+- **inside the box**, it names the coordinate and the point to split at, the
+  Greville point of that coefficient;
+- **on a ray**, it names the most negative shifted monomial.
+
+In the test case, splitting where it said proves the bound. The same record is
+in `meta["diagnosis"]`.
+
+### Compressed certificates, and one archive for thousands
+
+About 9 000 certificates came to 9.4 GB, and listing their directory took
+minutes. Measured on eight box certificates of one program:
+- **gzip:** 7.8x smaller;
+- **a zip of them:** the same 7.8x, as one file;
+- **xz:** another third, at fifty times the time;
+- **sharing the program between boxes:** 1.4x, and nothing on top of
+  compression, so that is not done.
+
+What ships:
+- **`--cert x.json.gz`** writes gzip, and everything that reads a certificate
+  reads it. The digest is over the content, so it does not change.
+- **`certo pack DIR -o family.zip`** writes one zip, each member compressed on
+  its own, with a manifest of names, digests, kinds and boxes.
+- **`certo verify family.zip`** checks every member and the manifest (`--jobs
+  N` in parallel), and `family.zip#member` is accepted wherever a path is,
+  including in `atlas`.
+
+### Stale MCP servers: `certo mcp`
+
+A server started before a `pip install` keeps the old code.
+- **Every MCP answer** now carries `certo_version`, and `stale: true` with a
+  note when the installed package is newer than what the server loaded.
+- **`certo mcp status`** lists the running servers and marks the ones started
+  before the install.
+- **`certo mcp restart --yes`** stops those, so the client starts fresh ones.
+
+certo cannot start a server, because only the client can, so stopping is
+behind a flag.
+
+### A cover's report was not tied to its parts, and a partition's order was not bounded
+
+Found from two user reports, one of them filed as a GitHub issue:
+- **The `exact_cover` verifier did not tie the parts to their vertex sets.**
+  It checked that each reported vertex set is a clique, and never that it
+  **is** the part beside it, so a report of small cliques next to parts that
+  were something else verified. It now requires one entry per part, with that
+  part's edges exactly the pairs of its vertex set. The `max_size` the
+  certificate carries, which was stored and never checked, is recounted.
+- **`Outcome.clique_partition(..., max_size=r)`** bounds the order of the
+  pieces. Without it, K5 as one part was "a partition into one clique": true,
+  and not what a `cp≤4` partition claims.
+- **`check(universe, clique_parts(...))`** answered "covered 0" for a correct
+  partition, because the pair `(parts, report)` was taken for two parts. It is
+  refused by name, and `clique_parts` now says what it returns.
+
+### Robustness for programs that call certo thousands of times
+
+- **`python -m certo` works.** There was no `__main__`. It is the entry point
+  to use from `subprocess` on Windows: `certo.exe` is a launcher, and a timeout
+  that kills it leaves the interpreter child holding the pipes. A user's
+  driver waited on those for 40 to 70 minutes. Under load the launcher could
+  also fail with `WinError 2`.
+- **`--json` always writes JSON.** A failure that left stdout empty, whether
+  an exception (exit 3) or a refusal (exit 1), now writes
+  `{"status": "error", "exit": ..., "message": ...}`. A user counted 51 empty
+  outputs in one campaign. Those were native deaths at start-up, which this
+  cannot catch; the ones certo *could* answer, it now does.
+- **`doctor` finds Lean without installing anything.** Its probe ran
+  `lake --version` where no toolchain is pinned, and elan began downloading
+  one. A user was left with 1.2 GB of a half-installed toolchain and a disk at
+  97%. The probe now asks `elan toolchain list`, runs `lake` only pinned to a
+  toolchain already installed, and reports the real error.
+- **Every MCP answer carries `certo_version`.** A server started before a
+  `pip install` keeps the old code, and results from two versions were
+  mixing silently.
+- **`report --coverage` with nothing to report prints the summary** instead
+  of writing a bug-report folder and a zip. An empty coverage record says why
+  it is empty: only inconclusive runs are recorded.
+- **The `nauty` row in `doctor` shows where `geng` is**, instead of its usage
+  text.
+
+### `certo atlas`: N boxes, one statement
+
+A parametric bound proved box by box leaves one sentence unproved: "so it holds
+on the whole domain". That is where a missing sliver hides. One user audited
+that sentence with scripts of their own (exact tiling, gaps, boundaries) over
+about 2 000 boxes. `atlas` is the 51st command and `parametric_atlas` the 53rd
+kind. It checks four things:
+1. every piece verifies;
+2. all pieces are the same program (objective, constraints, sense, free
+   variables) with the same claim in the same direction;
+3. no piece assumes a region condition the domain does not;
+4. the pieces cover the domain.
+
+The covering is exact. The domain is split at the pieces' edges, and each cell
+either lies inside a closed piece or is shown outside the region by a
+condition whose Bernstein coefficients are all negative there. A cell that is
+neither is named, with its coordinates.
+
+- **Pieces by path are referenced by digest**, not copied, so an atlas of two
+  thousand boxes stays small. `verify` finds each piece where it was recorded,
+  or by name in the working directory, and refuses one that changed.
+- **A shift-test certificate on a ray** covers everything above its floors.
+- **`cited` boxes** are covered by an external result instead: the statement
+  is then relative to them, and every verification lists them.
+- **Not yet: charts.** Several coordinate systems need the change of
+  coordinates checked too.
+- **A cell that only touches the region's boundary needs a piece.** Excluding
+  a cell requires a condition to be strictly negative on it, closed. This is
+  conservative in exactly the place the user's own scripts are careful.
+
+Checked by the tamper battery: every payload field of an atlas changes a check.
+
+### `SCHEMA_VERSION` 5
+
+The freeze moves once, for the removal it had held back since 0.18. A
+`parametric_bound` row whose residual has more than 64 terms is now recorded by
+its size (`residual_terms`, `shifted_terms`, `recomputed: true`) instead of
+written out. These are copies that no verifier has ever read, and they were
+most of a large certificate. Digests of certificates with such rows change.
+Those without such rows are unchanged, byte for byte apart from the `schema`
+number.
+
+- **Every schema-4 certificate is read exactly as before.**
+- **A schema-4 reader verifies a schema-5 certificate.** This was checked
+  against the installed 0.19.0, since it never read those fields.
+- **The number is read now**, where before it was only written. A certificate
+  keeps the schema it was written in, so a schema-4 certificate embedded in an
+  atlas still says 4, and one from a schema newer than the reader knows is
+  verified with a warning saying so.
+- **The freeze stands at 5**, with the same rules: new kinds and optional
+  fields, nothing removed or renamed.
+
 ## [0.19.0] — 2026-09-25
 
 **PuLP 4 supported, a sweep predicate certified in one line, a box cut by a

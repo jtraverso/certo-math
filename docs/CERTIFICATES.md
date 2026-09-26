@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The fifty-two kinds
+## The fifty-three kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -66,6 +66,7 @@ answers"*. The table below is the map; the header is the territory.
 | `equitable_quotient` | the partition, both regularities, and the two maps | **yes**, exact counting |
 | `integer_matrix` | rank, determinant, Hermite, Smith, with the transforms | **yes**, matrix multiplication |
 | `clique_lp` | an LP optimum over every clique of a graph, without listing them | **yes**, rational arithmetic and the pricing search rerun |
+| `parametric_atlas` | one parametric bound on a whole domain, from N certificates on N boxes | **yes**, every piece re-verified and the covering recomputed |
 | `symmetric_inertia` | the inertia of a symmetric rational matrix, PSD, and a vector refuting PSD | **yes**, two rational products: `S A Sᵀ = D`, `S S⁻¹ = I` |
 | `affine_semigroup` | pointedness, cone, group and semigroup membership, a refutation of normality, a proposed Hilbert basis | **yes**, the negatives by redoing the bounded search |
 | `capacity_profile` | a piecewise-affine function of a capacity: a bound, its attainment and its coverage on an interval | **yes**, one exact LP check per segment |

@@ -362,8 +362,17 @@ error. `lint` differs: `0` clean or notes only, `1` errors, `2` warnings.
 
 ## The schema is frozen
 
-The certificate schema is **frozen from 0.4**: existing payloads do not move,
-so a certificate produced for a paper still verifies against a later certo.
-New certificate kinds stay additive and always will. New fields on an existing
-kind are optional, which is how `unsat_core` gained its Farkas multipliers
-without a 0.5 reader noticing.
+The certificate schema is **frozen**, at 5 since 0.20: existing payloads do
+not move, so a certificate produced for a paper still verifies against a later
+certo. New certificate kinds stay additive and always will. New fields on an
+existing kind are optional, which is how `unsat_core` gained its Farkas
+multipliers without a 0.5 reader noticing.
+
+**4 to 5** is the one move the freeze has made, and it is small. A
+`parametric_bound` row whose residual has more than 64 terms is recorded by its
+size (`residual_terms`, `recomputed: true`) instead of written out. These were
+copies that no verifier ever read, and they were most of a large file. Every
+schema-4 certificate is read exactly as before. A schema-4 reader (0.19 and
+earlier) verifies a schema-5 certificate as well, because it never read those
+fields. A certificate keeps the schema it was written in, and one from a
+schema newer than the reader knows is verified with a warning that says so.

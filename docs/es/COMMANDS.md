@@ -1,4 +1,4 @@
-# Los cincuenta comandos
+# Los cincuenta y cuatro comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -1238,6 +1238,15 @@ recalcula cada hoja. `dual="bernstein"` con `dual_degree=k` hace que certo
 incógnitas de un único LP exacto cuyas restricciones son los coeficientes de
 los residuos. Ver `examples/parametric_box.py`.
 
+**Cuando falla un chequeo en caja, dice dónde.** Un "no demostrado" nombra la
+columna, su coeficiente de Bernstein más negativo, y lo que significa. En un
+**vértice** el coeficiente es el valor del polinomio ahí, así que es negativo
+en ese punto y ninguna subdivisión mostrará lo contrario: esa caja necesita
+otro dual, una caja más chica o una región. **En el interior**, nombra la
+coordenada y el punto donde partir. En un rayo nombra el monomio desplazado
+más negativo. El mismo registro está en `meta["diagnosis"]`, para un driver
+que decida dónde cortar.
+
 **Una caja cortada por una región.** Con `region=[(nombre, g), ...]` además,
 un residuo solo tiene que ser no negativo donde toda `g ≥ 0`. certo lo
 escribe como `Σ λ·g + s`, donde los `λ ≥ 0` son constantes sobre las
@@ -1256,6 +1265,55 @@ mitades y busca uno en cada mitad, hasta `d` niveles. El certificado lleva el
 teselan la caja y verifica cada pieza en su propia hoja. Con `claim=T` el
 enunciado del conjunto es `opt ≤ T` en la caja; donde ninguna hoja lo alcanza,
 se nombran las cajas que fallan y no se certifica nada.
+
+### `certo atlas`
+
+**Pregunta** — Cada caja está certificada. ¿Vale la cota en todo el dominio
+que las cajas deberían cubrir?
+**Spec** — `AtlasSpec`
+**Responde** — un enunciado, `opt ≤ T` (o `≥`) en el dominio, o las piezas que
+fallan y las celdas del dominio que ninguna pieza cubre
+**Certificado** — `parametric_atlas`, **sin solver**: cada pieza verificada de
+nuevo y el cubrimiento recalculado
+**No establece** — nada en una celda cubierta solo por una caja `cited`, de la
+que el enunciado pasa a depender. Una región es alcance, igual que en
+`parametric`.
+
+    AtlasSpec(domain={"p": (0, 1), "q": (0, 1)},
+              region=[("cut", p - q - Fraction(1, 4))],
+              claim=1,
+              pieces=["out/box1.json", "out/box2.json", "out/box3.json"])
+
+Una cota demostrada caja por caja deja una frase suelta, "así que vale en todo
+el dominio", y ahí es donde se esconde una franja que falta. `atlas` comprueba
+cuatro cosas:
+1. cada pieza verifica;
+2. todas las piezas son del **mismo programa** (objetivo, restricciones,
+   sentido, variables libres) y demuestran el **mismo claim** en el mismo
+   sentido;
+3. ninguna pieza supone una condición de región que el dominio no tenga;
+4. las piezas **cubren** el dominio.
+
+El cubrimiento es exacto. El dominio se parte en los bordes de las piezas
+hasta que cada celda esté dentro de una pieza, o fuera de la región, lo que se
+muestra con una condición cuyos coeficientes de Bernstein son todos negativos
+en esa celda. Una celda que no es ninguna de las dos cosas se **nombra**, con
+sus coordenadas. Las cajas son cerradas, así que cubierto significa cubierto
+punto por punto. Una celda que solo toca el borde de la región no se excluye:
+necesita una pieza.
+
+Las piezas dadas como rutas se **referencian** por ruta y digest, así que un
+atlas de dos mil cajas no las lleva todas. `verify` encuentra cada pieza donde
+se registró, o por nombre en el directorio de trabajo, y rechaza una cuyo
+digest cambió. Las piezas dadas como `ParametricSpec` se corren y se
+incrustan. Un certificado del test de desplazamiento sobre un rayo `p ≥ p0`
+cubre todo lo que está sobre sus pisos. `cited=[(caja, "fuente")]` cubre cajas
+con un resultado externo: el enunciado pasa a ser **relativo** a él, y cada
+verificación lo lista.
+
+Todavía no: **cartas**. Un dominio cubierto en varios sistemas de coordenadas
+necesita que el cambio de coordenadas sea parte de lo que se comprueba, y eso
+no está aquí.
 
 ### `certo peak`
 
@@ -1932,6 +1990,96 @@ los ejemplos publicados dispara cero veces.
 `certo what <comando>` hace la misma pregunta sobre un solo comando: su spec,
 su motor, el tipo de certificado y el nivel.
 
+
+### `certo promote`
+
+**Pregunta** — La mirada barata dijo que sí. ¿Coincide la corrida certificada?
+**Spec** — ninguna; el registro que escribió `--explore --record FICHERO`
+**Responde** — la corrida certificada, y si coincide con lo explorado
+**Certificado** — el de la corrida certificada
+**No establece** — nada que la corrida certificada no establezca por sí misma.
+
+    certo parametric spec.py --explore --record prueba.json   # segundos
+    certo promote prueba.json --cert demostrado.json          # paga, una vez
+
+**Primero explorar.** Casi todo el tiempo que certo dedica a una pregunta
+difícil se va en el certificado, no en la respuesta. Un LP toma 1,3 ms en punto
+flotante y segundos por la reconstrucción exacta. Un óptimo entero que HiGHS
+encuentra en un segundo le tomó más de una hora al branch and bound. Mientras
+se busca una ruta, la mayoría de esas respuestas se descartan. `--explore`
+responde la misma pregunta por el camino barato, en `opt`, `mixed`,
+`parametric` y `sweep`:
+
+| | Qué hace `--explore` |
+|---|---|
+| `opt`, `mixed` | el valor del LP o MILP en punto flotante, sin ruta exacta |
+| `parametric` | el LP resuelto en punto flotante en una grilla de la caja o del rayo (dentro de la región), comparando el claim en cada punto |
+| `sweep` | una muestra aleatoria, con semilla, de la familia |
+
+**Lo dice.** El estado es `explored` y el veredicto `likely`, nunca `proved`.
+No hay certificado, y el código de salida es `2`, así que un script lo trata
+como la respuesta sin certificar que es. Los demás comandos corren
+certificados, y lo dicen. **Un contraejemplo se sigue certificando cuando es
+barato.** Un claim paramétrico que falla en un punto muestreado se resuelve de
+nuevo exactamente en ese punto, y vuelve `refuted` con el certificado de esa
+instancia: un "no" es barato de certificar, y el "sí" es lo que cuesta. **El
+punto flotante puede equivocarse** cerca de un óptimo degenerado o en el borde
+de una tolerancia, y por eso `promote` informa si la corrida certificada
+coincide en vez de suponerlo. Por MCP, la mirada barata es `explore=true` en
+esas cuatro herramientas.
+
+### `certo pack`
+
+**Pregunta** — Miles de archivos de certificados: ¿pueden ser un solo
+archivo, con cada certificado todavía legible por separado?
+**Spec** — ninguna; un directorio de certificados
+**Responde** — un `.zip`, cada miembro comprimido por su cuenta, con un
+`manifest.json` de nombres, digests, tipos y cajas
+**Certificado** — ninguno propio; `verify` comprueba cada miembro y el
+manifiesto
+**No establece** — nada sobre un miembro más allá de lo que establece
+verificarlo. Empaquetar mueve bytes.
+
+    certo pack out/familia -o familia.zip
+    certo verify familia.zip --jobs 4
+    certo verify "familia.zip#caja0412.json"
+
+Medido sobre ocho certificados de caja de un mismo programa, 1,3 MB de JSON:
+gzip por archivo es 7,8 veces más chico, y un zip también, pero en UN solo
+archivo, así que listar un directorio de nueve mil deja de tardar minutos. xz
+gana otro tercio a cincuenta veces el tiempo. Compartir el programa entre
+cajas ganaba 1,4 veces, y nada encima de la compresión, así que no se hace. Un
+certificado suelto también se puede comprimir: `--cert x.json.gz` escribe
+gzip, y todo lo que lee un certificado lo lee (`verify`, `atlas`, `status`,
+`repro`, MCP). El digest es sobre el contenido, así que comprimir no cambia
+nada de lo que dice un certificado. `atlas` acepta `familia.zip#miembro`
+dondequiera que acepta una ruta.
+
+### `certo mcp`
+
+**Pregunta** — Reinstalé certo. ¿Qué servidores MCP siguen corriendo el código
+viejo?
+**Spec** — ninguna
+**Responde** — la versión instalada y cuándo se instaló, y cada servidor MCP de
+certo con cuándo arrancó, marcando como **viejos** los que arrancaron antes de
+la instalación
+**Certificado** — ninguno
+**No establece** — nada sobre las respuestas de un servidor. Lee la tabla de
+procesos.
+
+    certo mcp status
+    certo mcp restart          # muestra qué detendría
+    certo mcp restart --yes    # detiene los viejos; --all, todos
+
+Un servidor MCP lo arranca su cliente y conserva el código que cargó. Después
+de un `pip install` sigue respondiendo como la versión vieja, y se mezclaron
+resultados de dos versiones sin que nadie lo notara. certo no puede arrancar un
+servidor, porque solo el cliente puede, pero puede detener los viejos para que
+el cliente arranque unos nuevos: `/mcp` en Claude Code, o reiniciar Claude
+Desktop. Listar es lo que hace por defecto, porque detener un servidor corta la
+sesión de ese cliente con él. Y cada respuesta MCP trae `certo_version`, más
+`stale: true` con un aviso cuando el código del servidor es más viejo que el
+paquete instalado.
 
 ### `certo repro`
 

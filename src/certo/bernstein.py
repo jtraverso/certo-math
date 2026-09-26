@@ -163,6 +163,43 @@ def nonneg(poly, box, depth=0, degrees=None):
     return True, [name, tl, tr]
 
 
+def diagnose(poly, box, degrees=None):
+    """WHERE a non-negativity check fails, and what to do about it -- or None
+    when it does not fail. A user running thousands of box certificates got
+    "not proved" and could not tell where to cut.
+
+    The most negative Bernstein coefficient says it. At a CORNER a coefficient
+    IS the polynomial's value at that vertex, so the polynomial is negative
+    there and no subdivision will ever show otherwise: another dual (or a
+    smaller box, or a region) is needed. Anywhere else, the coefficient sits
+    over the point `lo + (a/d)(hi - lo)` of each coordinate, and splitting the
+    coordinate where that point is most interior is the natural cut.
+    """
+    d = _leaf_degrees(poly, degrees)
+    b = coefficients(poly, box, d)
+    if not b:
+        return None
+    alpha, value = min(b.items(), key=lambda kv: (kv[1], kv[0]))
+    if value >= 0:
+        return None
+    names = list(poly.vars)
+    corner = all(a in (0, di) for a, di in zip(alpha, d))
+    out = {"coefficient": str(value), "index": list(alpha), "degrees": list(d),
+           "corner": corner, "negative": sum(1 for v in b.values() if v < 0),
+           "of": len(b)}
+    if corner:
+        out["point"] = {n: str(box[n][0] if a == 0 else box[n][1])
+                        for n, a in zip(names, alpha)}
+        return out
+    k = max((i for i in range(len(names)) if d[i] > 0),
+            key=lambda i: (min(alpha[i], d[i] - alpha[i]) / d[i],
+                           box[names[i]][1] - box[names[i]][0], -i))
+    lo, hi = box[names[k]]
+    out["split"] = names[k]
+    out["at"] = str(lo + (hi - lo) * alpha[k] / d[k])
+    return out
+
+
 # --- a box cut by side conditions -----------------------------------------
 #
 # A box and a REGION `g_k(p) >= 0` inside it: the residual need only be

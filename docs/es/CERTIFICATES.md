@@ -25,7 +25,7 @@ certificado en concreto: *"verificado sin solver"*, *"comprobado contando, sin
 solver"*, *"reejecutando el spec, no confiando en sus respuestas"*. La tabla de
 abajo es el mapa; la cabecera es el territorio.
 
-## Los cincuenta y dos tipos
+## Los cincuenta y tres tipos
 
 | Tipo | Qué atestigua | ¿Sin solver? |
 |---|---|---|
@@ -66,6 +66,7 @@ abajo es el mapa; la cabecera es el territorio.
 | `equitable_quotient` | la partición, ambas regularidades, y los dos mapas | **sí**, conteo exacto |
 | `integer_matrix` | rango, determinante, Hermite, Smith, con las transformaciones | **sí**, multiplicación de matrices |
 | `clique_lp` | un óptimo LP sobre todas las cliques de un grafo, sin listarlas | **sí**, aritmética racional y la búsqueda de precios repetida |
+| `parametric_atlas` | una cota paramétrica en todo un dominio, a partir de N certificados en N cajas | **sí**, cada pieza re-verificada y el cubrimiento recalculado |
 | `symmetric_inertia` | la inercia de una matriz simétrica racional, PSD, y un vector que refuta PSD | **sí**, dos productos racionales: `S A Sᵀ = D`, `S S⁻¹ = I` |
 | `affine_semigroup` | puntiagudo, pertenencia al cono, al grupo y al semigrupo, refutación de normalidad, base de Hilbert propuesta | **sí**, las negativas rehaciendo la búsqueda acotada |
 | `capacity_profile` | una función afín a trozos de una capacidad: cota, alcance y cobertura en un intervalo | **sí**, una comprobación LP exacta por tramo |

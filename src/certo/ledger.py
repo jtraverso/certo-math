@@ -103,12 +103,14 @@ def verify_all(path, limits=None) -> dict:
             counts["no_cert"] += 1
             rows.append({**base, "state": "no_cert", "detail": ""})
             continue
-        p = Path(cert_info["path"])
-        if not p.exists():
+        from . import store
+
+        p = cert_info["path"]
+        if not store.exists(p):
             counts["missing"] += 1
             rows.append({**base, "state": "missing", "detail": str(p)})
             continue
-        cert = Certificate.from_dict(json.loads(p.read_text(encoding="utf-8")))
+        cert = Certificate.from_dict(store.read_json(p))
         if cert.digest() != cert_info["digest"]:
             # The file at that path is no longer what was logged.
             counts["tampered"] += 1

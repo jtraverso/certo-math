@@ -1,4 +1,4 @@
-# The fifty commands
+# The fifty-four commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -1221,6 +1221,14 @@ leaf. `dual="bernstein"` with `dual_degree=k` has certo **find** a polynomial
 dual: its Bernstein coefficients are the unknowns of one exact LP whose
 constraints are the residuals' coefficients. See `examples/parametric_box.py`.
 
+**When a box check fails, it says where.** A "not proved" names the column,
+its most negative Bernstein coefficient, and what that means. At a **vertex**
+the coefficient is the polynomial's value there, so it is negative at that
+point and no subdivision will show otherwise: that box needs another dual, a
+smaller box or a region. **Inside**, it names the coordinate and the point to
+split at. On a ray it names the most negative shifted monomial. The same
+record is in `meta["diagnosis"]` for a driver that decides where to cut.
+
 **A box cut by a region.** With `region=[(name, g), ...]` as well, a residual
 only has to be non-negative where every `g ≥ 0`. certo writes it as
 `Σ λ·g + s`, where the `λ ≥ 0` are constants on the conditions and their
@@ -1239,6 +1247,50 @@ the split tree and one piece per leaf; `verify` recomputes that the leaves tile
 the box and verifies every piece on its own leaf. With `claim=T` the statement
 of the whole is `opt ≤ T` on the box; where no leaf can reach it, the boxes
 that fail are named and nothing is certified.
+
+### `certo atlas`
+
+**Question** — Each box is certified. Does the bound hold on the whole domain
+the boxes are meant to cover?
+**Spec** — `AtlasSpec`
+**Answers** — one statement, `opt ≤ T` (or `≥`) on the domain, or the pieces
+that fail and the cells of the domain that no piece covers
+**Certificate** — `parametric_atlas`, **solver-free**: every piece verified
+again and the covering recomputed
+**Not established** — anything on a cell covered only by a `cited` box, which
+the statement then rests on. A region is scope, as it is in `parametric`.
+
+    AtlasSpec(domain={"p": (0, 1), "q": (0, 1)},
+              region=[("cut", p - q - Fraction(1, 4))],
+              claim=1,
+              pieces=["out/box1.json", "out/box2.json", "out/box3.json"])
+
+A bound proved box by box has one sentence left over, "so it holds on the
+whole domain", and that is where a missing sliver hides. `atlas` checks four
+things:
+1. every piece verifies;
+2. all pieces are about the **same program** (objective, constraints, sense,
+   free variables) and prove the **same claim** in the same direction;
+3. no piece assumes a region condition the domain does not;
+4. the pieces **cover** the domain.
+
+The covering is exact. The domain is split at the pieces' edges until every
+cell lies inside one piece, or lies outside the region, which it shows by a
+condition whose Bernstein coefficients are all negative on that cell. A cell
+that is neither is **named**, with its coordinates. Boxes are closed, so
+covered means covered point by point. A cell that only touches the region's
+boundary is not excluded: it needs a piece.
+
+Pieces given as paths are **referenced** by path and digest, so an atlas of
+two thousand boxes does not carry them all. `verify` finds each piece where
+it was recorded, or by name in the working directory, and refuses one whose
+digest changed. Pieces given as `ParametricSpec`s are run and embedded. A
+shift-test certificate on a ray `p ≥ p0` covers everything above its floors.
+`cited=[(box, "source")]` covers boxes by an external result: the statement
+is then **relative** to it, and every verification lists them.
+
+Not yet: **charts**. A domain covered in several coordinate systems needs the
+change of coordinates to be part of what is checked, and that is not here.
 
 ### `certo peak`
 
@@ -1902,6 +1954,92 @@ times.
 `certo what <command>` asks the same question about one command: its spec,
 engine, certificate kind and tier.
 
+
+### `certo promote`
+
+**Question** — The cheap look said yes. Does the certified run agree?
+**Spec** — none; the record `--explore --record FILE` wrote
+**Answers** — the certified run, and whether it agrees with what was explored
+**Certificate** — the certified run's own
+**Not established** — anything the certified run does not establish itself.
+
+    certo parametric spec.py --explore --record try.json   # seconds
+    certo promote try.json --cert proved.json               # pays, once
+
+**Explore first.** Most of the time certo spends on a hard question goes into
+the certificate, not the answer. An LP takes 1.3 ms in floating point and
+seconds through exact reconstruction. An integer optimum that HiGHS finds in a
+second took branch and bound over an hour. While a route is being searched,
+most of those answers are thrown away. `--explore` answers the same question
+the cheap way, for `opt`, `mixed`, `parametric` and `sweep`:
+
+| | What `--explore` does |
+|---|---|
+| `opt`, `mixed` | the floating-point LP or MILP value, with no exact route |
+| `parametric` | the LP solved in floating point on a grid of the box or ray (inside the region), with the claim compared at every point |
+| `sweep` | a seeded random sample of the family |
+
+**It says so.** The status is `explored` and the verdict `likely`, never
+`proved`. There is no certificate, and the exit code is `2`, so a script treats
+it as the uncertified answer it is. Other commands run certified, and say so.
+**A counterexample is still certified when that is cheap.** A parametric claim
+that fails at a sampled point is re-solved exactly at that point, and comes
+back `refuted` with the certificate of that instance: a "no" is cheap to
+certify, and the "yes" is what costs. **Floating point can be wrong** near a
+degenerate optimum or at the edge of a tolerance, which is why `promote`
+reports whether the certified run agrees rather than assuming it. Over MCP the
+cheap look is `explore=true` on those four tools.
+
+### `certo pack`
+
+**Question** — Thousands of certificate files: can they be one archive, with
+each certificate still readable alone?
+**Spec** — none; a directory of certificates
+**Answers** — one `.zip`, each member compressed on its own, with a
+`manifest.json` of names, digests, kinds and boxes
+**Certificate** — none of its own; `verify` checks every member and the
+manifest
+**Not established** — anything about a member beyond what verifying it
+establishes. Packing moves bytes.
+
+    certo pack out/family -o family.zip
+    certo verify family.zip --jobs 4
+    certo verify "family.zip#box0412.json"
+
+Measured on eight box certificates of one program, 1.3 MB of JSON: gzip per
+file is 7.8x smaller, and so is a zip, but as ONE file, so listing a
+directory of nine thousand stops taking minutes. xz gains another third at
+fifty times the time. Sharing the program between boxes gained 1.4x, and
+nothing on top of compression, so it is not done. A single certificate can be
+compressed on its own too: `--cert x.json.gz` writes gzip, and everything that
+reads a certificate reads it (`verify`, `atlas`, `status`, `repro`, MCP). The
+digest is over the content, so compression changes nothing a certificate
+says. `atlas` takes `family.zip#member` wherever it takes a path.
+
+### `certo mcp`
+
+**Question** — I reinstalled certo. Which MCP servers are still running the
+old code?
+**Spec** — none
+**Answers** — the installed version and when it was installed, and every certo
+MCP server with when it started, the ones started before the install marked
+**stale**
+**Certificate** — none
+**Not established** — anything about a server's answers. It reads the process
+table.
+
+    certo mcp status
+    certo mcp restart          # shows what it would stop
+    certo mcp restart --yes    # stops the stale ones; --all, every one
+
+An MCP server is started by its client and keeps the code it loaded. After a
+`pip install` it goes on answering as the old version, and results from two
+versions mixed without anyone noticing. certo cannot start a server, because
+only the client can, but it can stop the stale ones so that the client starts
+fresh ones: `/mcp` in Claude Code, or a restart of Claude Desktop. Listing is
+the default, because stopping a server ends that client's session with it.
+And every MCP answer carries `certo_version`, plus `stale: true` with a note
+when the server's code is older than the package installed.
 
 ### `certo repro`
 

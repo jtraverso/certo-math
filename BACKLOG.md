@@ -110,16 +110,26 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P2** | Branch and bound at the size users bring: an external incumbent (a partition already verified by `cover`), a progress callback in the Python API, orbital branching with the group `reduce` certifies | **M-L** | **low** | med | a 100-edge template with ~400 binary columns ran over an hour where a float MILP closed it in a second. Joins the 1048-column row below |
+| **P2** | Many runs, cheaply: `parametric --batch specs.jsonl` | **S-M** | med | med | one process per box paid the start-up thousands of times. `certo.api.run(command, spec)` runs in-process and `verify family.zip --jobs N` verifies in parallel; the CLI still has no batch form for PRODUCING certificates |
+| **P2** | `--deadline` that ends certo's CHILDREN too (a Windows Job Object, a process group elsewhere) | **M** | med | med | `python -m certo` fixes the launcher half of a reported hang; a `geng`, `cbc` or `lake` child can still outlive a deadline |
+| **P2** | `certo commands --json` with every subcommand's arguments, in one call | **S** | **high** | low | `certo <cmd> --help` six times took over 120 s on a loaded Windows machine -- the interpreter start, each time |
+| **P2** | `exists` with clique candidates generated, not only `triangles_of` | **M** | med | med | a clique partition needs every clique as a candidate; `columns` already enumerates them |
+| **P3** | `verify --reenumerate`: rerun the enumeration with the stored filters and compare the counts | **M** | med | low | `verify` says honestly that it does not check completeness; for graph families it could |
+| **P3** | Extra allowed roots for the MCP workspace | **S-M** | med | med | specs living in another tree had to be copied in; the restriction is a security boundary, so the list must be explicit |
+| **P3** | Bug-report folders in the data directory rather than the working directory | **S** | med | low | the self-check already writes there; `report` writes where it runs, which is often a shared workspace |
+| **P3** | A ratio objective certified directly: `kappa = min cap/K`, `profile` or `ratio` joined to `parametric` | **L** | **low** | med | done today by bisection outside certo |
+| **P3** | An exact cover number in one command: `cover` above, the LP dual below, and `exists` or branch and bound on the same candidates for the gap | **L** | **low** | med | assembled by hand from three modules today |
+| **P2** | Charts in `atlas`: pieces in other coordinate systems, and the change of coordinates checked | **L** | **low** | med | `atlas` covers a domain in ONE chart. The user's ~2 000 boxes are in three rational charts (a blow-up at the apex, a projection from a point of the conic): the map between them, its image, and where it is defined are what must be checked |
+| **P3** | `atlas`: excluding a cell that only TOUCHES the region's boundary | **M** | **low** | low | a cell is excluded only where a condition is strictly negative on it, closed; one touching `g = 0` needs a piece even when the neighbours cover that face. Conservative, and exactly where slivers live |
 | **P2** | The coverage map, from a USER'S machine | **S** | **high** | low | read again in this cycle: three lines here, none with `why`, and the users' maps live on their machines. The step is asking for one -- `certo report --coverage` or `doctor --json` -- not code |
 | **P2** | Polynomial multipliers for a region on a box, and region leaves that subdivide | **M** | **low** | med | box + region landed with CONSTANT multipliers on the conditions and their products, on the whole box. A residual that needs `p * g` or a split first is not certified yet |
 | **P3** | Other implicit column families: stars, independent sets, and a generic pricing hook | **L** | **low** | med | `columns` gained `max_size` and a Farkas certificate for an infeasible partition; which OTHER family is wanted was never said, and the pricing bound is per family |
 | **P3** | The support pass FIRST on a branch-and-bound node? | **S** | **low** | low | measured: over ~6 000 node certifications it never ran -- the ladder closes every node. Whether two eliminations beat the ladder's 11 `check_lp` on the 1048-column case is the question left, and it belongs to the P2 row on that instance |
-| **P3** | A parametric row's polynomials by size, not in full | **S** | **high** | low | **a schema decision, not code**: `rows[*].residual`/`shifted` are most of a large `parametric_bound` once it is written compact, and no verifier -- 0.17 included -- reads them. Dropping them past a size is a REMOVAL under the freeze, so it was built, measured, and taken out of 0.18.0 before release. Needs either the freeze rule widened for never-read descriptive copies, or `SCHEMA_VERSION` 5 |
 | **P2** | Branch and bound on 1048 columns: the exact check's reconstruction ladder, and the frontier certificate | **M** | med | med | sparse end to end landed and the instance still does not finish in 20 minutes (99 nodes). Measured: `check_lp` runs 11 times a node -- every denominator rung times three sign variants of the dual, each checked in full -- about 3.5 s a node; and building the frontier certificate at the stop serialises the whole system, 40 million `serialize` calls, about 190 s |
-| **P2** | Covering a parameter domain: N boxes cover a semialgebraic set, and N parametric certificates aggregate into one statement | **L** | **low** | med | coverage is audited by a user's own scripts today -- exact tiling, delta coverage, boundaries -- over ~2 000 boxes in THREE coordinate charts, plus regions covered by external lemmas. `CoverSpec` for parameter domains, with the charts and the cited lemmas as part of what is checked |
 | **P2** | A certified integer UPPER bound for packings -- **re-measure first** | **L** | **low** | med | branch and bound became 40 to 60 times faster on a user's instances; it may already be the answer |
 | **P2** | Branch-and-bound trees to Lean; a small finite `sweep` to Lean by `decide` | **L** | **low** | med | two users asked. The risk is the scaffolding, which is what removed the last structured exporter |
-| **P2** | Chvatal-Gomory cuts with their multipliers in the certificate; symmetry in branching; warm start | **L** | med | med | on small instances a node now costs ~30 ms; this is what is left of the throughput gap after the P1 row above |
+| **P2** | Chvatal-Gomory cuts with their multipliers in the certificate; symmetry in branching; warm start | **L** | med | med | on small instances a node now costs ~30 ms; this is what is left of the throughput gap after the branch-and-bound rows above |
 | **P2** | Chow ring and toric intersection | **L** | **low** | none | route space, but depth-shaped: an engine, not a checker. See the breadth/depth split above |
 | **P3** | Semialgebraic regions: polynomial multipliers (bounded Putinar), equality constraints, and boxes whose boundary is a curve | **L** | **low** | med | `region` multipliers are constants and products of pairs. A user's parameters live on a surface and needed three rational charts found by hand -- a blow-up at the apex, a projection from a point of the conic -- and boxes cut by a curve (`k1 = 0`, `x1 = 0`, `gamma0 = 1/10`) still leave slivers |
 | **P3** | The minimum over a family of an arbitrary certified leaf -- an LP, an inertia, a count | **M-L** | **low** | med | `family` maximises over explicit LPs only |
@@ -141,6 +151,19 @@ reasonable thing to want and the wrong place to put it: certo's argument is
 that nothing it reports rests on a tool it does not check, and a second
 opinion is most useful when it shares nothing with the first. `certo.api`
 already runs certo in-process for the reverse direction.
+
+### Asked for, and already there
+
+Reachability, not capability: each of these was requested in the last round
+of reports, and exists.
+
+- **An integer `opt` with a certified bound when branch and bound does not
+  close.** A stopped `mixed --prove-optimal` writes a `branch_frontier`
+  certificate: the incumbent, the unopened nodes, and the bound they give.
+- **A stable in-process API.** `certo.api.run(command, spec)` runs any command
+  without a new interpreter; `api.options(command)` lists what each takes.
+- **Branch and bound needs no large thread stack.** It keeps its own stack of
+  nodes and does not recurse, so the depth of the tree is not a Python limit.
 
 ### Blocked, and on whom
 
@@ -403,6 +426,14 @@ the cost is being paid somewhere else.
 | `certo report --stderr`: a native crash or deadline dump, frame by frame | **0.19.0** |
 | `doctor --register-mcp --venv DIR`, checked before written | **0.19.0** |
 | The `proof` kind in the tamper battery | **0.19.0** -- it found a hypothesis that could lose its name |
+| `certo atlas`: N parametric certificates on N boxes, one statement, the covering recomputed | **0.20.0** -- 51st command, 53rd kind; pieces referenced by digest, cited boxes relative, no charts yet |
+| `SCHEMA_VERSION` 5: large parametric rows by size, and the schema number read | **0.20.0** -- a schema-4 reader verifies schema 5; checked against 0.19.0 |
+| A cover's report tied to its parts; `max_size` rechecked; `clique_partition(max_size=)` | **0.20.0** -- a report of small cliques beside other parts used to verify |
+| `python -m certo`; `--json` always JSON; Lean found without downloads; `certo_version` in MCP answers; coverage printed, not reported | **0.20.0** |
+| Where a parametric box check failed: vertex or interior, coefficient, and where to split | **0.20.0** |
+| `.json.gz` certificates, and `certo pack` / `verify family.zip --jobs N` | **0.20.0** -- 7.8x smaller, one file; sharing the program between boxes measured at 1.4x and left out |
+| `certo mcp status` / `restart --yes`, and `stale` in every MCP answer | **0.20.0** |
+| `--explore` and `certo promote`: a cheap look, labelled `explored` / `likely`, then the certified run compared | **0.20.0** -- opt, mixed, parametric (grid, exact counterexample), sweep (seeded sample) |
 | A GitHub Release per tag, from `publish.yml` | **0.15.0** -- the release job, and the ten missing ones created by hand |
 | The project page stating its version and naming new commands | **0.15.0** -- tied to `__version__` by a test |
 | **The facets of a cone behind `semigroup`** | pycddlib, `certo[polyhedra]`, **0.17.0** -- gradings for 140 of 140 pointed cones against 77, and `pointed: false` now needs a zero combination |
@@ -982,10 +1013,11 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.19.0**, with **52 certificate kinds**. The certificate schema
-has been **frozen** since 0.4.0 and `SCHEMA_VERSION` is still 4: everything
-since has been a new kind, an optional field, or a command that emits no
-certificate. Among the optional fields added under the freeze: `loads`,
+Current: **0.20.0**, with **53 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+and moved to 5 once, for one removal the owner decided while the tool was
+still used almost only by its own project: `parametric_bound` rows past 64
+terms by size. Everything else since 0.4 has been a new kind, an optional
+field, or a command that emits no certificate. Among the optional fields added under the freeze: `loads`,
 `declared` and `relative`, in 0.18.0 `dual_selection`, `map` and a
 lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`.

@@ -116,7 +116,9 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
             if not path.exists():
                 return _fail(t("engine.compose.cert_missing", name=lem.name,
                                path=str(path)), t0)
-            sub = json.loads(path.read_text(encoding="utf-8"))
+            from .. import store
+
+            sub = store.read_json(path)
             rep = verify_cert(Certificate.from_dict(sub), lim)
             if not rep.ok:
                 return _fail(t("engine.compose.cert_invalid", name=lem.name,

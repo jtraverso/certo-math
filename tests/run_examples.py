@@ -46,6 +46,7 @@ CASES = [
     ("integer_matrix.py", "matrix", []),
     ("matrix_inertia.py", "matrix", []),
     ("clique_columns.py", "columns", []),
+    ("parametric_atlas.py", "atlas", []),
     ("interchange_matrix.py", "matrix", []),
     ("toric_cone.py", "cone", []),
     ("affine_semigroup.py", "semigroup", []),

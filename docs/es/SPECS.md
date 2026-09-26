@@ -82,7 +82,7 @@ encierro construido desde `0.1` sería perfectamente riguroso sobre
 
 ## Dominios finitos
 
-`DomainSpec` corre el patrón exhaustivo —los mismos seis estados, los mismos
+`DomainSpec` corre el patrón exhaustivo —los mismos siete estados, los mismos
 certificados de predicado, la misma calibración— sobre cualquier cosa que
 puedas enumerar.
 
@@ -371,9 +371,19 @@ avisos.
 
 ## El esquema está congelado
 
-El esquema de certificados está **congelado desde 0.4**: las cargas útiles
-existentes no se mueven, así que un certificado producido para un paper sigue
-verificando contra un certo posterior. Los tipos nuevos de certificado siguen
-siendo aditivos y siempre lo serán. Los campos nuevos sobre un tipo existente
-son opcionales, que es como `unsat_core` ganó sus multiplicadores de Farkas sin
-que un lector de 0.5 se enterara.
+El esquema de certificados está **congelado**, en 5 desde 0.20: las cargas
+útiles existentes no se mueven, así que un certificado producido para un paper
+sigue verificando contra un certo posterior. Los tipos nuevos de certificado
+siguen siendo aditivos y siempre lo serán. Los campos nuevos sobre un tipo
+existente son opcionales, que es como `unsat_core` ganó sus multiplicadores de
+Farkas sin que un lector de 0.5 se enterara.
+
+**De 4 a 5** es el único movimiento que ha hecho el congelamiento, y es
+pequeño. Una fila de `parametric_bound` cuyo residuo tiene más de 64 términos
+se registra por su tamaño (`residual_terms`, `recomputed: true`) en vez de
+escribirse. Eran copias que ningún verificador leyó nunca, y eran la mayor
+parte de un archivo grande. Todo certificado de esquema 4 se lee exactamente
+como antes. Un lector de esquema 4 (0.19 y anteriores) verifica también uno de
+esquema 5, porque nunca leyó esos campos. Un certificado conserva el esquema
+en que se escribió, y uno de un esquema más nuevo que el que conoce el lector
+se verifica con un aviso que lo dice.

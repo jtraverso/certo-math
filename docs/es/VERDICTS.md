@@ -19,7 +19,7 @@ pregunta si algo supera 9; la respuesta es `unsat`, y el veredicto es
 `proved`. **Un estado `unsat` sobre un óptimo probado no es un fallo.** Lee el
 veredicto.
 
-## Los seis estados
+## Los siete estados
 
 | Estado | Significa | Concluyente |
 |---|---|---|
@@ -29,6 +29,7 @@ veredicto.
 | `timeout` | se agotó el reloj | no |
 | `resource_exhausted` | se agotó un presupuesto de nodos, memoria o rlimit | no |
 | `out_of_theory` | la pregunta está fuera de lo que este comando decide | no |
+| `explored` | `--explore` respondió barato, en punto flotante o sobre una muestra, y no certificó nada | no |
 
 **Ninguno de los cuatro últimos significa «no existe».** Cada uno es una razón
 distinta para no tener respuesta, y se mantienen separados porque quien lee
@@ -36,7 +37,7 @@ distinta para no tener respuesta, y se mantienen separados porque quien lee
 búsqueda suele venir con lo que la búsqueda sabía al parar: ver
 `branch_frontier` más abajo.
 
-## Los seis veredictos
+## Los siete veredictos
 
 | Veredicto | Significa para tu pregunta |
 |---|---|
@@ -46,6 +47,7 @@ búsqueda suele venir con lo que la búsqueda sabía al parar: ver
 | `unsatisfiable` | lo que pediste no existe: tus restricciones se contradicen |
 | `inconclusive` | sin respuesta. El estado dice por qué |
 | `error` | el comando no pudo correr: un spec que no carga, una opción que no aplica |
+| `likely` | `--explore` lo encontró donde miró, sin certificar. Nunca `proved`; `certo promote` es cómo llega a serlo |
 
 ## Códigos de salida
 
@@ -62,6 +64,28 @@ tiempo de un driver. Una corrida que termina sin salida y funciona al
 relanzarla: corre `certo doctor`, cuya fila `startup` nombra los hooks de
 arranque que se sabe matan el intérprete antes de que corra certo. Con
 `PYTHONFAULTHANDLER=1` incluso esos imprimen una pila.
+
+### Llamar a certo desde un programa
+
+- **Usa `python -m certo ...`, no `certo`.** En Windows `certo.exe` es un
+  lanzador que arranca el intérprete como *hijo*. Un timeout que mata
+  `certo.exe` deja vivo ese intérprete con las tuberías abiertas, y quien
+  llama se queda esperándolas para siempre. Bajo carga el lanzador mismo
+  puede además no encontrarse (`WinError 2`). `python -m certo` es un solo
+  proceso, sin lanzador. Si no hay más remedio que usar el lanzador, mata el
+  árbol entero (`taskkill /T /F /PID ...`).
+- **`--json` siempre escribe JSON.** Una corrida que falla, sea por una
+  excepción (salida `3`) o por un rechazo (salida `1`), y que habría dejado
+  stdout vacío, ahora escribe una línea:
+  `{"status": "error", "exit": ..., "message": ...}`, donde el mensaje es lo
+  que dijo stderr. Lo único que no puede cubrir es un proceso que muere en
+  código nativo antes de que corra Python. `doctor` nombra los hooks de
+  arranque que se sabe que hacen eso.
+- **Costo de arranque.** Cada corrida vuelve a importar certo y z3. Donde un
+  hook `.pth` hace lento o mata el arranque del intérprete, `python -S` con
+  el directorio site-packages en `PYTHONPATH` se salta todos los `.pth`. Un
+  usuario midió que `import certo` bajó de 10–21 s a 1,7–4,8 s así, sin tocar
+  su instalación de Python.
 
 ## Optimización: cuatro afirmaciones distintas
 

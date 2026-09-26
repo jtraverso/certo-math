@@ -397,7 +397,13 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
 
     coverage.record(res, "mcp")
 
+    from . import __version__
+
     out: dict[str, Any] = {
+        # The server's OWN version. After a `pip install` a running server
+        # keeps the old code until the client reconnects, and results from
+        # two versions mixed silently; now every answer says which one.
+        "certo_version": __version__,
         "command": res.command,
         "verdict": res.verdict.value,
         "status": res.status.value,
@@ -407,6 +413,15 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
         "elapsed_ms": round(res.elapsed_ms, 1),
         "meta": _trim(res.meta),
     }
+    # OLD CODE, said out loud: the package on disk is newer than what this
+    # server loaded, so these results are the old version's.
+    from . import mcpctl
+    from .i18n import t as _t
+
+    old = mcpctl.stale()
+    if old:
+        out["stale"] = True
+        out["stale_note"] = _t("mcp.stale", installed=old[0], loaded=old[1])
     # A vacuous proof looks exactly like a good one in a summary, so it does
     # not get to hide inside `meta`.
     if res.meta.get("vacuous"):
@@ -663,12 +678,19 @@ async def bounds(spec_path: str | None = None, spec_source: str | None = None,
     "third, global optimality is certified for free."))
 @_guard
 async def mixed(spec_path: str | None = None, spec_source: str | None = None,
-                target: str | None = None, timeout_ms: int = 120_000) -> dict:
+                target: str | None = None, timeout_ms: int = 120_000,
+                explore: bool = False) -> dict:
     from .engines import mixed as mx
     from .spec import LPSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     sp = await _off(load_spec, f, LPSpec)
+    if explore:
+        from . import explore as ex
+
+        return _emit(await _off(ex.lp, "mixed", sp, _limits(timeout_ms),
+                                target if target is not None else sp.target),
+                     spec_file=f)
     res = await _off(mx.mixed, sp, _limits(timeout_ms), str(f),
                      target if target is not None else sp.target)
     out = _emit(res, spec_file=f)
@@ -740,12 +762,17 @@ async def cover(spec_path: str | None = None, spec_source: str | None = None,
 @_guard
 async def parametric(spec_path: str | None = None,
                      spec_source: str | None = None,
-                     timeout_ms: int = 60_000) -> dict:
+                     timeout_ms: int = 60_000, explore: bool = False) -> dict:
     from .engines import algebra
     from .spec import ParametricSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), ParametricSpec)
+    if explore:
+        from . import explore as ex
+
+        return _emit(await _off(ex.parametric, spec, _limits(timeout_ms)),
+                     spec_file=f)
     res = await _off(algebra.parametric, spec, _limits(timeout_ms), str(f))
     return _emit(res, spec_file=f)
 
@@ -984,7 +1011,8 @@ async def synth(spec_path: str | None = None, spec_source: str | None = None,
     "relaxation bound, not integer optimality."))
 @_guard
 async def opt(spec_path: str | None = None, spec_source: str | None = None,
-              timeout_ms: int = 10_000, by_type: bool = False) -> dict:
+              timeout_ms: int = 10_000, by_type: bool = False,
+              explore: bool = False) -> dict:
     from .engines import lp
     from .packing import PackingSpec
     from .spec import LPSpec, load_spec
@@ -999,6 +1027,11 @@ async def opt(spec_path: str | None = None, spec_source: str | None = None,
         raise TypeError("opt needs an LPSpec or a PackingSpec; spec() returned "
                         + type(sp).__name__)
 
+    if explore:
+        from . import explore as ex
+
+        return _emit(await _off(ex.lp, "opt", sp, _limits(timeout_ms)),
+                     spec_file=f)
     res = await _off(lp.opt, sp, _limits(timeout_ms))
     out = _emit(res, spec_file=f)
     if packing is not None:
@@ -1068,12 +1101,17 @@ async def sweep(spec_path: str | None = None, spec_source: str | None = None,
                 by_orbit: bool = False,
                 timeout_ms: int = 60_000, cert_mode: str = "failures",
                 n_range: str | None = None,
-                stop_on_first: bool = False) -> dict:
+                stop_on_first: bool = False, explore: bool = False) -> dict:
     from .engines import domain, graphsearch
     from .spec import DomainSpec, SweepSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     sp = await _off(load_spec, f)
+    if explore and isinstance(sp, (DomainSpec, SweepSpec)):
+        from . import explore as ex
+
+        return _emit(await _off(ex.sweep, sp, _limits(timeout_ms)),
+                     spec_file=f)
     if n_range:
         if not isinstance(sp, SweepSpec):
             raise TypeError("n_range only applies to a SweepSpec")
@@ -1648,6 +1686,79 @@ async def columns(spec_path: str | None = None, spec_source: str | None = None,
 
 
 @mcp.tool(description=(
+    "ATLAS: a parameter domain covered by boxes, each certified by "
+    "`parametric`, and ONE statement for the whole. Every piece is verified "
+    "again; all must be the same program with the same claim; and the "
+    "covering is recomputed exactly -- the domain split at the pieces' edges, "
+    "each cell inside a piece or shown outside the `region` by Bernstein "
+    "coefficients. A cell that is neither is NAMED with its coordinates: the "
+    "sliver a box-by-box proof leaves. Pieces given as paths are referenced "
+    "by digest; `cited` boxes make the statement relative. No charts yet."))
+@_guard
+async def atlas(spec_path: str | None = None, spec_source: str | None = None,
+                timeout_ms: int = 120_000) -> dict:
+    from .engines import algebra
+    from .spec import AtlasSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), AtlasSpec)
+    res = await _off(algebra.atlas, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
+    "PROMOTE: run an exploration again CERTIFIED and say whether the two "
+    "agree. `explore=true` on opt, mixed, parametric and sweep answers "
+    "cheaply -- floating point, samples, verdict `likely`, no certificate; "
+    "promote is how a likely answer becomes a proved one. Give the record a "
+    "CLI `--explore --record FILE` wrote."))
+@_guard
+async def promote(record_path: str, timeout_ms: int = 120_000) -> dict:
+    from . import explore, report
+
+    rec = explore.load_record(_resolve(record_path))
+    run = await _off(report.rerun, list(rec["argv"]))
+    res = run.get("result")
+    if res is None:
+        return {"ok": False, "error": run.get("exception") or "no result"}
+    agrees, why = explore.agreement(rec, res)
+    out = _emit(res)
+    out["explored"] = rec.get("answer")
+    out["agrees"], out["why"] = agrees, why
+    return out
+
+
+@mcp.tool(description=(
+    "PACK: every certificate under a directory into ONE zip, each member "
+    "compressed on its own and readable alone, with a manifest of names, "
+    "digests and kinds. `verify` then takes the zip (every member and the "
+    "manifest) or `family.zip#member`. For thousands of box certificates: "
+    "7.8x smaller and one file instead of thousands."))
+@_guard
+async def pack(src: str, out: str) -> dict:
+    from . import store
+
+    return await _off(store.pack, str(_resolve(src)), str(_resolve(out)))
+
+
+@mcp.tool(name="mcp", description=(
+    "MCP: which certo MCP servers are running, when each started, and which "
+    "started before the installed package -- STALE, answering with old code. "
+    "Lists only: stopping a server ends another client's session, so that is "
+    "left to the person, with `certo mcp restart --yes` on the command line."))
+@_guard
+async def mcp_servers(action: str = "status") -> dict:
+    # Not `def mcp`: that name is the server object every `@mcp.tool` uses.
+    from . import mcpctl
+    from .i18n import t as _t
+
+    out = await _off(mcpctl.status)
+    out["stale_here"] = bool(mcpctl.stale())
+    out["to_stop"] = _t("mcp.stop_from_cli")
+    return out
+
+
+@mcp.tool(description=(
     "MATRIX: exact integer linear algebra -- rank, determinant, Hermite and "
     "Smith normal form -- with the unimodular transforms carried alongside "
     "their inverses, so every answer is checkable by integer matrix "
@@ -1820,8 +1931,14 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000) -> dict:
     from .certificate import Certificate
     from .certificate import verify as vc
 
-    p = _resolve(certificate_path)
-    cert = Certificate.from_dict(json.loads(p.read_text(encoding="utf-8")))
+    from . import store
+
+    head, member = store.split_ref(certificate_path)
+    p = _resolve(head)
+    if member is None and str(p).lower().endswith(".zip"):
+        return await _off(store.verify_archive, str(p), 1, timeout_ms)
+    ref = str(p) if member is None else "{}#{}".format(p, member)
+    cert = Certificate.from_dict(store.read_json(ref))
     rep = await _off(vc, cert, _limits(timeout_ms))
     # rep.to_dict() and not a hand-built subset: this used to drop `warnings`,
     # which is where every "this says less than it looks like" lives -- a
@@ -1881,8 +1998,10 @@ async def export_lean(certificate_path: str | None = None,
     if graph:
         graphs, source = [Graph.from_graph6(graph)], "graph6 " + graph
     elif certificate_path:
+        from . import store
+
         p = _resolve(certificate_path)
-        data = json.loads(p.read_text(encoding="utf-8"))
+        data = store.read_json(p)
         graphs = lean.graphs_from_certificate(data)
         source = "{} (certificate {})".format(
             certificate_path, Certificate.from_dict(data).digest())

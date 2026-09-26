@@ -57,6 +57,12 @@ def check(universe, parts, exact: bool = True) -> dict:
     doubled, and the counts. A cover that is wrong is usually wrong in a way
     worth seeing.
     """
+    # The pair `clique_parts` returns, passed whole: two "parts", neither of
+    # them a set of edges, and every edge reported missed. Refused by name.
+    if (isinstance(parts, tuple) and len(parts) == 2
+            and isinstance(parts[1], list) and parts[1]
+            and all(isinstance(r, dict) and "vertices" in r for r in parts[1])):
+        raise TypeError(_t("cover.pair_passed"))
     want = [_key(u) for u in universe]
     if len(set(want)) != len(want):
         dupes = [k for k, n in Counter(want).items() if n > 1]
@@ -127,6 +133,10 @@ def edges_of(vertices) -> list:
 
 def clique_parts(edges, vertex_sets, max_size=None):
     """Turn vertex sets into cover parts, refusing any that is not a clique.
+
+    Returns `(parts, report)`: the parts as edge lists, which is what `check`
+    takes, and one `{"vertices", "edges"}` per part. Pass `parts` to `check`,
+    not the pair -- a user did, and got "covered 0" for a correct partition.
 
     This is the check the general cover machinery cannot make: a part is a set
     of edges, and nothing about a set of edges says it came from a clique. A

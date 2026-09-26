@@ -24,6 +24,7 @@ likes, and a certificate that is exact and checkable without it.
 """
 from __future__ import annotations
 
+import json
 import time
 
 from ..certificate import (cover_certificate, ideal_certificate,
@@ -39,6 +40,7 @@ from ..i18n import t
 from ..limits import Limits
 
 ENGINE_COLGEN = "certo/column-generation"
+ENGINE_ATLAS = "certo/atlas"
 from ..polynomials import Budget, Poly, cofactors
 from ..status import Result, Status, Verdict
 
@@ -397,6 +399,129 @@ def clique_lp(spec, limits: Limits | None = None,
               "generated": out["generated"], "rounds": out["rounds"],
               "support": len(p["columns"]),
               "nodes": p["pricing"]["nodes"], "exact": True})
+
+
+def _where_text(d) -> str:
+    """One sentence from a `diagnose` record: where, how negative, and what
+    would change it."""
+    if d.get("ray"):
+        return t("engine.param.where_ray", where=d["where"],
+                 coef=d["coefficient"], mono=d["monomial"],
+                 neg=d["negative"], of=d["of"])
+    if d.get("corner"):
+        return t("engine.param.where_corner", where=d["where"],
+                 point=", ".join("{} = {}".format(k, v)
+                                 for k, v in d["point"].items()),
+                 coef=d["coefficient"], neg=d["negative"], of=d["of"])
+    return t("engine.param.where_split", where=d["where"],
+             coef=d["coefficient"], index=d["index"], deg=d["degrees"],
+             neg=d["negative"], of=d["of"], split=d["split"], at=d["at"])
+
+
+def atlas(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """N parametric certificates on N boxes, and the one statement they make
+    together -- or the pieces and cells that stop them making it."""
+    from fractions import Fraction
+
+    from .. import atlas as A
+    from ..certificate import atlas_certificate
+    from ..polynomials import Poly
+    from ..spec import ParametricSpec
+
+    t0 = time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+
+    def refuse(msg):
+        return Result("atlas", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_ATLAS, ms(), None, detail=str(msg))
+
+    try:
+        ring = tuple(spec.domain)
+        domain = A._box(spec.domain, ring)
+        if any(hi is None or hi <= lo for lo, hi in domain.values()):
+            return refuse(t("atlas.domain_bounded"))
+
+        def P(x):
+            if isinstance(x, Poly):
+                if x.vars != ring:
+                    raise A.NotAnAtlas(t("atlas.wrong_ring",
+                                         got=", ".join(x.vars),
+                                         want=", ".join(ring)))
+                return x
+            if isinstance(x, (int, Fraction)):
+                return Poly.const(ring, x)
+            return Poly.from_z3(x, ring)
+
+        certs, records = [], []
+        for k, entry in enumerate(spec.pieces or []):
+            if isinstance(entry, ParametricSpec):
+                r = parametric(entry, limits)
+                if r.certificate is None:
+                    return refuse(t("atlas.piece_failed", k=k, detail=r.detail))
+                entry = r.certificate
+            c, rec = A.load(entry)
+            certs.append(c)
+            records.append(rec)
+        if not certs and not spec.cited:
+            return refuse(t("atlas.no_pieces"))
+    except A.NotAnAtlas as e:
+        return refuse(e)
+
+    first = next((c for c in certs if c.kind == "parametric_bound"), None)
+    if first is None:
+        return refuse(t("atlas.no_parametric"))
+    program = A.program_of(first.payload)
+    if list(program["parameters"]) != list(ring):
+        return refuse(t("atlas.wrong_ring", got=", ".join(program["parameters"]),
+                        want=", ".join(ring)))
+    fc = first.payload.get("claim") or {}
+    target = P(spec.claim).serialize() if spec.claim is not None \
+        else fc.get("target")
+    if target is None or not fc.get("relation"):
+        return refuse(t("atlas.no_claim"))
+    claim = {"target": target, "relation": fc["relation"]}
+    region = {str(n): P(g).serialize() for n, g in (spec.region or [])}
+    cited = [{"box": A._text(A._box(b, ring)), "source": str(src).strip()}
+             for b, src in (spec.cited or [])]
+    if any(not c["source"] for c in cited):
+        return refuse(t("atlas.cite_no_source"))
+    payload = {"parameters": list(ring), "domain": A._text(domain),
+               "region": region, "claim": claim, "program": program,
+               "pieces": [dict(rec, box=A._text(A.piece_box(c.payload, ring)))
+                          for c, rec in zip(certs, records)],
+               "cited": cited, "title": spec.title}
+
+    rows = A.check_pieces(payload, certs, limits)
+    try:
+        cov = A.cover(domain, A.boxes_of(payload, certs),
+                      A.conditions_of(payload))
+    except A.CoverBudget:
+        return Result("atlas", Status.RESOURCE_EXHAUSTED, Verdict.INCONCLUSIVE,
+                      ENGINE_ATLAS, ms(), None,
+                      detail=t("atlas.budget", n=A.MAX_CELLS))
+    failed = [label for label, ok, _d in rows if not ok]
+    meta = {"pieces": len(certs), "cited": len(cited), "cells": cov["cells"],
+            "excluded": cov["excluded"], "gaps": cov["gaps"],
+            "uncovered": cov["uncovered"], "failed": failed}
+    if failed or cov["gaps"]:
+        detail = t("atlas.not_proved",
+                   failed=", ".join("{} ({})".format(l, d) for l, ok, d in rows
+                                    if not ok) or "-",
+                   gaps=cov["gaps"],
+                   first=json.dumps(cov["uncovered"][0]) if cov["uncovered"]
+                   else "-")
+        return Result("atlas", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      ENGINE_ATLAS, ms(), None, detail=detail, meta=meta)
+    payload["coverage"] = {"cells": cov["cells"], "covered": cov["covered"],
+                           "excluded": cov["excluded"]}
+    cert = atlas_certificate(payload).stamp(spec_path or None)
+    detail = t("atlas.proved", relation=claim["relation"],
+               target=str(Poly.parse(ring, target)) or "0",
+               n=len(certs), cells=cov["cells"], excluded=cov["excluded"])
+    if cited:
+        detail += " -- " + t("atlas.relative", n=len(cited))
+    return Result("atlas", Status.UNSAT, Verdict.PROVED, ENGINE_ATLAS, ms(),
+                  cert, detail=detail, meta=meta)
 
 
 def capacity_profile(spec, limits: Limits | None = None,
@@ -1106,10 +1231,15 @@ def parametric(spec, limits: Limits | None = None,
             detail = t("engine.param.not_shown_box" if out.get("box")
                        else "engine.param.not_shown",
                        names=", ".join(out["failed"][:4]), floor=floor)
+        diag = out.get("diagnosis") or []
+        if diag:
+            detail = detail.rstrip()
+            detail += ("" if detail.endswith(".") else ".") + " " +                 _where_text(diag[0])
         return Result("parametric", Status.UNKNOWN_SOLVER,
                       Verdict.INCONCLUSIVE, ENGINE_PARAM, ms, None,
                       detail=detail,
-                      meta={"failed_columns": out["failed"]})
+                      meta={"failed_columns": out["failed"],
+                            "diagnosis": diag})
 
     cert = parametric_bound_certificate(
         parameters=dict(spec.parameters),

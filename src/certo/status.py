@@ -1,4 +1,4 @@
-"""Los seis estados de resultado y el veredicto.
+"""Los siete estados de resultado y el veredicto.
 
 Regla transversal 2: nunca colapsar en tres estados. Un LLM que lee
 "unknown" escribe "no existe solucion"; hay que distinguir por que.
@@ -17,6 +17,9 @@ class Status(str, Enum):
     TIMEOUT = "timeout"                        # se agoto el reloj
     RESOURCE_EXHAUSTED = "resource_exhausted"  # rlimit / memoria
     OUT_OF_THEORY = "out_of_theory"            # fuera del fragmento decidible
+    # A cheap look, not an answer: `--explore` solved it in floating point or
+    # on a sample, and certified nothing. Never conclusive, so it exits 2.
+    EXPLORED = "explored"
 
     @property
     def conclusive(self) -> bool:
@@ -51,10 +54,13 @@ class Verdict(str, Enum):
     UNSATISFIABLE = "unsatisfiable"
     INCONCLUSIVE = "inconclusive"
     ERROR = "error"
+    # What `--explore` found, uncertified: the claim held where it was
+    # looked at. Never PROVED; `certo promote` is how it becomes one.
+    LIKELY = "likely"
 
 
 def classify_unknown(reason: str) -> Status:
-    """Traduce el reason_unknown() de z3 a uno de los seis estados."""
+    """Traduce el reason_unknown() de z3 a uno de los estados."""
     r = (reason or "").lower()
     if "timeout" in r or "canceled" in r:
         return Status.TIMEOUT

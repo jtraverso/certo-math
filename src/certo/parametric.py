@@ -219,6 +219,21 @@ def dual_text(poly) -> str:
     return str(poly)
 
 
+def _diagnose(poly, box, degrees, shifted):
+    """Where a non-negativity check failed, or None: the most negative
+    Bernstein coefficient on a box (see `bernstein.diagnose`), or the most
+    negative shifted coefficient on a ray, with its monomial."""
+    if box is not None:
+        from . import bernstein
+        return bernstein.diagnose(poly, box, degrees)
+    neg = [(c, e) for e, c in shifted.terms.items() if c < 0]
+    if not neg:
+        return None
+    c, e = min(neg)
+    return {"coefficient": str(c), "monomial": list(e), "ray": True,
+            "negative": len(neg), "of": len(shifted.terms)}
+
+
 def certify(spec) -> dict:
     """The three checks, and everything the certificate needs to repeat them.
 
@@ -353,13 +368,18 @@ def certify(spec) -> dict:
                                                hints.get(("column", var)))
             if tree is not None:
                 trees["columns"][var] = tree
-        rows.append({"variable": var,
-                     "residual": residual.serialize(),
-                     "shifted": shifted.serialize(),
-                     "ok": ok,
-                     "region_multipliers": {k: str(v) for k, v in used.items()},
-                     "negative": sorted(str(c) for c in shifted.terms.values()
-                                        if c < 0)})
+        row = {"variable": var,
+               **_row_polys(residual=residual, shifted=shifted),
+               "ok": ok,
+               "region_multipliers": {k: str(v) for k, v in used.items()},
+               "negative": sorted(str(c) for c in shifted.terms.values()
+                                  if c < 0)}
+        if not ok and var not in free:
+            diag = _diagnose(residual, box, hints.get(("column", var)),
+                             shifted)
+            if diag:
+                row["diagnosis"] = diag
+        rows.append(row)
 
     bound = Poly(ring)
     for name, _row, _sense, rhs in spec.constraints:
@@ -400,6 +420,10 @@ def certify(spec) -> dict:
         "negative_dual": negative,
         "ok": not negative and all(r["ok"] for r in rows),
         "failed": [r["variable"] for r in rows if not r["ok"]],
+        # Where each failing column failed, for the one who has to decide
+        # where to cut. Not in any certificate: a certificate means it held.
+        "diagnosis": [dict(r["diagnosis"], where=r["variable"])
+                      for r in rows if r.get("diagnosis")],
     }
 
 
@@ -682,8 +706,8 @@ def _certify_primal(spec, P, ring, minimising, free, claim, nn=None,
             ok, shifted, _u, _r, tree = nn(slack)
             if tree is not None:
                 trees["rows"][str(name)] = tree
-        rows.append({"constraint": str(name), "slack": slack.serialize(),
-                     "shifted": shifted.serialize(), "ok": ok})
+        rows.append({"constraint": str(name),
+                     **_row_polys(slack=slack, shifted=shifted), "ok": ok})
     bound = Poly(ring)
     for var, coef in spec.objective.items():
         if x.get(var) is not None and x[var].terms:
@@ -712,6 +736,24 @@ def _certify_primal(spec, P, ring, minimising, free, claim, nn=None,
         "negative_dual": negative, "ok": not negative and not failed,
         "failed": failed,
     }
+
+
+#: Terms past which a row's polynomial is recorded by its size, not written
+#: out -- schema 5. `verify` rebuilds every residual from the constraints and
+#: the dual and never read these copies; on a large instance they were most
+#: of the file.
+ROW_TEXT_MAX = 64
+
+
+def _row_polys(**polys) -> dict:
+    """The descriptive polynomials of one row: in full when small enough to
+    read, otherwise how many terms each has -- and a note that it is
+    recomputed, so an absent copy is not mistaken for a missing check."""
+    if all(len(p.terms) <= ROW_TEXT_MAX for p in polys.values()):
+        return {k: p.serialize() for k, p in polys.items()}
+    out = {k + "_terms": len(p.terms) for k, p in polys.items()}
+    out["recomputed"] = True
+    return out
 
 
 def evaluate(poly: Poly, values: dict) -> Fraction:

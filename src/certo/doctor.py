@@ -69,11 +69,64 @@ def _flint():
 
 
 def _geng():
-    # nauty's geng exits non-zero on --version, so ask it for nothing instead.
-    return _binary("geng", ("-h",))
+    # nauty's geng exits non-zero on --version, so ask it for nothing instead,
+    # and report where it is: its help text as the detail read like an error.
+    ok, _detail = _binary("geng", ("-h",))
+    return ok, shutil.which("geng") or ""
 
 
 def _lean():
+    """Lean, found WITHOUT installing anything.
+
+    `lake --version` run from a directory with no `lean-toolchain` makes elan
+    resolve its default toolchain -- and install it if it is missing. A user
+    ran exactly that and watched elan download v4.34.1, leaving 1.2 GB of a
+    half-installed toolchain and a lock when it was cut off. A diagnostic that
+    can download gigabytes is not a diagnostic.
+
+    So: with elan, `elan toolchain list` (which installs nothing) says what is
+    there, and `lake` is only run inside a scratch directory pinned to a
+    toolchain ALREADY installed. Without elan, `lake` cannot download, and is
+    asked as before. The detail says the real error, not just a path.
+    """
+    import tempfile
+
+    elan = shutil.which("elan")
+    if elan is None:
+        return _lean_plain()
+    try:
+        out = subprocess.run([elan, "toolchain", "list"], capture_output=True,
+                             text=True, timeout=20, encoding="utf-8",
+                             errors="replace")
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, t("doctor.lean.elan_failed", detail=str(e)[:80])
+    names = [ln.split()[0] for ln in (out.stdout or "").splitlines()
+             if ln.strip() and not ln.lower().startswith(("no ", "info"))]
+    if out.returncode != 0 or not names:
+        return False, t("doctor.lean.no_toolchain",
+                        detail=_first_line(out) or "elan: no toolchain installed")
+    lake = shutil.which("lake")
+    if lake is None:
+        return False, t("doctor.lean.no_lake", toolchains=", ".join(names[:3]))
+    with tempfile.TemporaryDirectory(prefix="certo_doctor_lean_") as tmp:
+        Path(tmp, "lean-toolchain").write_text(names[0] + "\n", encoding="utf-8")
+        try:
+            run = subprocess.run([lake, "--version"], capture_output=True,
+                                 text=True, timeout=30, cwd=tmp,
+                                 encoding="utf-8", errors="replace")
+        except (OSError, subprocess.SubprocessError) as e:
+            return False, t("doctor.lean.lake_failed", detail=str(e)[:80])
+    if run.returncode != 0:
+        return False, t("doctor.lean.lake_failed", detail=_first_line(run))
+    return True, "{} ({})".format(_first_line(run)[:50], names[0])
+
+
+def _first_line(run) -> str:
+    lines = (run.stdout or run.stderr or "").strip().splitlines()
+    return lines[0][:120] if lines else ""
+
+
+def _lean_plain():
     """`lake`, and whether it can answer from HERE.
 
     Outside a Lean project `lake --version` fails with "no default toolchain":

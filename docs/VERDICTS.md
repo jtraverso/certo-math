@@ -17,7 +17,7 @@ branch and bound asks whether anything beats 9; the answer is `unsat`, and the
 verdict is `proved`. **An `unsat` status on a proved optimum is not a
 failure.** Read the verdict.
 
-## The six statuses
+## The seven statuses
 
 | Status | Means | Conclusive |
 |---|---|---|
@@ -27,6 +27,7 @@ failure.** Read the verdict.
 | `timeout` | the clock ran out | no |
 | `resource_exhausted` | a node, memory or rlimit budget ran out | no |
 | `out_of_theory` | the question is outside what this command decides | no |
+| `explored` | `--explore` answered cheaply, in floating point or on a sample, and certified nothing | no |
 
 **None of the last four means "does not exist".** Each is a different reason
 for having no answer, and they are kept apart because a reader who sees
@@ -34,7 +35,7 @@ for having no answer, and they are kept apart because a reader who sees
 search usually comes with what the search knew when it stopped -- see
 `branch_frontier` below.
 
-## The six verdicts
+## The seven verdicts
 
 | Verdict | Means for your question |
 |---|---|
@@ -44,6 +45,7 @@ search usually comes with what the search knew when it stopped -- see
 | `unsatisfiable` | what you asked for does not exist: your constraints contradict each other |
 | `inconclusive` | no answer. The status says why |
 | `error` | the command could not run: a spec that does not load, a flag that does not apply |
+| `likely` | `--explore` found it where it looked, uncertified. Never `proved`; `certo promote` is how it becomes one |
 
 ## Exit codes
 
@@ -59,6 +61,27 @@ stderr is usually a kill from outside -- a driver's own timeout. A run that
 ends with no output and succeeds when relaunched: run `certo doctor`, whose
 `startup` row names the start-up hooks known to kill the interpreter before
 certo runs. Setting `PYTHONFAULTHANDLER=1` makes even those print a stack.
+
+### Calling certo from a program
+
+- **Use `python -m certo ...`, not `certo`.** On Windows `certo.exe` is a
+  launcher that starts the interpreter as a *child*. A timeout that kills
+  `certo.exe` leaves that interpreter alive and holding the pipes, and the
+  caller waits on them forever. Under load the launcher itself can also fail
+  to be found (`WinError 2`). `python -m certo` is one process and no
+  launcher. If a launcher is unavoidable, kill the whole tree
+  (`taskkill /T /F /PID ...`).
+- **`--json` always writes JSON.** A run that fails, whether by an exception
+  (exit `3`) or a refusal (exit `1`), and would have left stdout empty now
+  writes one line: `{"status": "error", "exit": ..., "message": ...}`, where
+  the message is what stderr said. The one thing it cannot cover is a
+  process that dies natively before Python runs. `doctor` names the start-up
+  hooks known to do that.
+- **Start-up cost.** Each run imports certo and z3 again. Where a `.pth` hook
+  slows or kills interpreter start-up, `python -S` with the site-packages
+  directory on `PYTHONPATH` skips every `.pth` file. One user measured
+  `import certo` falling from 10–21 s to 1.7–4.8 s that way, without touching
+  their Python installation.
 
 ## Optimisation: four different claims
 

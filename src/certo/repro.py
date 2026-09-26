@@ -49,8 +49,14 @@ def bundle(where, out, limits=None, include_ledger=True) -> dict:
     certs_dir.mkdir(exist_ok=True)
 
     included, refused, specs, untied = [], [], {}, []
+    from . import store
+
     for entry in _all_certificates(src):
-        path, data = entry
+        ref, data = entry
+        container, member = store.split_ref(ref)
+        # A file keeps its bytes (and its name); a member of an archive is
+        # written out as the plain JSON it is.
+        path = Path(container) if member is None else Path(member)
         cert = Certificate.from_dict(data)
         rep = verify_cert(cert, limits)
         if not rep.ok:
@@ -66,7 +72,12 @@ def bundle(where, out, limits=None, include_ledger=True) -> dict:
         while target.exists():
             target = certs_dir / "{}_{}{}".format(path.stem, n, path.suffix)
             n += 1
-        shutil.copy2(path, target)
+        if member is None:
+            shutil.copy2(path, target)
+        else:
+            target = target.with_suffix(".json") if not target.name.endswith(
+                ".json") else target
+            store.write_certificate(cert, target)
         included.append({"file": "certificates/" + target.name,
                          "kind": cert.kind,
                          "digest": cert.digest(),
@@ -122,17 +133,16 @@ def _all_certificates(src: Path):
     """Every certificate under `src`, whichever shape it was written in."""
     from .certificate import Certificate
 
-    files = sorted(src.rglob("*.json")) if src.is_dir() else [src]
-    for f in files:
-        if f.name == "MANIFEST.json":
+    from . import store
+
+    for ref, _rel, raw in store.walk(src):
+        if Path(store.split_ref(ref)[0]).name == "MANIFEST.json":
             continue
-        try:
-            raw = json.loads(f.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+        if raw is None:
             continue
         data = Certificate.unwrap(raw) if isinstance(raw, dict) else None
         if isinstance(data, dict) and "kind" in data:
-            yield f, data
+            yield ref, data
 
 
 def _readme(m: dict) -> str:

@@ -410,6 +410,23 @@ def test_clique_lp():
         _report("clique_lp", probe(cert))
 
 
+def test_parametric_atlas():
+    """One statement from several certificates: every field -- a piece's box,
+    the domain, the region, the claim, the program, the covering tally -- has
+    to change a check, embedded pieces included."""
+    import importlib.util
+    import pathlib as _p
+
+    from certo.engines import algebra
+
+    path = _p.Path(__file__).resolve().parent.parent / "examples" / "parametric_atlas.py"
+    spec = importlib.util.spec_from_file_location("_adv_atlas", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    cert = algebra.atlas(mod.spec(), LIM).certificate
+    _report("parametric_atlas", probe(cert))
+
+
 def test_clique_lp_bounded_and_infeasible():
     """The two shapes 0.19 adds: a family bounded above by `max_size`, and an
     infeasible partition carried by a Farkas vector and its pricing."""
