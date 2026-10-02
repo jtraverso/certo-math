@@ -110,15 +110,16 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P1** | Forgeries written from scratch, per kind: empty lists, truncated lists, negative and duplicate indices, a valid sub-certificate swapped for another, several fields edited coherently (external audit of 0.20.0) | **M** | high | high | `tamper` mutates ONE field of an honest certificate and could not have found any of the audit's ten; each was a coherent forgery. A generator of structural forgeries per kind, run like the adversarial suite |
-| **P1** | Every composite kind re-derives the numbers it uses from the sub-certificates it verified, and ties each sub-certificate to ITS object (factor, value, problem, parameter, sense, domain) -- an audit of the kinds not yet covered by the 0.20.x fixes | **M** | high | high | the common cause of CM-03/04/05/06/08/09: a sub-certificate verified, then believed to be about something it never named |
-| **P2** | The degree of checking, explicit in every report: complete, partial, reproduced with a solver, assumed obligation -- not one `ok` | **M** | med | high | `ok=True` means different things across kinds (a bisect without its spec, an induction schema applied, a `model` re-solved), and warnings are where the difference hides |
+| **P1** | Route coverage: a report ROOTED at one target (the crux), not over a directory -- the tree of obligations under it, each node proved (and how: solver-free, re-solved), assumed (a bridge, with its text), cited (with its source), bound to Lean, finite-only (the range a `sweep`/`cases` settled) or a region left out (an `atlas` gap or cited box); and `--since` from the `ledger`, saying what changed UNDER the target since last time | **M** | high | high | user feedback: tells "we closed another case" from "we reduced the crux". A certificate off the target's tree changes nothing under it, and says so. Extends `status` (`--root`), reading what `compose`, `bind` and `atlas` already record; no certificate, like `status`, and it needs the degree-of-checking row below |
+| **P1** | `export --lean` for `affine_semigroup`, deep and in stages: (1) membership, the N-combination as a vector identity by `decide`; (2) pointedness, the grading's positive degrees plus one lemma proved once in an emitted preamble; (3) minimality, per generator the separating functional that puts it outside the cone of the others (y.g_j >= 0, y.g_i < 0, then `linarith`), and only where none exists the graded bounded search by `decide`, refused honestly if the kernel cannot; (4) for a unimodular generator matrix, its inverse identity by `decide`, so a user's own "unimodular => free monoid" lemma consumes it (via `bind`) | **M** | high | med | user feedback, formalising toric charts: 72 semigroup certificates verify, and the free-monoid identification still had to be written by hand because the exporter refuses the kind. Stage (3) by separation covers every simplicial case. NOT exported: the Hilbert basis and absence from a non-normal semigroup beyond small degrees; normality is never claimed anyway |
+| **P2** | Piecewise programs in `atlas`: a DECLARED piecewise definition (region k -> program k), each piece checked against the program declared for its region, the statement about that declared function | **M** | med | med | user feedback (a piecewise phi): one program for the whole domain forced a reformulation as a max of lines, which is not always possible. Declared, not inferred from the pieces -- otherwise the atlas would define the function it claims to bound |
 | **P2** | `api.run(..., self_check="all")`: also verify solver-backed certificates (`unsat_core`, `model`) before returning them | **S** | high | low | today only solver-free certificates are self-checked; CM-01 was one `verify` away from being caught |
+| **P2** | The same mathematical summary for proofs: the hypotheses a core actually used and the ones it did not, a Farkas / Positivstellensatz combination written as an identity, an LP's active constraints and their prices, the sub-boxes where a parametric bound is tight | **M** | med | med | the second half of the row above. Each kind's summary is derived from what `verify` already checks, one kind at a time; a "simplest counterexample" (small denominators, via optimisation) is a later step, P3 |
+| **P2** | A declarative spec notation that is not code: typed variables, named hypotheses, infix formulas, parsed without `eval`; certo DERIVES the structure (the induction step from P(k), the family of a bisect), echoes a canonical reading back, and hashes it. SMT-LIB accepted as an alternative | **M-L** | med | high | specs other than the 10 JSON types are Python that certo executes. This makes third-party specs safe for `prove`, `induct`, `parametric`, `bisect`, gives a model less to get wrong than Python + z3, and removes by construction the class of CM-08 (a step that is not the one the chain needs). First stage `Spec` and `induct`, then `parametric` and `bisect`; `sweep` predicates stay in Python. Natural language stays OUTSIDE certo: a model writes the notation, certo parses it, reads it back and lints it, a person confirms |
 | **P2** | python-flint for the polynomial arithmetic behind the checks (`fmpq_mpoly`) | **M** | med | med | exact and much faster than `Poly` over `Fraction`, which is where a large parametric verification spends its time (19 s before the `shift` fix, 2.4 s after). Nothing changes in what is trusted: the same exact arithmetic, a faster implementation, `Poly` kept as the fallback when flint is absent |
 | **P2** | mpmath `identify` / `findpoly` (PSLQ) in `--explore`: guess a closed form for an explored constant, then certify THAT | **S-M** | med | low | exploration returns 0.6666667 or 1.618034; PSLQ proposes 2/3 or (1+sqrt5)/2; certo certifies the conjectured exact value. The library proposes, certo checks -- `explore -> promote` with the constant named |
 | **P3** | SageMath as an optional PROPOSER, through `sage -python`: automorphism groups (for orbital branching), large Groebner bases, exact real-root isolation, Normaliz/PPL | **M-L** | **low** | med | gigabytes, not pip-installable, no native Windows -- so never a dependency, an optional backend like `geng` or `cadical`. Every answer checked by certo: generators are automorphisms, cofactors multiply out, Sturm sequences, `check_hilbert`. CAD proposes only; it produces no certificate |
-| **P2** | Branch and bound at the size users bring: an external incumbent (a partition already verified by `cover`), a progress callback in the Python API, orbital branching with the group `reduce` certifies | **M-L** | **low** | med | a 100-edge template with ~400 binary columns ran over an hour where a float MILP closed it in a second. Joins the 1048-column row below |
-| **P2** | Many runs, cheaply: `parametric --batch specs.jsonl` | **S-M** | med | med | one process per box paid the start-up thousands of times. `certo.api.run(command, spec)` runs in-process and `verify family.zip --jobs N` verifies in parallel; the CLI still has no batch form for PRODUCING certificates |
+| **P2** | Branch and bound at the size users bring: an external incumbent (a partition already verified by `cover`), a progress callback in the Python API, orbital branching with the group `reduce` certifies | **M-L** | **low** | med | asked for again: a symmetric instance stalled at 18 497 nodes in 600 s, and symmetry is the bottleneck (the clique-cut row above closes that one; orbital branching is the general answer). A 100-edge template with ~400 binary columns ran over an hour where a float MILP closed it in a second. Joins the 1048-column row below |
 | **P2** | `--deadline` that ends certo's CHILDREN too (a Windows Job Object, a process group elsewhere) | **M** | med | med | `python -m certo` fixes the launcher half of a reported hang; a `geng`, `cbc` or `lake` child can still outlive a deadline |
 | **P2** | `certo commands --json` with every subcommand's arguments, in one call | **S** | **high** | low | `certo <cmd> --help` six times took over 120 s on a loaded Windows machine -- the interpreter start, each time |
 | **P2** | `exists` with clique candidates generated, not only `triangles_of` | **M** | med | med | a clique partition needs every clique as a candidate; `columns` already enumerates them |
@@ -127,7 +128,7 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | Bug-report folders in the data directory rather than the working directory | **S** | med | low | the self-check already writes there; `report` writes where it runs, which is often a shared workspace |
 | **P3** | A ratio objective certified directly: `kappa = min cap/K`, `profile` or `ratio` joined to `parametric` | **L** | **low** | med | done today by bisection outside certo |
 | **P3** | An exact cover number in one command: `cover` above, the LP dual below, and `exists` or branch and bound on the same candidates for the gap | **L** | **low** | med | assembled by hand from three modules today |
-| **P2** | Charts in `atlas`: pieces in other coordinate systems, and the change of coordinates checked | **L** | **low** | med | `atlas` covers a domain in ONE chart. The user's ~2 000 boxes are in three rational charts (a blow-up at the apex, a projection from a point of the conic): the map between them, its image, and where it is defined are what must be checked |
+| **P2** | Charts in `atlas`: pieces in other coordinate systems, and the change of coordinates checked | **L** | **low** | med | `atlas` covers a domain in ONE chart. The user's ~2 000 boxes are in three rational charts (a blow-up at the apex, a projection from a point of the conic): the map between them, its image, and where it is defined are what must be checked. Also the migration path a user asked for: thousands of 0.16-0.19 certificates on the orthant `t >= 0` are pieces in a reparametrised chart. Until then, re-certifying with `box=` is minutes of compute (20 ms each) once the batch row lands |
 | **P3** | `atlas`: excluding a cell that only TOUCHES the region's boundary | **M** | **low** | low | a cell is excluded only where a condition is strictly negative on it, closed; one touching `g = 0` needs a piece even when the neighbours cover that face. Conservative, and exactly where slivers live |
 | **P2** | The coverage map, from a USER'S machine | **S** | **high** | low | read again in this cycle: three lines here, none with `why`, and the users' maps live on their machines. The step is asking for one -- `certo report --coverage` or `doctor --json` -- not code |
 | **P2** | Polynomial multipliers for a region on a box, and region leaves that subdivide | **M** | **low** | med | box + region landed with CONSTANT multipliers on the conditions and their products, on the whole box. A residual that needs `p * g` or a split first is not certified yet |
@@ -352,6 +353,20 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Structural forgeries per kind, held in the suite | `certo.tamper.forgeries`, `verify --tamper`, **0.22.0** |
+| Composite kinds re-derive their numbers and tie their parts | eleven holes closed, **0.22.0** |
+| A counterexample as mathematics | `certo.explain`, `verify --md`, **0.22.0** |
+| Clique cuts of the conflict graph, re-derived | `opt --cuts clique`, **0.22.0** |
+| The integer optimum's bound by rounding | `opt --round`, **0.22.0** |
+| A value pinned from both sides | `certo pin`, **0.22.0** |
+| A polynomial >= 0 on a box, cut by a region | `certo nonneg`, **0.22.0** |
+| `Poly` ergonomics, and rings no longer mixed | `Poly`, **0.22.0** |
+| `atlas` says what is missing and what differs | `atlas`, **0.22.0** |
+| `atlas` carries its claim to pieces with their own bound | `atlas`, **0.22.0** |
+| `pack DIR` without `-o` | `pack`, **0.22.0** |
+| The degree of checking in every report | `VerifyReport.degree`, **0.22.0** |
+| A launcher without the `.pth` hooks | `doctor --launcher`, **0.22.0** |
+| Many runs in one process | `certo batch`, **0.22.0** |
 | Local toric geometry: cone, multiplicity, height, discrepancy | `certo cone`, **0.9.2** — measured against the T1 cells below |
 | The transcription point between Lean data and a Python matrix | `certo.interchange`, **0.9.2** — canonical JSON with a fingerprint both sides recompute |
 | Circularity detection in a parameter's own dependencies | `certo cycle`, **0.10.0** |
@@ -1020,14 +1035,15 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.20.1**, with **53 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.22.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
 field, or a command that emits no certificate. Among the optional fields added under the freeze: `loads`,
 `declared` and `relative`, in 0.18.0 `dual_selection`, `map` and a
 lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
-and `not_edges`.
+and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
+`bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`.
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

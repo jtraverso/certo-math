@@ -196,3 +196,178 @@ def probe(cert, limits=None, skip=(), excuse=True) -> dict:
             caught = True
         (out["caught"] if caught else out["uncaught"]).append(field)
     return out
+
+
+# ---------------------------------------------------------------------------
+# STRUCTURAL forgeries: the shapes one field at a time cannot reach
+# ---------------------------------------------------------------------------
+#
+# An external audit of 0.20.0 found ten certificates `verify` accepted, and
+# `probe` above could have found none of them. Each was COHERENT: an empty
+# list the verifier walked over without complaint, a negative index, a valid
+# sub-certificate about something else, two fields edited together so that
+# they still agreed with each other. Mutating one field of an honest
+# certificate produces none of those. These do:
+#
+#   empty     a list or dict emptied            (CM-02: `mus_indices: []`)
+#   short     a list missing its last entry
+#   dup       a list with its first entry twice
+#   reversed  a list in the opposite order
+#   negative  an integer in a list of integers set to -1        (CM-07)
+#   beyond    ... or to one past the largest index it could be
+#   dropkey   a dict missing its first key
+#   swap      two sub-certificates of one kind exchanged         (CM-09)
+#   coherent  one value rewritten EVERYWHERE it occurs in the payload, so
+#             every field that repeats it still agrees            (CM-04/05)
+#
+# Not every surviving forgery is a hole -- reversing a list of names that is
+# only displayed changes nothing -- so, like `probe`, this REPORTS. certo's own
+# suite holds each kind to it, with every survivor that is benign excused by
+# name and with a reason.
+
+#: How many forgeries one certificate is put through, at most. A payload with
+#: thousands of list entries would otherwise make thousands of certificates.
+MAX_FORGERIES = 240
+
+
+def _walk(node, path=()):
+    """Every (path, value) under `node`, depth first, containers included."""
+    yield path, node
+    if isinstance(node, dict):
+        for k in sorted(node, key=str):
+            yield from _walk(node[k], path + (k,))
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _walk(v, path + (i,))
+
+
+def _set(root, path, value):
+    out = json.loads(json.dumps(root))
+    node = out
+    for k in path[:-1]:
+        node = node[k]
+    node[path[-1]] = value
+    return out
+
+
+def _label(path, op) -> str:
+    return "{}:{}".format(".".join(str(p) for p in path), op)
+
+
+def _is_cert(v) -> bool:
+    return isinstance(v, dict) and "kind" in v and isinstance(v.get("payload"), dict)
+
+
+def _number(v):
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return Fraction(v)
+    if isinstance(v, str):
+        try:
+            return Fraction(v)
+        except (ValueError, ZeroDivisionError):
+            return None
+    return None
+
+
+def forgeries(payload, limit=MAX_FORGERIES):
+    """`(label, forged payload)` for every structural forgery of `payload`.
+    Labels are `path:op`, with the path through the payload's keys and list
+    positions; positions inside lists are generalised to `*` for excusing."""
+    seen = set()
+    out = []
+
+    def add(path, op, value):
+        lab = _label(path, op)
+        if lab in seen or len(out) >= limit:
+            return
+        seen.add(lab)
+        out.append((lab, _set(payload, path, value)))
+
+    certs = {}
+    for path, v in _walk(payload):
+        if not path:
+            continue
+        if _is_cert(v):
+            certs.setdefault(v["kind"], []).append((path, v))
+        if isinstance(v, list) and v:
+            add(path, "empty", [])
+            add(path, "short", v[:-1])
+            add(path, "dup", v + [v[0]])
+            if len(v) > 1 and v[::-1] != v:
+                add(path, "reversed", v[::-1])
+            ints = [x for x in v if isinstance(x, int) and not isinstance(x, bool)]
+            if ints and len(ints) == len(v):
+                add(path, "negative", [-1] + v[1:])
+                add(path, "beyond", [max(max(ints), len(v)) + 1] + v[1:])
+        elif isinstance(v, dict) and v and not _is_cert(v):
+            add(path, "empty", {})
+            first = sorted(v, key=str)[0]
+            add(path, "dropkey", {k: x for k, x in v.items() if k != first})
+
+    for kind, found in certs.items():
+        for (p1, c1), (p2, c2) in zip(found, found[1:]):
+            if c1 != c2:
+                out_payload = _set(_set(payload, p1, c2), p2, c1)
+                lab = "{}<->{}:swap".format(".".join(map(str, p1)),
+                                            ".".join(map(str, p2)))
+                if lab not in seen and len(out) < limit:
+                    seen.add(lab)
+                    out.append((lab, out_payload))
+
+    # COHERENT: a number that appears in two or more places, changed in all
+    # of them at once. Compared as numbers, so "1" and 1 are the same value.
+    places = {}
+    for path, v in _walk(payload):
+        n = _number(v)
+        if n is not None and path:
+            places.setdefault(n, []).append((path, v))
+    for n, where in sorted(places.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(where) < 2 or len(out) >= limit:
+            continue
+        forged = json.loads(json.dumps(payload))
+        for path, v in where:
+            new = n + 1
+            if isinstance(v, int):
+                new = int(new) if new.denominator == 1 else v + 1
+            else:
+                new = str(new)
+            forged = _set(forged, path, new)
+        out.append(("={}:coherent".format(n), forged))
+    return out
+
+
+def _general(label) -> str:
+    """A label with list positions replaced by `*`, for excusing a family."""
+    head, _, op = label.rpartition(":")
+    parts = ["*" if p.isdigit() else p for p in head.split(".")]
+    return "{}:{}".format(".".join(parts), op)
+
+
+def probe_structural(cert, limits=None, excuse=(), limit=MAX_FORGERIES) -> dict:
+    """Put a certificate through every structural forgery. `excuse` names
+    forgeries -- by label, or by its general form with `*` for positions --
+    that are benign and may pass. Returns `{original_ok, caught, survived,
+    excused}`, lists of labels."""
+    from .certificate import Certificate, verify
+
+    base = json.loads(json.dumps(cert.to_dict()
+                                 if hasattr(cert, "to_dict") else cert))
+    original = verify(Certificate.from_dict(base), limits)
+    out = {"kind": base.get("kind"), "original_ok": bool(original.ok),
+           "caught": [], "survived": [], "excused": []}
+    if not original.ok:
+        return out
+    excuse = set(excuse)
+    for label, forged in forgeries(base.get("payload") or {}, limit):
+        if label in excuse or _general(label) in excuse:
+            out["excused"].append(label)
+            continue
+        d = dict(base, payload=forged)
+        try:
+            caught = not verify(Certificate.from_dict(d), limits).ok
+        except Exception:  # noqa: BLE001 -- a refusal by raising is a refusal
+            caught = True
+        (out["caught"] if caught else out["survived"]).append(label)
+    return out

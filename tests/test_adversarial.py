@@ -46,14 +46,218 @@ from certo.tamper import DESCRIPTIVE, WEAKENING, mutate as _mutate  # noqa: E402
 from certo.tamper import probe as _probe                            # noqa: E402
 
 
+#: STRUCTURAL forgeries that survive and are BENIGN, per kind, by label
+#: (`certo.tamper.forgeries`; `*` for any list position). Every other survivor
+#: fails the kind's test, so a new hole shows up as a new label here rather
+#: than in an audit. The audit of 0.20.0 is why this exists: each of its ten
+#: forgeries was coherent and structural, and `probe` above could reach none.
+#: Three things put a label on this list, and nothing else:
+#:
+#:   - the field carries no claim: provenance, `declared` (recomputed when
+#:     present), names and labels, counts, the `dropped` and `sorts` of a
+#:     core, the residual `rows` a parametric bound recomputes, `kinds` where
+#:     no rounding reads them;
+#:   - the order is not part of the claim: the edges of a graph, the parts of
+#:     a cover, the factors of a Pratt tree, the pieces of an atlas;
+#:   - the forgery is ANOTHER TRUE STATEMENT the same evidence proves, which
+#:     `verify` rightly accepts: a constraint with dual 0 removed, a region
+#:     condition the tree never used dropped, the objective emptied, an
+#:     instance relabelled coherently, an empty DRAT proof for a formula unit
+#:     propagation already refutes.
+#:
+#: Found and FIXED by this battery, so not here: a branch-and-bound tree with
+#: no root or a branch missing a value; a `mixed` residual compared over its
+#: own (emptied) columns, with extra rows and an unchecked `conditional`; a
+#: parametric bound whose `variables` list, emptied, left every column
+#: unchecked; semigroup vectors read with `zip` at the wrong length, and a
+#: Hilbert entry's evidence compared with nothing; a proof's `bridges`,
+#: `used`, `unused` and hypothesis labels; a core's names; polynomial
+#: exponents read in a ring of the wrong size; duplicated variable names.
+STRUCTURAL_BENIGN = {
+    # an edge list is a set of unordered pairs: order and repeats say nothing
+    'pinned_value': {
+        'edges.*:reversed', 'edges:dup', 'edges:reversed',
+        'lower.payload.columns.*.clique:reversed', 'lower.payload.columns:reversed',
+        'lower.payload.edges.*:reversed', 'lower.payload.edges:dup',
+        'lower.payload.edges:reversed',
+    },
+    'affine_semigroup': {
+        'points.outside:dropkey', 'points.reachable:dropkey',
+        'points.w.group_coefficients:negative', 'points:dropkey',
+    },
+    'asymptotic': {
+        '=2:coherent', 'collected.*:dropkey', 'collected.*:empty',
+        'collected:dup', 'collected:empty', 'collected:short',
+        'laurent.*.monomial:empty', 'laurent.*.monomial:reversed',
+        'laurent:dup', 'terms.*:dropkey', 'terms.*:empty', 'terms:dup',
+        'terms:empty', 'terms:short',
+    },
+    'branch_bound': {
+        'incumbent_cert.payload.relaxation.payload.declared:dropkey',
+        'incumbent_cert.payload.relaxation.payload.declared:empty',
+        'incumbent_cert.payload.relaxation.payload.kinds:dropkey',
+        'incumbent_cert.payload.relaxation.payload.kinds:empty',
+        'incumbent_cert.payload.relaxation.provenance:dropkey',
+        'incumbent_cert.payload.relaxation.provenance:empty',
+        'incumbent_cert.payload.residual.payload.declared:dropkey',
+        'incumbent_cert.payload.residual.payload.declared:empty',
+        'incumbent_cert.payload.residual.provenance:dropkey',
+        'incumbent_cert.payload.residual.provenance:empty',
+        'incumbent_cert.provenance:dropkey',
+        'incumbent_cert.provenance:empty', 'nodes.*.values:reversed',
+        'nodes.*:dropkey', 'nodes:reversed',
+    },
+    'capacity_profile': {
+        'columns.*:dropkey', 'segments:reversed',
+    },
+    'clique_lp': {
+        '=3:coherent', '=5:coherent', 'columns.*.clique:reversed',
+        'columns:reversed', 'edges.*:reversed', 'edges:dup', 'edges:reversed',
+        'pricing:dropkey', 'vertices:reversed',
+    },
+    'cnf_model': {
+        'true_vars:dup',
+    },
+    'domain_sweep': {
+        '=0:coherent', '=16:coherent', 'counts:dropkey', 'counts:empty',
+        'ids:reversed',
+    },
+    'drat': {
+        'proof:dup', 'proof:empty', 'proof:short',
+    },
+    'exact_cover': {
+        'part_report.*.vertices:reversed', 'parts.*.*:reversed',
+        'parts.*:reversed', 'universe.*:reversed', 'universe:reversed',
+    },
+    'farkas': {
+        'multipliers:dup', 'rows:dup', 'rows:reversed', 'sorts:dropkey',
+        'sorts:empty',
+    },
+    'first_moment': {
+        'terms:reversed',
+    },
+    'ideal': {
+        'variables:reversed',
+    },
+    'integer_peak': {
+        '=1/2:coherent',
+    },
+    'lp_dual': {
+        # with cuts: a bound row reversed is another true program (binaries
+        # need no bound row); a cut's variable order is not its content; and
+        # with `cuts` dropped the row is one more constraint of the program
+        # the payload states -- true of THAT program, and claimed of no other
+        'A.*:reversed', 'cuts.*.vars:reversed', 'cuts:empty', 'cuts:short',
+        # another optimal integral point, by symmetry of the instance
+        'integral_point:reversed',
+        '=3:coherent', 'declared:dropkey', 'declared:empty', 'kinds:dropkey',
+        'kinds:empty', 'names:dup', 'names:empty', 'names:short',
+        'primal:reversed', 'var_names:empty', 'var_names:reversed',
+        'var_names:short',
+    },
+    'mixed_design': {
+        '=5:coherent', 'relaxation.payload.declared:dropkey',
+        'relaxation.payload.declared:empty',
+        'relaxation.payload.kinds:dropkey', 'relaxation.payload.kinds:empty',
+        'relaxation.provenance:dropkey', 'relaxation.provenance:empty',
+        'residual.payload.declared:dropkey',
+        'residual.payload.declared:empty', 'residual.payload.kinds:dropkey',
+        'residual.payload.kinds:empty', 'residual.provenance:dropkey',
+        'residual.provenance:empty',
+    },
+    'number': {
+        'tree.factors.*.cert.factors.*.cert.factors.*.cert.factors:dup',
+        'tree.factors.*.cert.factors.*.cert.factors:dup',
+        'tree.factors.*.cert.factors.*.cert.factors:reversed',
+        'tree.factors.*.cert.factors:dup',
+        'tree.factors.*.cert.factors:reversed', 'tree.factors:dup',
+        'tree.factors:reversed',
+    },
+    'parametric_atlas': {
+        'pieces.*.cert.payload.rows.*.negative:dup',
+        'pieces.*.cert.payload.rows.*.negative:empty',
+        'pieces.*.cert.payload.rows.*.negative:short',
+        'pieces.*.cert.payload.rows.*.residual:dropkey',
+        'pieces.*.cert.payload.rows.*.residual:empty',
+        'pieces.*.cert.payload.rows.*.shifted:dropkey',
+        'pieces.*.cert.payload.rows.*.shifted:empty',
+        'pieces.*.cert.payload.rows.*:dropkey',
+        'pieces.*.cert.payload.rows.*:empty',
+        'pieces.*.cert.payload.rows:dup', 'pieces.*.cert.payload.rows:empty',
+        'pieces.*.cert.payload.rows:short',
+        'pieces.*.cert.provenance:dropkey', 'pieces.*.cert.provenance:empty',
+        'pieces:dup', 'pieces:reversed',
+    },
+    'parametric_bound': {
+        '=1/2:coherent', '=3:coherent', 'constraints.*.*.a:dropkey',
+        'constraints.*.*.a:empty', 'constraints.*.*.b:dropkey',
+        'constraints.*.*.b:empty', 'constraints.*.*.c:dropkey',
+        'constraints.*.*.c:empty', 'constraints.*.*.e:dropkey',
+        'constraints.*.*.e:empty', 'constraints.*.*.x:dropkey',
+        'constraints.*.*.x:empty', 'constraints.*.*.y:dropkey',
+        'constraints.*.*.y:empty', 'constraints.*.*:dropkey',
+        'constraints.*.*:empty', 'constraints:dup', 'constraints:reversed',
+        'constraints:short', 'dual_poly:dropkey', 'objective.a:dropkey',
+        'objective.a:empty', 'objective.b:dropkey', 'objective.b:empty',
+        'objective.e:dropkey', 'objective.x:dropkey', 'objective.y:dropkey',
+        'objective:dropkey', 'objective:empty', 'region.r_within:dropkey',
+        'rows.*.residual:dropkey', 'rows.*.residual:empty',
+        'rows.*.shifted:dropkey', 'rows.*.shifted:empty', 'rows.*:dropkey',
+        'rows.*:empty', 'rows:dup', 'rows:empty', 'rows:reversed',
+        'rows:short', 'variables:reversed',
+    },
+    'polynomial_nonneg': {
+        '=-1:coherent', 'poly:empty', 'region.r:dropkey', 'tree.deg:beyond',
+        'tree.deg:dup',
+    },
+    'proof': {
+        '=5:coherent', 'lemmas.*.cert.payload.multipliers:empty',
+        'lemmas.*.cert.payload.sorts:dropkey',
+        'lemmas.*.cert.payload.sorts:empty', 'lemmas.*.cert.payload:dropkey',
+        'lemmas.*.cert.provenance:dropkey', 'lemmas.*.cert.provenance:empty',
+        'lemmas.*:dropkey', 'lemmas:reversed', 'step.payload.dropped:dup',
+        'step.payload.dropped:empty', 'step.payload.dropped:reversed',
+        'step.payload.dropped:short', 'step.payload.multipliers:empty',
+        'step.payload.sorts:dropkey', 'step.payload.sorts:empty',
+        'step.payload:dropkey', 'step.provenance:dropkey',
+        'step.provenance:empty', 'used:dup', 'used:reversed',
+    },
+    'resultant': {
+        'lead_f:dropkey', 'lead_f:empty', 'lead_g:dropkey', 'lead_g:empty',
+    },
+    'sweep': {
+        '=0:coherent', '=11:coherent', 'counts:dropkey', 'counts:empty',
+        'family_graph6:reversed',
+    },
+    'symmetric_inertia': {
+        'witness:reversed',
+    },
+    'unsat_core': {
+        'multipliers:empty', 'sorts:dropkey', 'sorts:empty',
+    },
+}
+
+
 def probe(cert, skip=()):
     """Mutate each payload field in turn. Returns {field: caught}.
 
     The suite wants a flat verdict per field; `certo.tamper.probe` reports
-    lists so a person can read it. Same run, different shape.
+    lists so a person can read it. Same run, different shape. The STRUCTURAL
+    forgeries run beside it, and any survivor not recorded as benign above
+    fails here, by label.
     """
     out = _probe(cert, LIM, skip=skip)
     assert out["original_ok"], "the original must pass"
+    from certo.tamper import _general, probe_structural
+
+    st = probe_structural(cert, LIM)
+    benign = STRUCTURAL_BENIGN.get(st["kind"], set())
+    new = sorted({lab for lab in st["survived"]
+                  if lab not in benign and _general(lab) not in benign})
+    assert not new, ("{}: structural forgeries {} were accepted. Either a "
+                     "check is missing, or the forgery is benign and belongs "
+                     "in STRUCTURAL_BENIGN with its reason.".format(
+                         st["kind"], ", ".join(new[:6])))
     return dict([(f, True) for f in out["caught"]]
                 + [(f, False) for f in out["uncaught"]])
 
@@ -114,6 +318,56 @@ def test_lp_dual():
     s.objective({"x": 1, "y": 1})
     s.constraint({"x": 1, "y": 1}, "<=", 3, name="cap")
     _report("lp_dual", probe(lp.opt(s, LIM).certificate))
+
+
+def test_lp_dual_rounded():
+    """`opt --round`: the integer bound rides on `lp_dual` as `rounded`, and
+    is recomputed from the dual bound and the objective's integrality."""
+    from certo import LPSpec
+    from certo.engines import lp
+
+    s = LPSpec(sense="max")
+    s.variable("x", 0, None, kind="integer")
+    s.variable("y", 0, None, kind="integer")
+    s.objective({"x": 2, "y": 3})
+    s.constraint({"x": 2, "y": 2}, "<=", 5, name="cap")
+    cert = lp.opt(s, LIM, round=True).certificate
+    assert cert.payload["rounded"] == {"bound": "7"}
+    _report("lp_dual (rounded)", probe(cert))
+    # a continuous variable in the objective makes rounding invalid
+    forged = Certificate.from_dict(json.loads(json.dumps(cert.to_dict())))
+    forged.payload["kinds"]["y"] = "continuous"
+    assert not verify(forged, LIM).ok
+
+
+def test_lp_dual_with_clique_cuts():
+    """`opt --cuts clique`: every cut re-derived from the rows that force its
+    pairs; one nothing forces would be a constraint added to lower a bound."""
+    from itertools import combinations
+
+    from certo import LPSpec
+    from certo.engines import lp
+
+    s = LPSpec(sense="max")
+    for i in range(4):
+        s.variable("x%d" % i, 0, 1, kind="binary")
+    s.objective({"x%d" % i: 1 for i in range(4)})
+    for i, j in combinations(range(4), 2):
+        s.constraint({"x%d" % i: 1, "x%d" % j: 1}, "<=", 1, name="c%d%d" % (i, j))
+    s.constraint({"x%d" % i: 1 for i in range(4)}, "<=", 3, name="loose")
+    cert = lp.opt(s, LIM, round=True, cuts="clique").certificate
+    assert cert.payload["rounded"] == {"bound": "1"}
+    # `cuts` is skipped by name: with one cut, `mutate` empties the list, and
+    # the row then stands as a constraint of the program the payload states
+    # (see STRUCTURAL_BENIGN). The forgeries below are the ones that matter.
+    _report("lp_dual (cuts)", probe(cert, skip=("cuts",)))
+    d = json.loads(json.dumps(cert.to_dict()))
+    first = next(iter(d["payload"]["cuts"][0]["why"]))
+    d["payload"]["cuts"][0]["why"][first] = "loose"      # forces nothing
+    _refused(Certificate.from_dict(d))
+    d = json.loads(json.dumps(cert.to_dict()))
+    d["payload"]["kinds"]["x0"] = "continuous"           # 1/2 + 1/2 is fine
+    _refused(Certificate.from_dict(d))
 
 
 def test_mixed_design():
@@ -425,6 +679,67 @@ def test_parametric_atlas():
     spec.loader.exec_module(mod)
     cert = algebra.atlas(mod.spec(), LIM).certificate
     _report("parametric_atlas", probe(cert))
+
+
+def test_polynomial_nonneg():
+    from fractions import Fraction as F
+
+    from certo import NonnegSpec
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    x = Poly.var(("x",), "x")
+    proved = algebra.nonneg(NonnegSpec(
+        poly=F(3, 10) - x, box={"x": (0, F(1, 2))},
+        region=[("r", F(3, 40) - x ** 2)]), LIM).certificate
+    # `poly` IS the statement, and `mutate` adds 1 to a coefficient: here a
+    # weaker statement, still true on the box, which the tree still proves.
+    # Excusing the field everywhere would excuse `sos` too, where it is
+    # caught; so it is skipped here, and a polynomial made FALSE is tried below.
+    _report("polynomial_nonneg", probe(proved, skip=("poly",)))
+    forged = Certificate.from_dict(json.loads(json.dumps(proved.to_dict())))
+    forged.payload["poly"] = (F(1, 4) - x).serialize()   # < 0 near sqrt(3/40)
+    assert not verify(forged, LIM).ok
+    refuted = algebra.nonneg(NonnegSpec(
+        poly=x ** 3 - x + F(1, 4), box={"x": (0, 1)}), LIM).certificate
+    assert refuted.payload["holds"] is False
+    _report("polynomial_nonneg (refuted)", probe(refuted))
+
+
+def test_pinned_value():
+    """`pin`: both halves tied to ONE graph and ONE quantity before their
+    numbers are compared -- the lesson of the 0.20.0 audit, built in."""
+    from itertools import combinations
+
+    from certo import CoverSpec, PinSpec
+    from certo.engines import algebra
+    from certo.spec import CliqueLPSpec
+
+    E = list(combinations(range(7), 2))
+    fano = [(0, 1, 3), (1, 2, 4), (2, 3, 5), (3, 4, 6), (4, 5, 0), (5, 6, 1),
+            (6, 0, 2)]
+
+    def make(edges=E, lower_max=3, upper_edges=E, upper_parts=fano):
+        return algebra.pin(PinSpec(
+            edges=edges, max_size=3,
+            upper=CoverSpec(universe=upper_edges, parts=upper_parts,
+                            cliques=True, max_size=3),
+            lower=CliqueLPSpec(edges=E, problem="partition",
+                               weight={"constant": 1}, max_size=lower_max)), LIM)
+
+    r = make()
+    assert r.verdict.value == "proved" and r.meta["value"] == 7
+    _report("pinned_value", probe(r.certificate))
+    # an LP that allows only edges has a LARGER optimum, and bounds nothing
+    # about triangles: refused by name, not compared
+    assert make(lower_max=2).certificate is None
+    # a cover of another graph
+    K6 = list(combinations(range(6), 2))
+    assert make(upper_edges=K6, upper_parts=[tuple(e) for e in K6]).certificate is None
+    # the bounds, edited
+    d = json.loads(json.dumps(r.certificate.to_dict()))
+    d["payload"]["bounds"]["lower"] = "8"
+    _refused(Certificate.from_dict(d))
 
 
 def test_clique_lp_bounded_and_infeasible():
@@ -803,6 +1118,101 @@ def test_a_bisection_end_is_about_its_own_query():
                                 good_instance=instance(at(4)),
                                 bad_instance=instance(at(1)))
     assert verify(honest, LIM).ok
+
+
+def test_a_mixed_residual_is_the_problem_frozen_at_its_design():
+    """Found by the structural battery: the residual LP was compared over its
+    own `var_names` -- emptied, no coefficient was compared -- and a row it
+    did not know about was never read. A constraint added to SHRINK the
+    residual made "optimal given the discrete part" false. And `conditional`
+    was read, not derived."""
+    from certo import LPSpec
+    from certo.engines import mixed
+
+    s = LPSpec(sense="max")
+    s.variable("a", 0, 1, kind="binary")
+    s.variable("w", 0, None)
+    s.objective({"a": 3, "w": 1})
+    s.constraint({"w": 6}, "<=", 1, name="cap")
+    s.constraint({"a": 1}, "<=", 1, name="one")
+    good = mixed.mixed(s, LIM).certificate.to_dict()
+    assert verify(Certificate.from_dict(good), LIM).ok
+    d = json.loads(json.dumps(good))
+    rp = d["payload"]["residual"]["payload"]
+    rp["A"].append(["1"] * len(rp["A"][0]))
+    rp["b"].append("0")
+    rp["names"].append("shrink")
+    rp["dual"].append("0")
+    _refused(Certificate.from_dict(d))
+    d = json.loads(json.dumps(good))
+    d["payload"]["conditional"] = "99"
+    _refused(Certificate.from_dict(d))
+
+
+def _from_example(name, command, *flags):
+    """The certificate an example produces, by the CLI, in this process."""
+    import contextlib
+    import io
+    import tempfile
+    from pathlib import Path
+
+    from certo import cli, store
+
+    root = Path(__file__).resolve().parent.parent
+    out = Path(tempfile.mkdtemp(prefix="certo_adv_")) / "cert.json"
+    with contextlib.redirect_stdout(io.StringIO()):
+        cli.main([command, str(root / "examples" / name), *flags,
+                  "--cert", str(out)])
+    return store.read_json(str(out))
+
+
+def test_the_structural_battery_found_these_in_kinds_it_had_not_reached():
+    """Run over the examples of kinds with no fixture above, the battery
+    found five more claims nothing re-checked. Each is pinned here."""
+    # hypothesis_audit: a NEEDED hypothesis relabelled REDUNDANT -- a positive
+    # claim, and the reader drops the hypothesis. It was never asked again.
+    d = _from_example("hypothesis_audit.py", "audit")
+    assert verify(d, LIM).ok
+    row = next(r for r in d["payload"]["rows"] if r["verdict"] == "needed")
+    row.update(verdict="redundant", witness=None)
+    d["payload"]["counts"] = {k: sum(1 for r in d["payload"]["rows"]
+                                     if r["verdict"] == k)
+                              for k in d["payload"]["counts"]}
+    _refused(Certificate.from_dict(d))
+    # ... and a hypothesis removed from the formulas, its row left behind.
+    d = _from_example("hypothesis_audit.py", "audit")
+    d["payload"]["hypotheses_smt2"].pop(next(iter(d["payload"]["hypotheses_smt2"])))
+    _refused(Certificate.from_dict(d))
+
+    # dependency_cycle: the closing comparison read its two classes from the
+    # payload, so the steps -- emptied -- decided nothing.
+    d = _from_example("dependency_cycle.py", "cycle")
+    assert verify(d, LIM).ok
+    d["payload"]["steps"] = []
+    _refused(Certificate.from_dict(d))
+
+    # synth_proved: the candidate shown was not tied to the one found.
+    d = _from_example("synth_prove_identity.py", "synth", "--prove-candidate")
+    assert verify(d, LIM).ok
+    d["payload"]["candidate"] = {k: v + 1 for k, v in d["payload"]["candidate"].items()}
+    _refused(Certificate.from_dict(d))
+
+    # sweep_range: no entry per size, so `entries: []` checked nothing.
+    d = _from_example("sweep_range_nested.py", "sweep", "--n-range", "3..4")
+    assert verify(d, LIM).ok
+    d["payload"]["entries"] = []
+    _refused(Certificate.from_dict(d))
+
+    # linear_system / toric_cone: vectors read with `zip` at the wrong length.
+    d = _from_example("linear_system.py", "solve")
+    assert verify(d, LIM).ok
+    d["payload"]["matrix"][0] = d["payload"]["matrix"][0] + ["7"]
+    _refused(Certificate.from_dict(d))
+    d = _from_example("toric_cone.py", "cone")
+    assert verify(d, LIM).ok
+    first = next(iter(d["payload"]["rays"]))
+    d["payload"]["rays"][first] = d["payload"]["rays"][first][:-1]
+    _refused(Certificate.from_dict(d))
 
 
 def test_a_bisection_end_is_the_family_at_its_t_when_the_spec_is_there():

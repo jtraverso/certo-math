@@ -41,6 +41,8 @@ from ..limits import Limits
 
 ENGINE_COLGEN = "certo/column-generation"
 ENGINE_ATLAS = "certo/atlas"
+ENGINE_NONNEG = "certo/bernstein"
+ENGINE_PIN = "certo/pin"
 from ..polynomials import Budget, Poly, cofactors
 from ..status import Result, Status, Verdict
 
@@ -418,6 +420,176 @@ def _where_text(d) -> str:
              neg=d["negative"], of=d["of"], split=d["split"], at=d["at"])
 
 
+def pin(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """Both halves of `cp_r(G)`, tied to one graph, and the value they pin."""
+    from .. import pin as P
+    from .. import store
+    from ..certificate import Certificate, pinned_value_certificate
+    from ..spec import CliqueLPSpec, CoverSpec, LPSpec
+
+    t0 = time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+
+    def refuse(msg):
+        return Result("pin", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_PIN, ms(), None, detail=str(msg))
+
+    def half(x):
+        if isinstance(x, CoverSpec):
+            return cover(x, limits).certificate
+        if isinstance(x, CliqueLPSpec):
+            return clique_lp(x, limits).certificate
+        if isinstance(x, LPSpec):
+            from . import lp
+
+            return lp.opt(x, limits, round=True).certificate
+        if isinstance(x, Certificate):
+            return x
+        if isinstance(x, dict):
+            return Certificate.from_dict(x)
+        return Certificate.from_dict(store.read_json(str(x)))
+
+    try:
+        up, lo = half(spec.upper), half(spec.lower)
+        if up is None or lo is None:
+            return refuse(t("pin.half_failed"))
+        payload = {"quantity": "clique_partition",
+                   "edges": [list(e) for e in P._edges(spec.edges)],
+                   "max_size": spec.max_size, "upper": up.to_dict(),
+                   "lower": lo.to_dict(), "assumption": spec.assumption,
+                   "title": spec.title}
+        X, _ = P.upper_bound(payload["upper"], spec.max_size)
+        L, _, assumed = P.lower_bound(payload["lower"], spec.max_size)
+    except P.NotAPin as e:
+        return refuse(e)
+    if assumed and not spec.assumption.strip():
+        return refuse(t("pin.needs_assumption"))
+    payload["bounds"] = {"lower": str(L), "upper": str(X)}
+    payload["pinned"] = L == X
+    rows = P.check(payload, limits)
+    failed = [label for label, ok, _d in rows if not ok]
+    if failed:
+        return refuse(t("pin.not_tied", failed=", ".join(
+            "{} ({})".format(l, d) for l, ok, d in rows if not ok)))
+    cert = pinned_value_certificate(payload).stamp(spec_path or None)
+    r = "" if spec.max_size is None else "_{}".format(spec.max_size)
+    if L == X:
+        return Result("pin", Status.UNSAT, Verdict.PROVED, ENGINE_PIN, ms(), cert,
+                      detail=t("pin.pinned", r=r, value=X)
+                      + (" -- " + t("pin.relative") if assumed else ""),
+                      meta={"value": X, "lower": L, "upper": X})
+    return Result("pin", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, ENGINE_PIN,
+                  ms(), cert, detail=t("pin.range", r=r, lower=L, upper=X),
+                  meta={"value": None, "lower": L, "upper": X})
+
+
+def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """`poly >= 0` on a box, cut by a region: a Bernstein certificate, or a
+    point where it fails."""
+    from fractions import Fraction
+    from itertools import product as _product
+
+    from .. import bernstein
+    from ..certificate import polynomial_nonneg_certificate
+    from ..parametric import evaluate
+    from ..polynomials import Poly
+
+    t0 = time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+
+    def refuse(msg):
+        return Result("nonneg", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_NONNEG, ms(), None, detail=str(msg))
+
+    ring = tuple(spec.box or {})
+    if not ring:
+        return refuse(t("nonneg.no_box"))
+    try:
+        box = {n: (Fraction(spec.box[n][0]), Fraction(spec.box[n][1]))
+               for n in ring}
+    except (TypeError, ValueError, IndexError) as e:
+        return refuse(t("nonneg.box_bad", detail=str(e)))
+    if any(hi < lo for lo, hi in box.values()):
+        return refuse(t("nonneg.box_bad", detail="lo > hi"))
+
+    def P(x):
+        if isinstance(x, Poly):
+            if x.vars != ring:
+                raise ValueError(t("poly.ring_mismatch", got=", ".join(x.vars),
+                                   want=", ".join(ring)))
+            return x
+        if isinstance(x, (int, Fraction)):
+            return Poly.const(ring, x)
+        return Poly.from_z3(x, ring)
+
+    try:
+        poly = P(spec.poly)
+        conditions = [(str(n), P(g)) for n, g in (spec.region or [])]
+    except (ValueError, TypeError, KeyError) as e:
+        return refuse(e)
+    payload = {"parameters": list(ring), "poly": poly.serialize(),
+               "box": {n: [str(lo), str(hi)] for n, (lo, hi) in box.items()},
+               "region": {n: g.serialize() for n, g in conditions},
+               "title": spec.title}
+    depth = max(0, int(spec.subdivide or 0))
+    terms = bernstein.region_terms(conditions) if conditions else []
+    ok, tree = (bernstein.nonneg_region(poly, box, terms, depth) if terms
+                else bernstein.nonneg(poly, box, depth))
+    if ok:
+        cert = polynomial_nonneg_certificate(
+            dict(payload, holds=True, tree=tree)).stamp(spec_path or None)
+        return Result("nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG,
+                      ms(), cert, detail=t("nonneg.proved", poly=str(poly) or "0",
+                                           box=_box_text(box),
+                                           region=_region_text(conditions)))
+
+    # A point where it fails: the corners of a grid on the box, finest last,
+    # inside the region. A NEGATIVE corner coefficient is such a point, and
+    # the grid finds the others the coefficients only hint at.
+    def inside(pt):
+        return all(evaluate(g, pt) >= 0 for _n, g in conditions)
+
+    hint = bernstein.diagnose(poly, box)
+    cands = []
+    if hint and hint.get("point"):
+        cands.append({n: Fraction(v) for n, v in hint["point"].items()})
+    for m in range(0, 7):
+        k = 2 ** m
+        if (k + 1) ** len(ring) > 20_000:
+            break
+        for idx in _product(range(k + 1), repeat=len(ring)):
+            cands.append({n: box[n][0] + (box[n][1] - box[n][0]) * Fraction(i, k)
+                          for n, i in zip(ring, idx)})
+    for pt in cands:
+        v = evaluate(poly, pt)
+        if v < 0 and inside(pt):
+            cert = polynomial_nonneg_certificate(dict(
+                payload, holds=False, point={n: str(x) for n, x in pt.items()},
+                value=str(v))).stamp(spec_path or None)
+            return Result("nonneg", Status.SAT, Verdict.REFUTED, ENGINE_NONNEG,
+                          ms(), cert, detail=t(
+                              "nonneg.refuted", value=str(v),
+                              point=", ".join("{} = {}".format(n, x)
+                                              for n, x in pt.items())),
+                          meta={"point": {n: str(x) for n, x in pt.items()},
+                                "value": str(v)})
+    where = ""
+    if hint and hint.get("split"):
+        where = t("nonneg.split_hint", name=hint["split"], at=hint["at"])
+    return Result("nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                  ENGINE_NONNEG, ms(), None,
+                  detail=t("nonneg.unknown", depth=depth) + (" " + where if where else ""),
+                  meta={"diagnose": hint})
+
+
+def _box_text(box):
+    return ", ".join("{} in [{}, {}]".format(n, lo, hi) for n, (lo, hi) in box.items())
+
+
+def _region_text(conditions):
+    return "".join("; {} >= 0".format(g) for _n, g in conditions)
+
+
 def atlas(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """N parametric certificates on N boxes, and the one statement they make
     together -- or the pieces and cells that stop them making it."""
@@ -474,12 +646,25 @@ def atlas(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     if list(program["parameters"]) != list(ring):
         return refuse(t("atlas.wrong_ring", got=", ".join(program["parameters"]),
                         want=", ".join(ring)))
+    # The claim: `("<=", T)`, or `T` with the direction the pieces bound the
+    # optimum in, or the first piece's own. "needs a claim" to a user who had
+    # given `claim=T` was the relation being read from the pieces alone.
     fc = first.payload.get("claim") or {}
-    target = P(spec.claim).serialize() if spec.claim is not None \
-        else fc.get("target")
-    if target is None or not fc.get("relation"):
+    given_rel, given = None, spec.claim
+    if isinstance(spec.claim, tuple):
+        if len(spec.claim) != 2 or spec.claim[0] not in ("<=", ">="):
+            return refuse(t("atlas.claim_shape", got=repr(spec.claim)))
+        given_rel, given = spec.claim
+    target = P(given).serialize() if given is not None else fc.get("target")
+    relation = given_rel or (fc.get("relation") if given is None else None)
+    if relation is None and target is not None:
+        got = A.piece_bound(first.payload, ring)
+        relation = None if got is None else ("<=" if got[1] else ">=")
+    if target is None:
         return refuse(t("atlas.no_claim"))
-    claim = {"target": target, "relation": fc["relation"]}
+    if relation is None:
+        return refuse(t("atlas.no_relation"))
+    claim = {"target": target, "relation": relation}
     region = {str(n): P(g).serialize() for n, g in (spec.region or [])}
     cited = [{"box": A._text(A._box(b, ring)), "source": str(src).strip()}
              for b, src in (spec.cited or [])]
@@ -490,6 +675,19 @@ def atlas(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                "pieces": [dict(rec, box=A._text(A.piece_box(c.payload, ring)))
                           for c, rec in zip(certs, records)],
                "cited": cited, "title": spec.title}
+    # A piece proved with another bound (or none) carries the atlas's claim
+    # when `T - B >= 0` on its box: the tree goes in its record, and `verify`
+    # recomputes the gap from the piece's own bound.
+    conditions = A.conditions_of(payload)
+    for c, rec in zip(certs, payload["pieces"]):
+        pc = c.payload.get("claim") or {}
+        if c.kind == "parametric_bound" and not (
+                pc.get("holds") is True and pc.get("target") == target
+                and pc.get("relation") == relation):
+            by = A.carry_claim(c.payload, ring, claim, conditions,
+                               int(getattr(spec, "subdivide", 8) or 0))
+            if by is not None:
+                rec["claim_by"] = by
 
     rows = A.check_pieces(payload, certs, limits)
     try:

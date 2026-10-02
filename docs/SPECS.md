@@ -58,6 +58,8 @@ back, and an unnamed hypothesis is one you cannot be told about.
 | `SOSSpec` | `sos` |
 | `NumberSpec` | `number` |
 | `BoundSpec` | `bounds` |
+| `NonnegSpec` | `nonneg` |
+| `PinSpec` | `pin` |
 | `OrderSpec` | `order` |
 | `BisectSpec` | `bisect` |
 

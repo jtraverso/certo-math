@@ -88,7 +88,7 @@ REQUIRED = {"range": ("var",)}
 #: implied, so `tests` can hold `run` to covering everything else.
 NOT_FROM_A_SPEC = frozenset({
     "verify", "status", "doctor", "ask", "commands", "repro", "export",
-    "ledger", "lint", "enum", "report", "pack", "mcp", "promote",
+    "ledger", "lint", "enum", "report", "pack", "mcp", "promote", "batch",
 })
 
 

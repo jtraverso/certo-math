@@ -1,4 +1,4 @@
-# Los cincuenta y cuatro comandos
+# Los cincuenta y siete comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -418,6 +418,13 @@ datos en el acto y se imprime su ruta. En local, y sin enviarse nunca.
 **Certificado** — ninguno
 **No establece** — nada; no hace ninguna afirmación matemática.
 
+`certo doctor --launcher DIR` escribe `certo-nosite` en DIR: certo arrancado
+con `python -S`, los directorios de site devueltos por el propio lanzador,
+cada `.pth` leído por las rutas que agrega y NO por el código que corre -- el
+gancho de arranque sobre el que `doctor` avisa queda fuera de certo y sigue
+sirviendo a todos los demás programas. Un archivo, escrito solo si se pide;
+borrarlo lo deshace.
+
 ```
 $ certo doctor
   capacidad    presente  para qué
@@ -488,6 +495,17 @@ CBC trabaja en punto flotante y devuelve `10.66666656003499` donde la respuesta
 es `32/3`. certo resuelve en flotante, **reconstruye racionales y verifica en
 `Fraction`**, aceptando solo si la comprobación exacta pasa, así que una mala
 reconstrucción se rechaza sola.
+
+`--round`, con un objetivo entero (coeficientes enteros sobre variables
+enteras), certifica además `óptimo entero <= floor(LP)` (`>= ceil` si se
+minimiza) -- recalculado por `verify` desde la cota dual, nunca leído. Cuando
+un punto entero lo alcanza, ESE es el óptimo entero, demostrado.
+`--cuts clique` agrega los cortes de clique del grafo de conflictos -- pares de
+variables 0/1 que alguna fila del programa prohíbe juntas -- cada uno
+registrado con la fila que fuerza cada par que une, y re-derivado por
+`verify`. La cota es entonces sobre el óptimo ENTERO, que es lo que un corte
+así hizo en una instancia simétrica que branch and bound no cerraba:
+`examples/opt_clique_cuts.py`.
 
 ```
 $ certo verify out/lp.json
@@ -1318,9 +1336,67 @@ cubre todo lo que está sobre sus pisos. `cited=[(caja, "fuente")]` cubre cajas
 con un resultado externo: el enunciado pasa a ser **relativo** a él, y cada
 verificación lo lista.
 
+**Un programa, un claim.** Cada pieza debe estar certificada para el mismo
+programa -- objetivo, restricciones, sentido, variables libres -- y un rechazo
+nombra las piezas que difieren y en qué. El claim es `claim=("<=", T)`, o
+`claim=T` con el sentido en que las piezas acotan el óptimo; una pieza
+certificada con su PROPIA cota `B` -- o sin claim -- cuenta donde `T - B >= 0`
+en su caja, lo que se comprueba con coeficientes de Bernstein y `verify`
+recalcula desde la cota de la propia pieza. Así las piezas pueden probar una
+cota más fina que la que el enunciado necesita, y no hay que recertificarlas
+con ella.
+
 Todavía no: **cartas**. Un dominio cubierto en varios sistemas de coordenadas
 necesita que el cambio de coordenadas sea parte de lo que se comprueba, y eso
 no está aquí.
+
+### `certo nonneg`
+
+**Pregunta** — ¿Este polinomio es >= 0 en una caja -- o en la parte que corta
+una región?
+**Spec** — `NonnegSpec`
+**Responde** — DEMOSTRADO con el certificado de Bernstein, o REFUTADO con un
+punto de la caja, dentro de la región, y el valor negativo exacto ahí
+**Certificado** — `polynomial_nonneg`, **sin solver**: coeficientes de
+Bernstein recalculados en cada hoja, o el punto evaluado
+**No establece** — nada cuando es INCONCLUSO: los coeficientes siguieron
+negativos tras `subdivide` bisecciones y ningún punto de la grilla fue
+negativo. Puede que igual valga; el detalle dice dónde cortar.
+
+    NonnegSpec(poly=Fraction(3, 10) - x, box={"x": (0, Fraction(1, 2))},
+               region=[("below_root", Fraction(3, 40) - x**2)])
+
+"P >= 0 en una caja" había que disfrazarlo de LP con dual cero. La región es
+también la forma de escribir exacto un extremo ALGEBRAICO: `[0, sqrt(3/40)]`
+es la caja `[0, 1/2]` con `3/40 - x^2 >= 0`, en vez de un corte racional
+cercano y dos cotas justificadas a mano. La maquinaria es la que ya usan
+`parametric` y `atlas`; esto es ella como comando.
+
+### `certo pin`
+
+**Pregunta** — Un cubrimiento da `cp(G) <= X` y un LP da `cp(G) >= X`: ¿pueden
+ser UN certificado de que `cp(G) = X`?
+**Spec** — `PinSpec`
+**Responde** — `cp_r(G) = X` DEMOSTRADO cuando las cotas se encuentran; el
+rango certificado `ceil(L) <= cp_r(G) <= X` cuando no
+**Certificado** — `pinned_value`, **sin solver**: ambas mitades re-verificadas,
+atadas a una lista de aristas, y sus números comparados
+**No establece** — para una mitad inferior de un LP tuyo (`opt --round`), que
+el LP acote `cp(G)` por abajo: `assumption=` lo declara, y el resultado es
+RELATIVO a eso.
+
+    PinSpec(edges=EDGES, max_size=3,
+            upper=CoverSpec(universe=EDGES, parts=FANO, cliques=True, max_size=3),
+            lower=CliqueLPSpec(edges=EDGES, problem="partition",
+                               weight={"constant": 1}, max_size=3))
+
+El amarre es el punto, y es la lección de la auditoría de 0.20.0: dos
+certificados verificados cada uno por su cuenta no dicen nada el uno del
+otro. Aquí el cubrimiento debe ser por cliques de orden <= r de exactamente
+las aristas del payload, y el LP debe contar cliques, cubrir cada arista una
+vez y admitir toda pieza de orden <= r -- un LP sobre menos piezas tiene un
+óptimo MAYOR y no acota nada. `examples/pin_fano.py`: el plano de Fano da
+`cp_3(K_7) = 7`.
 
 ### `certo peak`
 
@@ -1866,6 +1942,19 @@ Los avisos son la parte que envejece bien. Una demostración vacua sigue
 diciendo que es vacua; un barrido sigue diciendo qué no certificó; una
 multiplicidad sigue nombrando su retículo. Meses después, solo con el artefacto.
 
+Cada reporte termina con su **grado de comprobación**, una palabra en vez de un
+`ok`: `complete` (cada paso re-derivado por la aritmética exacta de certo),
+`with_solver` (re-derivado preguntándole de nuevo a un solver), `relative`
+(válido, y apoyado en puentes, resultados citados o una simetría declarada,
+listados), `partial` (parte no re-derivada -- un spec que no se pudo
+reproducir, un predicado que nada certificó -- listada). `--json` trae
+`degree`, `partial` y `assumed`. Para un contraejemplo, `verify` imprime
+además qué hace cada fórmula en su punto, exacto, y `--md` lo da como tabla
+para pegar en una demostración. `--tamper` agrega las falsificaciones
+ESTRUCTURALES -- listas vaciadas y acortadas, índices fuera de rango,
+subcertificados intercambiados, un valor reescrito en todas partes -- que es
+como se encontraron los arreglos de 0.22.
+
 ### `certo bind`
 
 **Pregunta** — ¿Da realmente el lema de Lean lo que supuso mi certificado?
@@ -2061,6 +2150,27 @@ gzip, y todo lo que lee un certificado lo lee (`verify`, `atlas`, `status`,
 `repro`, MCP). El digest es sobre el contenido, así que comprimir no cambia
 nada de lo que dice un certificado. `atlas` acepta `familia.zip#miembro`
 dondequiera que acepta una ruta.
+
+### `certo batch`
+
+**Pregunta** — Cientos de specs pequeños: ¿pueden correr sin un proceso cada
+uno?
+**Spec** — ninguno; un comando y un directorio de specs
+**Responde** — una fila por spec, en el orden del directorio: veredicto,
+tiempo, y el certificado escrito junto a los demás, con el nombre del spec
+**Certificado** — uno por spec, cada uno autoverificado igual que una corrida
+sola
+**No establece** — nada sobre los specs en conjunto. Un batch son muchas
+corridas separadas; unir cajas en un enunciado es `atlas`, y "cada uno
+exactamente una vez" es `status --manifest`.
+
+    certo batch parametric pieces/ -o pieces/certs --jobs 4
+
+179 piezas de lemas eran 179 procesos, cada uno pagando el intérprete y los
+imports por veinte milisegundos de trabajo. `--jobs N` usa N trabajadores,
+cada uno arrancado una vez; un trabajador que muere al arrancar (un gancho de
+`site` hace eso en algunas máquinas) ve sus specs corridos en este proceso en
+vez de perdidos.
 
 ### `certo mcp`
 

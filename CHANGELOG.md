@@ -6,7 +6,104 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
-## [0.20.1] — 2026-09-26
+## [0.22.0] — 2026-10-02
+
+**What three reports asked for, and eleven more holes closed.** There are 57
+commands (`nonneg`, `pin`, `batch`) and 55 kinds (`polynomial_nonneg`,
+`pinned_value`). The schema stays 5: every new payload field is optional. A
+battery of STRUCTURAL forgeries -- the shapes the 0.20.0 audit used -- now runs
+over every kind in the test suite, and found eleven more claims `verify`
+did not re-check. There is no 0.21: this is one release.
+
+### Soundness: found by the structural battery
+
+Each was a forgery of the shape the audit wrote -- an emptied list, a vector
+of the wrong length, two fields edited together -- and each is now a check
+and a test.
+
+- **`branch_bound`**: a tree with no nodes verified (nothing missing, nothing
+  open), and a branch listing only `x = 0` never examined `x = 1`. The root is
+  required, and every branch must list exactly its variable's values, by the
+  producer's own function.
+- **`mixed`**: the residual LP was compared over its own `var_names` --
+  emptied, nothing was compared -- and extra rows, which shrink the residual
+  and make "optimal given the discrete part" false, were never read. It is
+  rebuilt exactly, and `conditional` and `discrete_gain` are recomputed.
+- **`parametric_bound`**: with `variables` emptied no column was checked, and
+  any `y >= 0` proved any bound. Every variable the program mentions must be
+  a checked column.
+- **`hypothesis_audit`**: a `redundant` verdict -- the goal follows without the
+  hypothesis -- was never asked again. A needed hypothesis relabelled
+  redundant verified, and a reader would drop it. `redundant` and `domain`
+  are re-checked, and every hypothesis has exactly one row.
+- **`dependency_cycle`**: the closing comparison read its two classes from the
+  payload, so the steps decided nothing. They are tied to the steps.
+- **`synth_proved`**: the candidate shown was not tied to the one found, nor
+  the universal proof to the candidate. Both are, the second by rebuilding
+  the universal statement from the spec.
+- **`sweep_range`**: no entry per size was required; `entries: []` checked
+  nothing.
+- **`affine_semigroup`**, **`toric_cone`**, **`linear_system`**, **`lp_dual`**,
+  **`mixed`**, **`ball`**, **`nonneg`**: vectors read with `zip` at the wrong
+  length -- a point with a coordinate dropped was checked on the ones it
+  kept. Every vector has the length its role gives it, and a semigroup's
+  positive answers must carry their coefficients. A Hilbert basis entry's
+  whole evidence is compared, not two flags.
+- **`proof`**: `bridges`, `used` and `unused` -- the lists a reader quotes --
+  were not compared with anything, and reversing `assumptions` relabelled
+  every hypothesis. All are recomputed, and each name is its formula.
+- **`unsat_core`**: `names` were not tied to the rows or the formulas.
+- **Everywhere**: `Poly.parse` refuses an exponent with the wrong number of
+  entries for its ring, and a payload naming a variable twice is refused.
+  `capacity_profile`'s stated lines are recomputed.
+
+### New
+
+- **`certo nonneg`**: a polynomial >= 0 on a box, or on the part a region
+  `g >= 0` cuts -- Bernstein coefficients, or the point where it fails with
+  its exact value. A region also writes an algebraic endpoint exactly:
+  `[0, sqrt(3/40)]` is `[0, 1/2]` with `3/40 - x^2 >= 0`.
+- **`certo pin`**: `cp_r(G) = X` from both sides -- an exact cover by cliques
+  above, a clique LP rounded up below -- both re-verified and tied to one edge
+  list before their numbers are compared. Otherwise, the certified range. A
+  lower bound from a program of your own is accepted with `assumption=`, and
+  the result is relative to it.
+- **`certo batch COMMAND DIR`**: every spec in a directory through one
+  command, in one process or `--jobs N`, one certificate per spec. A worker
+  that dies at start-up has its specs run in-process instead of lost.
+- **`opt --round`**: with an integer objective, `integer optimum <=
+  floor(LP)` as part of the certificate, recomputed by `verify` from the dual
+  bound. When an integral point reaches it, the integer optimum is proved.
+- **`opt --cuts clique`**: the clique cuts of the conflict graph, each with
+  the row that forces every pair it joins, re-derived by `verify`. The bound
+  is then on the integer optimum -- what closed a symmetric instance branch
+  and bound could not.
+- **The degree of checking**, in every report: `complete`, `with_solver`,
+  `relative` (resting on bridges, cited results, a declared symmetry -- listed)
+  or `partial` (part of it not re-derived -- listed). `--json` carries
+  `degree`, `partial` and `assumed`.
+- **A counterexample as mathematics**: each formula evaluated exactly at the
+  point -- both sides, the slack, the margin by which the claim fails, and
+  which inequalities are active. In the refutation, in `verify`, as
+  `explained` in JSON, and as a Markdown table with `verify --md`.
+- **`atlas` carries its claim**: `claim=("<=", T)`, or `claim=T` with the
+  pieces' direction; a piece proving its own bound `B` counts where
+  `T - B >= 0` on its box, checked by Bernstein. The refusals say what is
+  missing -- "needs a claim" was the relation read from the pieces alone --
+  and name the pieces that are about another program, and in what.
+- **`certo doctor --launcher DIR`** writes `certo-nosite`: certo started
+  without running the `.pth` hooks doctor warns about, their paths kept.
+- **`verify --tamper`** runs the structural forgeries too.
+- **`Poly`**: `p ** k`, unary minus, and numbers on either side of `+ - *`;
+  combining polynomials of different rings is refused instead of silently
+  mixing their exponents.
+- **`pack DIR`** without `-o` writes `DIR.zip`; `--cert` also names it.
+
+### Documentation
+
+- The commands, certificates and specs references and `dsl_guide` cover the
+  new commands, flags and spec fields.
+
 
 **Ten soundness fixes from an external audit of 0.20.0.** Nine let `verify`
 accept, or `PROVED` report, something false; the tenth let an MCP `verify`

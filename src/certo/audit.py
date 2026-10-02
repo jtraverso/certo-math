@@ -296,4 +296,32 @@ def recheck(payload, limits=None) -> dict:
                                 z3.Not(z3.substitute(goal, *subs)))))
             if s.check() != z3.unsat:
                 bad.append(row["hypothesis"])
-    return {"checked": checked, "bad": sorted(set(bad))}
+
+    # REDUNDANT and DOMAIN are POSITIVE claims -- the goal still follows
+    # without the hypothesis -- and they were not re-checked at all: a
+    # certificate could call a needed hypothesis redundant, and the reader
+    # would drop it. Each is asked again, the way `audit` asked it.
+    unproved = []
+    guards = [(d.sexpr(), d != 0) for d in duties]
+    for row in payload["rows"]:
+        if row["verdict"] not in (REDUNDANT, DOMAIN):
+            continue
+        checked += 1
+        keep = [(n, f) for n, f in formulas.items() if n != row["hypothesis"]]
+        s = z3.Solver()
+        lim.apply_to(s)
+        for _n, f in keep:
+            s.add(f)
+        s.add(z3.Not(goal))
+        for _text, guard in guards:
+            s.add(guard)
+        if s.check() != z3.unsat:
+            unproved.append(row["hypothesis"])
+            continue
+        lost = _lost_obligations(keep, guards, lim)
+        if (row["verdict"] == REDUNDANT) != (not lost) or (
+                row["verdict"] == DOMAIN
+                and sorted(row.get("obligations") or []) != sorted(lost)):
+            unproved.append(row["hypothesis"])
+    return {"checked": checked, "bad": sorted(set(bad)),
+            "unproved": sorted(set(unproved))}

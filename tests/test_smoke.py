@@ -353,7 +353,10 @@ def test_synth_then_prove_candidate_closes_the_manual_step():
     combo = synth_proved_certificate(
         r.meta["implementation"], r.certificate.to_dict(), uni.certificate.to_dict())
     rep = verify(_roundtrip(combo), LIM)
-    assert rep.ok and len(rep.checks) == 2
+    # Both halves, and the candidate tied to the one the search found. With
+    # no spec to rebuild the universal statement from, that the universal
+    # proof is about THIS candidate is not checked -- and the degree says so.
+    assert rep.ok and len(rep.checks) == 3 and rep.degree == "partial"
 
 
 def test_prove_candidate_says_what_to_add_when_the_spec_lacks_it():

@@ -188,7 +188,14 @@ def check(payload) -> dict:
     a = g.Class.from_dict(c["left_class"])
     b = g.Class.from_dict(c["right_class"])
     cmp = g.compare(a, b)
-    return {"steps_ok": not bad, "bad": sorted(set(bad)),
+    # The two sides compared ARE what the steps derived for them. Read from
+    # `closes` alone, the comparison could be between any two classes, and
+    # the steps -- emptied, even -- decided nothing.
+    left, right = seen.get(c.get("left")), seen.get(c.get("right"))
+    tied = (left is not None and right is not None
+            and left.to_dict() == c["left_class"]
+            and right.to_dict() == c["right_class"])
+    return {"steps_ok": not bad, "bad": sorted(set(bad)), "tied": tied,
             "comparison_ok": cmp == c["comparison"],
             "comparison": cmp,
             "empty_ok": payload["empty"] == bool(

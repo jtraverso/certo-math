@@ -184,6 +184,39 @@ class Certificate:
         return self
 
 
+class Note(str):
+    """A warning that also says how much of the claim was CHECKED.
+
+    `partial`: part of it was not re-derived (a spec that could not be
+    replayed, a predicate nothing certified, a field read where it should be
+    rebuilt). `assumed`: it rests on something certo did not check and was
+    told to accept (a bridge, a cited result, a declared symmetry). It is a
+    `str`, so everything that prints or serialises warnings is unchanged."""
+
+    degree = ""
+
+
+def _note(degree, key, **kw) -> Note:
+    out = Note(t(key, **kw))
+    out.degree = degree
+    return out
+
+
+def _relay(prefix, w) -> Note:
+    """A sub-certificate's warning, prefixed, keeping its degree: a partial
+    lemma makes the proof partial."""
+    out = Note("{}{}".format(prefix, w))
+    out.degree = getattr(w, "degree", "")
+    return out
+
+
+#: The degrees, strongest first. `complete`: every step re-derived by
+#: certo's own arithmetic. `with_solver`: re-derived, by asking a solver
+#: again. `relative`: valid, RESTING on something assumed. `partial`: part of
+#: it not re-derived at all. A single `ok` used to stand for all four.
+DEGREES = ("complete", "with_solver", "relative", "partial", "invalid")
+
+
 @dataclass
 class VerifyReport:
     ok: bool
@@ -197,10 +230,34 @@ class VerifyReport:
     # the user's own predicate. Naming the method keeps the header honest.
     method_key: str = ""
 
+    @property
+    def partial(self) -> list:
+        return [str(w) for w in self.warnings
+                if getattr(w, "degree", "") == "partial"]
+
+    @property
+    def assumed(self) -> list:
+        return [str(w) for w in self.warnings
+                if getattr(w, "degree", "") == "assumed"]
+
+    @property
+    def degree(self) -> str:
+        """How much of the claim was checked, in one word: see DEGREES."""
+        if not self.ok:
+            return "invalid"
+        if self.partial:
+            return "partial"
+        if self.assumed:
+            return "relative"
+        return "complete" if self.solver_free else "with_solver"
+
     def to_dict(self) -> dict:
         return {
             "ok": self.ok,
             "kind": self.kind,
+            "degree": self.degree,
+            "partial": self.partial,
+            "assumed": self.assumed,
             "solver_free": self.solver_free,
             "method": self.method_key,
             "checks": [{"check": c, "ok": o, "detail": d} for c, o, d in self.checks],
@@ -297,6 +354,38 @@ def _declared_values(sense, objective, integral_objective):
     if integral_objective is not None:
         out["integral_objective"] = turn(integral_objective)
     return out
+
+
+def lp_rounding(p, dual_bound):
+    """`(bound, offenders)`: the INTEGER optimum's bound an exact LP gives by
+    rounding -- `floor` of the certified `b.y` in the maximised frame, so
+    `floor` for a max and `ceil` for a min in the declared sense -- or
+    `(None, [variables])` when rounding is not valid.
+
+    Valid when every variable with a non-zero objective coefficient is
+    integer (or binary) and its coefficient is an integer: then every
+    integer point has an integer objective, and the integer optimum, which
+    the LP bounds, is at most the floor. Continuous variables with a zero
+    coefficient do not matter."""
+    import math
+
+    from . import exact
+
+    kinds = p.get("kinds") or {}
+    names = p.get("var_names") or []
+    off = []
+    for j, cj in enumerate(exact.parse_all(p["c"])):
+        if cj == 0:
+            continue
+        name = names[j] if j < len(names) else str(j)
+        kind = kinds.get(name, "integer" if p.get("integer") and not kinds
+                         else "continuous")
+        if kind not in ("integer", "binary") or cj.denominator != 1:
+            off.append(name)
+    if off:
+        return None, off
+    flip = -1 if p.get("sense") == "min" else 1
+    return flip * exact.to_fraction(math.floor(dual_bound)), []
 
 
 def lp_dual_certificate(sense, objective, dual, A, b, c, names,
@@ -1004,6 +1093,20 @@ def clique_lp_certificate(out, title="") -> Certificate:
         payload["max_size"] = out["max_size"]
     return Certificate(kind="clique_lp", solver_free=True, payload=payload,
                        note_key="cert.note.clique_lp")
+
+
+def pinned_value_certificate(payload) -> Certificate:
+    """`cp_r(G)` between two certified bounds -- equal, or the range -- with
+    both halves embedded and tied to one edge list."""
+    return Certificate(kind="pinned_value", solver_free=True, payload=payload,
+                       note_key="cert.note.pinned_value")
+
+
+def polynomial_nonneg_certificate(payload) -> Certificate:
+    """`poly >= 0` on a box (cut by a region): the Bernstein subdivision tree
+    with any multipliers -- or, refuted, the point and its exact value."""
+    return Certificate(kind="polynomial_nonneg", solver_free=True,
+                       payload=payload, note_key="cert.note.polynomial_nonneg")
 
 
 def atlas_certificate(payload) -> Certificate:
@@ -1844,6 +1947,18 @@ def verify(cert, limits=None) -> VerifyReport:
             False, cert.kind, cert.solver_free,
             detail=t("verify.unknown_kind", kind=cert.kind),
         )
+    # NAMES ARE UNIQUE. A variable listed twice is two columns with one name,
+    # or one ring position read twice; no kind means either, and several
+    # read such a list without looking.
+    # (Row names are not in the list: `LPSpec.constraint` accepts a name
+    # twice, so a legitimate program can repeat one.)
+    dup = [k for k in ("variables", "var_names", "parameters", "order")
+           if isinstance(cert.payload.get(k), list)
+           and len(set(map(str, cert.payload[k]))) != len(cert.payload[k])]
+    if dup:
+        return VerifyReport(False, cert.kind, cert.solver_free, checks=[(
+            t("verify.names_unique"), False, ", ".join(dup))],
+            detail=t("verify.names_unique"))
     try:
         rep = fn(cert, limits)
         rep.warnings = _provenance_warnings(cert) + list(rep.warnings)
@@ -1940,8 +2055,9 @@ def _verify_proof(cert, limits) -> VerifyReport:
             checks.append((t("verify.proof.cited_shape", name=name),
                            sub is None and bool(str(lem["cited"]).strip()),
                            lem.get("cited", "")))
-            warnings.append(t("verify.proof.cited" if name in used
-                              else "verify.proof.cited_unused",
+            warnings.append(_note("assumed" if name in used else "",
+                                  "verify.proof.cited" if name in used
+                                  else "verify.proof.cited_unused",
                               name=name, source=lem["cited"],
                               statement=str(phi)[:160]))
             continue
@@ -1952,10 +2068,10 @@ def _verify_proof(cert, limits) -> VerifyReport:
         rep = verify(Certificate.from_dict(sub), limits)
         checks.append((t("verify.proof.lemma", name=name), rep.ok,
                        "{}: {}".format(sub["kind"], rep.detail)))
-        warnings.extend("{}: {}".format(name, w) for w in rep.warnings)
+        warnings.extend(_relay(name + ": ", w) for w in rep.warnings)
 
         if not lem.get("derived"):
-            warnings.append(t("verify.proof.bridge", name=name,
+            warnings.append(_note("assumed", "verify.proof.bridge", name=name,
                               why=lem.get("bridge") or sub["kind"]))
             continue
         obl = obligations_of(sub)
@@ -2015,6 +2131,40 @@ def _verify_proof(cert, limits) -> VerifyReport:
                     if n != "__goal__" and n not in declared]
         checks.append((t("verify.proof.declared"), not smuggled,
                        ", ".join(smuggled)))
+        # THE LISTS A READER QUOTES, recomputed. `bridges: []` beside a lemma
+        # that is a bridge verified, because the warnings came from each
+        # lemma's flag and nothing compared the list a reader of the JSON
+        # sees -- the same for `used` and `unused`.
+        core = {n for n in step.get("payload", {}).get("names", [])
+                if n != "__goal__"}
+        lemma_names = [l["name"] for l in p["lemmas"]]
+        want_bridges = [l["name"] for l in p["lemmas"] if not l.get("derived")]
+        off = [k for k, ok in (
+            ("bridges", list(p.get("bridges") or []) == want_bridges),
+            ("used", set(p.get("used") or []) == core),
+            ("unused", sorted(p.get("unused") or [])
+             == sorted(n for n in lemma_names if n not in core)))
+            if not ok]
+        checks.append((t("verify.proof.summaries"), not off,
+                       ", ".join(off) or "-"))
+        # EACH NAME IS ITS FORMULA. The step's core lists formulas and the
+        # names beside them; a hypothesis or lemma the step names must be the
+        # formula of that name here. Reversing `assumptions` relabelled every
+        # hypothesis, and only the SET of names was compared.
+        try:
+            core_f = list(z3.parse_smt2_string(
+                step.get("payload", {}).get("core_smt2") or ""))
+        except z3.Z3Exception:
+            core_f = []
+        by_name = dict(zip(names, ambient))
+        by_name.update({l["name"]: s for l, s in zip(p["lemmas"], statements)})
+        step_names = step.get("payload", {}).get("names", [])
+        relabelled = [n for n, f in zip(step_names, core_f)
+                      if n in by_name and not f.eq(by_name[n])]
+        if len(core_f) != len(step_names):
+            relabelled.append("core")
+        checks.append((t("verify.proof.labels"), not relabelled,
+                       ", ".join(relabelled[:4]) or "-"))
 
     if p.get("vacuous"):
         warnings.append(t("verify.proof.vacuous"))
@@ -2046,6 +2196,9 @@ def _verify_ball(cert, limits) -> VerifyReport:
     p = cert.payload
     lo, hi = Fraction(p["lo"]), Fraction(p["hi"])
     claim = tuple(p["claim"]) if p.get("claim") else None
+    if claim is not None and len(claim) != (3 if claim[0] == "in" else 2):
+        return VerifyReport(False, "ball", True, checks=[(
+            t("verify.ball.claim_shape"), False, str(list(claim)))])
     checks, warnings = [], []
 
     checks.append((t("verify.ball.ordered"), lo <= hi,
@@ -2056,7 +2209,7 @@ def _verify_ball(cert, limits) -> VerifyReport:
 
     path = Path(p.get("spec_path") or "")
     if not p.get("spec_path") or not path.exists():
-        warnings.append(t("verify.ball.no_spec", path=p.get("spec_path") or "-"))
+        warnings.append(_note("partial", "verify.ball.no_spec", path=p.get("spec_path") or "-"))
         return VerifyReport(
             all(c[1] for c in checks), "ball", True, checks=checks,
             warnings=warnings,
@@ -2072,7 +2225,7 @@ def _verify_ball(cert, limits) -> VerifyReport:
         checks.append((t("verify.ball.reproduced"), inside,
                        "[{}, {}]".format(float(got_lo), float(got_hi))))
     except Exception as e:  # noqa: BLE001
-        warnings.append(t("verify.ball.not_redone", reason=str(e)))
+        warnings.append(_note("partial", "verify.ball.not_redone", reason=str(e)))
 
     return VerifyReport(
         all(c[1] for c in checks), "ball", True, checks=checks,
@@ -2106,9 +2259,10 @@ def _verify_induction(cert, limits) -> VerifyReport:
             continue
         rep = verify(Certificate.from_dict(sub), limits)
         checks.append((label, rep.ok, "{}: {}".format(sub["kind"], rep.detail)))
-        warnings.extend("k={}: {}".format(b["k"], w) for w in rep.warnings)
+        warnings.extend(_relay("k={}: ".format(b["k"]), w)
+                        for w in rep.warnings)
         if not b.get("derived") and p.get("bridge"):
-            warnings.append(t("verify.induction.bridge", k=b["k"],
+            warnings.append(_note("assumed", "verify.induction.bridge", k=b["k"],
                               why=p["bridge"]))
 
     # --- the step ----------------------------------------------------------
@@ -2200,7 +2354,7 @@ def _verify_orbit_witnesses(cert, limits) -> VerifyReport:
             continue
         rep = verify(Certificate.from_dict(wc), limits)
         checks.append((label, rep.ok, "{} -> {}".format(w["minimal"], rep.detail)))
-        warnings.extend("{}: {}".format(w["representative"], x)
+        warnings.extend(_relay("{}: ".format(w["representative"]), x)
                         for x in rep.warnings)
         free = free and rep.solver_free
 
@@ -2441,6 +2595,11 @@ def _verify_parametric_symmetry(cert, limits) -> VerifyReport:
     spec = _paramsym_view(p, ring)
     checks = []
 
+    # 0. AT LEAST ONE POINT. Each check below runs over the points; with
+    # none, the symbolic side was compared with nothing and passed.
+    checks.append((t("verify.paramsym.some_point"), bool(p["points"]),
+                   str(len(p["points"]))))
+
     # 1. the multiplicities give the orbit sizes recorded at each point
     bad = []
     for row in p["points"]:
@@ -2532,6 +2691,13 @@ def _verify_linear_system(cert, limits) -> VerifyReport:
     b = [Fraction(v) for v in p["rhs"]]
     m = p["columns"]
     checks = []
+    # Every row has `columns` entries and every row its right-hand side: the
+    # products below pair entries with `zip`, which reads a longer row on its
+    # first entries and a shorter one as if the rest were zero.
+    if any(len(row) != m for row in A) or len(b) != len(A):
+        return VerifyReport(False, "linear_system", True, checks=[(
+            t("verify.solve.shapes"), False,
+            "{} x {} / {}".format(len(A), m, len(b)))])
 
     if p["status"] == linsolve.NONE:
         # WHICH argument is required is decided by the DOMAIN, not by which
@@ -2701,6 +2867,14 @@ def _verify_toric_cone(cert, limits) -> VerifyReport:
     order = list(p["order"])
     basis = p.get("lattice")
     checks = []
+    # One length for every vector in the lattice's space.
+    dims = {len(v) for v in rays.values()}
+    dims |= {len(v) for v in (basis or [])}
+    if p.get("height_functional") is not None:
+        dims.add(len(p["height_functional"]))
+    if len(dims) > 1 or sorted(order) != sorted(rays):
+        return VerifyReport(False, "toric_cone", True, checks=[(
+            t("verify.toric.shapes"), False, ", ".join(map(str, sorted(dims))))])
 
     # 1. the multiplicity, in the lattice the payload says it is about
     try:
@@ -2788,6 +2962,7 @@ def _verify_capacity_profile(cert, limits) -> VerifyReport:
     A profile that no longer holds is refused, and so is one whose stated
     piecewise form disagrees with what its own duals give.
     """
+    from fractions import Fraction
     from types import SimpleNamespace
 
     from . import profile as pr
@@ -2807,7 +2982,16 @@ def _verify_capacity_profile(cert, limits) -> VerifyReport:
         return VerifyReport(False, "capacity_profile", True,
                             detail=str(e))
 
+    # Each segment's stated line -- what a reader quotes -- is the one its
+    # dual gives, recomputed: it was carried and compared with nothing.
+    stated = sorted(p["segments"], key=lambda s: Fraction(s["from"]))
+    keys = ("alpha", "beta", "at_from", "at_to")
+    lines_ok = len(stated) == len(got["segments"]) and all(
+        all(str(a.get(k)) == str(b.get(k)) for k in keys)
+        for a, b in zip(stated, got["segments"]))
+
     checks = [
+        (t("verify.profile.lines"), lines_ok, str(len(stated))),
         (t("verify.profile.dual"),
          all(f["why"] not in ("dual_infeasible", "negative_price")
              for f in got["failures"]),
@@ -2866,6 +3050,100 @@ def _zero_combination(A, c) -> bool:
                for r in range(len(A[0]) if A else 0))
 
 
+def _verify_pinned_value(cert, limits) -> VerifyReport:
+    """Both halves re-verified, both about the payload's graph, and the
+    bounds recomputed from what they certify."""
+    from . import pin as P
+
+    p = cert.payload
+    labels = {"upper": "verify.pin.upper", "lower": "verify.pin.lower",
+              "same_graph": "verify.pin.same_graph",
+              "assumption": "verify.pin.assumption",
+              "bounds": "verify.pin.bounds", "pinned": "verify.pin.pinned"}
+    try:
+        rows = P.check(p, limits)
+    except (P.NotAPin, KeyError, TypeError, ValueError, ZeroDivisionError) as e:
+        return VerifyReport(False, "pinned_value", True, checks=[(
+            t("verify.pin.readable"), False, "{}: {}".format(type(e).__name__, e))])
+    checks = [(t(labels[k]), ok, str(d)) for k, ok, d in rows]
+    warnings = []
+    if (p.get("lower") or {}).get("kind") == "lp_dual":
+        warnings.append(_note("assumed", "verify.pin.assumed",
+                              text=p.get("assumption") or "-"))
+    sub_free = all(Certificate.from_dict(p[k]).solver_free for k in ("upper", "lower"))
+    b = p.get("bounds") or {}
+    return VerifyReport(
+        all(c[1] for c in checks), "pinned_value", sub_free, checks=checks,
+        warnings=warnings, method_key="verify.pin.method",
+        detail=t("verify.pin.detail_pinned" if p.get("pinned") else "verify.pin.detail_range",
+                 value=b.get("upper"), lower=b.get("lower"), upper=b.get("upper"),
+                 n=len(p.get("edges") or []),
+                 r="" if p.get("max_size") is None else "_{}".format(p["max_size"])))
+
+
+def _verify_polynomial_nonneg(cert, limits) -> VerifyReport:
+    """The tree's leaves recomputed, or the counterexample evaluated."""
+    from fractions import Fraction
+
+    from . import bernstein
+    from .parametric import evaluate
+    from .polynomials import Poly
+
+    p = cert.payload
+    checks, warnings = [], []
+    try:
+        ring = tuple(p["parameters"])
+        poly = Poly.parse(ring, p["poly"])
+        if any(len(p["box"][n]) != 2 for n in ring):
+            raise ValueError("box")
+        box = {n: (Fraction(p["box"][n][0]), Fraction(p["box"][n][1]))
+               for n in ring}
+        if set(p["box"]) != set(ring) or any(hi < lo for lo, hi in box.values()):
+            raise ValueError("box")
+        conditions = [(n, Poly.parse(ring, g))
+                      for n, g in sorted((p.get("region") or {}).items())]
+        holds = p["holds"]
+        if not isinstance(holds, bool):
+            raise ValueError("holds")
+        if holds:
+            terms = dict(bernstein.region_terms(conditions)) if conditions else None
+            ok = bernstein.check(poly, box, p.get("tree"), terms=terms)
+            checks.append((t("verify.nonneg.tree"), ok,
+                           t("verify.nonneg.tree_detail",
+                             leaves=_tree_leaves(p.get("tree")))))
+        else:
+            pt = {n: Fraction(p["point"][n]) for n in ring}
+            in_box = set(p["point"]) == set(ring) and all(
+                box[n][0] <= pt[n] <= box[n][1] for n in ring)
+            checks.append((t("verify.nonneg.in_box"), in_box,
+                           ", ".join("{} = {}".format(n, x) for n, x in pt.items())))
+            vals = {n: evaluate(g, pt) for n, g in conditions}
+            checks.append((t("verify.nonneg.in_region"),
+                           all(v >= 0 for v in vals.values()),
+                           ", ".join("{} = {}".format(n, v) for n, v in vals.items())
+                           or "-"))
+            v = evaluate(poly, pt)
+            checks.append((t("verify.nonneg.negative"),
+                           v < 0 and Fraction(p["value"]) == v, str(v)))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
+        return VerifyReport(False, "polynomial_nonneg", True, checks=checks + [(
+            t("verify.nonneg.readable"), False, "{}: {}".format(type(e).__name__, e))])
+    return VerifyReport(
+        all(c[1] for c in checks), "polynomial_nonneg", True, checks=checks,
+        warnings=warnings, method_key="verify.nonneg.method",
+        detail=t("verify.nonneg.detail" if p["holds"] else "verify.nonneg.detail_refuted",
+                 poly=str(poly) or "0",
+                 box=", ".join("{} in [{}, {}]".format(n, lo, hi)
+                               for n, (lo, hi) in box.items()),
+                 region="".join("; {} >= 0".format(g) for _n, g in conditions)))
+
+
+def _tree_leaves(tree) -> int:
+    if isinstance(tree, list) and len(tree) == 3:
+        return _tree_leaves(tree[1]) + _tree_leaves(tree[2])
+    return 1
+
+
 def _verify_parametric_atlas(cert, limits) -> VerifyReport:
     """Every piece resolved and verified, all about one program and one
     claim, and the covering of the domain recomputed cell by cell."""
@@ -2909,7 +3187,7 @@ def _verify_parametric_atlas(cert, limits) -> VerifyReport:
     except A.CoverBudget:
         checks.append((t("verify.atlas.covered"), False, "budget"))
     for c in p.get("cited") or []:
-        warnings.append(t("verify.atlas.cited", box=json.dumps(c["box"]),
+        warnings.append(_note("assumed", "verify.atlas.cited", box=json.dumps(c["box"]),
                           source=c["source"]))
     if p.get("region"):
         warnings.append(t("verify.atlas.region_scope", n=len(p["region"])))
@@ -2973,6 +3251,41 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
     gens = {n: list(map(int, v)) for n, v in p["generators"].items()}
     A = [gens[n] for n in order]
     checks = []
+
+    # 0. EVERY VECTOR HAS THE LENGTH ITS ROLE GIVES IT. The products below
+    # pair entries with `zip`, which stops at the shorter of the two, so a
+    # point with a coordinate dropped was checked on the coordinates it kept.
+    d = len(A[0]) if A else 0
+    k = len(A)
+    wrong_len = [n for n in order if len(gens[n]) != d]
+    if sorted(order) != sorted(gens) or len(set(order)) != len(order):
+        wrong_len.append("order")
+    if p.get("grading") is not None and len(p["grading"]) != d:
+        wrong_len.append("grading")
+    if p.get("not_pointed_witness") is not None \
+            and len(p["not_pointed_witness"]) != k:
+        wrong_len.append("not_pointed_witness")
+    for name, e in sorted((p.get("points") or {}).items()):
+        if len(e.get("point") or []) != d:
+            wrong_len.append(name)
+        if e.get("separating") is not None and len(e["separating"]) != d:
+            wrong_len.append(name)
+        for key in ("cone_coefficients", "group_coefficients",
+                    "semigroup_coefficients"):
+            if e.get(key) is not None and len(e[key]) != k:
+                wrong_len.append(name)
+        # A positive answer carries what shows it, or it is not one.
+        if (e.get("in_semigroup") is True and e.get("semigroup_coefficients") is None) \
+                or (e.get("in_cone") is True and e.get("cone_coefficients") is None
+                    and e.get("semigroup_coefficients") is None) \
+                or (e.get("in_group") is True and e.get("group_coefficients") is None
+                    and e.get("semigroup_coefficients") is None):
+            wrong_len.append(name)
+    for name, e in sorted(((p.get("hilbert") or {}).get("elements") or {}).items()):
+        if len(e.get("element") or []) != d:
+            wrong_len.append(name)
+    checks.append((t("verify.semigroup.shapes"), not wrong_len,
+                   ", ".join(sorted(set(wrong_len))[:4]) or "-"))
 
     # 1. the grading, which is what makes every search below terminate
     u = p.get("grading")
@@ -3144,11 +3457,12 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
                 and sorted(want["why_not"]) == sorted(hb.get("why_not") or [])
                 and sorted(want["unreachable_generators"])
                 == sorted(hb.get("unreachable_generators") or []))
-        # And each element's own two answers, not only the summary.
+        # And each element's WHOLE entry -- its answers, its coefficients and
+        # how it reduces -- not only the two flags: evidence carried beside a
+        # recomputed verdict and compared with nothing could say anything.
         for name, got in want["elements"].items():
             claimed = (hb.get("elements") or {}).get(name) or {}
-            if (got.get("in_semigroup") != claimed.get("in_semigroup")
-                    or got.get("irreducible") != claimed.get("irreducible")):
+            if json.loads(json.dumps(got)) != claimed:
                 same = False
         checks.append((t("verify.semigroup.hilbert"), same,
                        t("verify.semigroup.hilbert_is",
@@ -3157,7 +3471,7 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
 
     warnings = [t("verify.semigroup.scope")]
     if u is None and wit is None and p.get("pointed") is False:
-        warnings.append(t("verify.semigroup.legacy_not_pointed"))
+        warnings.append(_note("partial", "verify.semigroup.legacy_not_pointed"))
     return VerifyReport(
         all(c[1] for c in checks), "affine_semigroup", True, checks=checks,
         warnings=warnings,
@@ -3234,6 +3548,8 @@ def _verify_dependency_cycle(cert, limits) -> VerifyReport:
         (t("verify.cycle.steps"), got["steps_ok"],
          t("verify.cycle.recomposed", n=len(p["steps"]),
            bad=", ".join(got["bad"][:3]) or "-")),
+        (t("verify.cycle.tied"), got["tied"],
+         "{} / {}".format(c.get("left"), c.get("right"))),
         (t("verify.cycle.comparison"), got["comparison_ok"],
          t("verify.cycle.compared", left=c["left"], rel=c["rel"],
            right=c["right"], cmp=got["comparison"])),
@@ -3295,7 +3611,7 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
 
     warnings = [t("verify.bind.bridge", decl=p["declaration"] or "-")]
     if p["spec"].get("stale"):
-        warnings.append(t("verify.bind.stale", path=p["spec"]["path"]))
+        warnings.append(_note("partial", "verify.bind.stale", path=p["spec"]["path"]))
     if not p["covers"]:
         warnings.append(t("verify.bind.does_not_cover", name=p["discharges"]))
     return VerifyReport(
@@ -3470,10 +3786,21 @@ def _verify_hypothesis_audit(cert, limits) -> VerifyReport:
     checks.append((t("verify.audit.verdicts"), not stray,
                    ", ".join(stray) or "-"))
 
+    # One row per hypothesis the formulas name, each once: a formula removed
+    # from `hypotheses_smt2` left its row, and every check below ran with one
+    # hypothesis fewer than the verdicts were about.
+    named = [r["hypothesis"] for r in rows]
+    checks.append((t("verify.audit.rows_are_hypotheses"),
+                   sorted(named) == sorted(p.get("hypotheses_smt2") or {})
+                   and len(set(named)) == len(named),
+                   "{} / {}".format(len(named), len(p.get("hypotheses_smt2") or {}))))
+
     got = _audit.recheck(p, limits)
     checks.append((t("verify.audit.witnesses"), not got["bad"],
                    t("verify.audit.reapplied", n=got["checked"],
                      bad=", ".join(got["bad"][:3]) or "-")))
+    checks.append((t("verify.audit.positive"), not got["unproved"],
+                   ", ".join(got["unproved"][:3]) or "-"))
 
     # Every `needed` verdict must actually carry its witness: one without is a
     # claim with nothing behind it.
@@ -3501,7 +3828,7 @@ def _verify_hypothesis_audit(cert, limits) -> VerifyReport:
 
     warnings = [t("verify.audit.not_minimal")]
     if counts["unknown"]:
-        warnings.append(t("verify.audit.unknown", n=counts["unknown"]))
+        warnings.append(_note("partial", "verify.audit.unknown", n=counts["unknown"]))
     if counts["domain"]:
         warnings.append(t("verify.audit.domain_scope", n=counts["domain"]))
     return VerifyReport(
@@ -3595,7 +3922,7 @@ def _verify_family_extremum(cert, limits) -> VerifyReport:
     if path is None:
         # Without the spec there is no way to rebuild the programs, and the
         # stored vectors are numbers about nothing. Said, not skipped.
-        warnings.append(t("verify.family_max.no_spec",
+        warnings.append(_note("partial", "verify.family_max.no_spec",
                           reason=t("verify.sweep.replay."
                                    + (why if why else "no_path"))))
         return VerifyReport(
@@ -3728,6 +4055,16 @@ def _verify_parametric_bound(cert, limits) -> VerifyReport:
                        t("verify.param.differing",
                          names=", ".join(drift) or "-")))
         nonneg = nonneg and not drift
+
+    # EVERY COLUMN IS CHECKED. The loop below is over `variables`; emptied, it
+    # checked no column, and any `y >= 0` "proved" any bound. Every variable
+    # the objective or a constraint mentions must be one of them.
+    mentioned = set(p["objective"]) | {v for _n, row, _s, _r in p["constraints"]
+                                       for v in row}
+    unlisted = sorted(mentioned - set(p["variables"]))
+    checks.append((t("verify.param.columns_listed"), not unlisted,
+                   ", ".join(unlisted[:4]) or "-"))
+    nonneg = nonneg and not unlisted
 
     # The residual, rebuilt from the payload rather than trusted from it.
     bad = []
@@ -4187,6 +4524,22 @@ def _verify_mixed_design(cert, limits) -> VerifyReport:
         warnings.extend(rep.warnings)
         checks.append((t("verify.mixed.substituted"),
                        _residual_matches(p, assign, sub), ""))
+        # CONDITIONAL OPTIMALITY is the residual's certified optimum being
+        # what the continuous part reaches -- recomputed, with the discrete
+        # part's contribution, rather than read from `conditional`.
+        try:
+            gain = sum((exact.to_fraction(p["objective"].get(v, 0)) * x
+                        for v, x in assign.items()), Fraction(0))
+            sp_ = sub.get("payload") or {}
+            res_val = _lp_value(sp_) if sp_.get("exact") is True else None
+            tied = (res_val is not None
+                    and res_val == exact.to_fraction(p["achieved"]) - gain
+                    and exact.to_fraction(p["conditional"]) == res_val
+                    and exact.to_fraction(p["discrete_gain"]) == gain)
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            tied = False
+        checks.append((t("verify.mixed.conditional"), tied,
+                       t("verify.lp.declared", value=p.get("conditional"))))
 
     # 5. the target, compared exactly.
     #    A design that falls short is not an INVALID certificate -- it is a
@@ -4219,6 +4572,8 @@ def _verify_mixed_design(cert, limits) -> VerifyReport:
         try:
             var_names = list(kinds)
             if p.get("bounds") is not None:
+                if any(len(b) != 2 for b in p["bounds"].values()):
+                    raise ValueError("bounds")
                 bounds = {v: (b[0], b[1]) for v, b in p["bounds"].items()}
             else:
                 # Written before `bounds` was recorded: the kinds say only
@@ -4284,11 +4639,49 @@ def normalised_rows(name, sense):
 
 
 def _residual_matches(p, assign, sub) -> bool:
-    """Is the sub-certificate's system the original one, frozen at `assign`?"""
+    """Is the sub-certificate's system the original one, frozen at `assign`?
+
+    With `bounds` recorded, the residual is REBUILT the way `LPSpec.frozen`
+    builds it -- the discrete variables substituted, the rows' right-hand
+    sides moved, the objective restricted to the continuous part, the
+    continuous bounds -- and compared exactly, rows, objective and columns.
+    The comparison it replaces looped over the residual's own `var_names`:
+    emptied, it compared no coefficient at all, and rows it did not know
+    about -- a constraint added to shrink the residual -- were never read."""
     from fractions import Fraction
 
     from . import exact
 
+    kinds = p["kinds"]
+    discrete = [v for v in kinds if kinds[v] != "continuous"]
+    continuous = [v for v in kinds if kinds[v] == "continuous"]
+    if sorted(assign) != sorted(discrete):
+        return False
+    if p.get("bounds") is not None:
+        try:
+            rows = []
+            for row in p["system"]:
+                moved = sum((exact.to_fraction(c) * assign[v]
+                             for v, c in row["coeffs"].items() if v in assign),
+                            Fraction(0))
+                rows.append({"name": row["name"], "sense": row["sense"],
+                             "rhs": exact.to_fraction(row["rhs"]) - moved,
+                             "coeffs": {v: c for v, c in row["coeffs"].items()
+                                        if v not in assign}})
+            obj = {v: c for v, c in p["objective"].items() if v in continuous}
+            bounds = {v: (p["bounds"][v][0], p["bounds"][v][1])
+                      for v in continuous}
+            A, b, c, names = _system_leq(rows, obj, p.get("sense", "max"),
+                                         continuous, bounds)
+        except (KeyError, TypeError, ValueError, IndexError):
+            return False
+        return _lp_is(sub["payload"], A, b, c, names, continuous)
+
+    # Written before `bounds` was recorded: the original rows are checked
+    # coefficient by coefficient over EVERY continuous column, and the
+    # columns must be exactly the continuous variables.
+    if list(sub["payload"].get("var_names") or []) != continuous:
+        return False
     names = sub["payload"].get("names") or []
     var_names = sub["payload"].get("var_names") or []
     A = [exact.parse_all(r) for r in sub["payload"]["A"]]
@@ -4730,7 +5123,35 @@ def _verify_branch_bound(cert, limits) -> VerifyReport:
     system = p.get("system")
     root = tree.spec_of(system) if system else None
     if root is None:
-        warnings.append(t("verify.bb.untied"))
+        warnings.append(_note("partial", "verify.bb.untied"))
+
+    # THE ROOT, AND EVERY VALUE OF A BRANCH. A tree with no nodes had nothing
+    # missing and nothing open, and verified; a branch listing only `x = 0`
+    # never examined `x = 1`. The root must be there, and a branch on `x`
+    # must list exactly the values `x` can take -- by the producer's own
+    # function, from the root system's bounds, not by a second reading.
+    checks.append((t("verify.bb.root"), "" in by_key, str(len(nodes))))
+    if root is not None:
+        from .engines.bb import _values
+
+        short = []
+        for n in nodes:
+            if n["why"] != "branch":
+                continue
+            on = n.get("on")
+            fixed_vars = {v for v, _x in n["fixed"]}
+            want = (_values(root, on) if on in root.bounds
+                    and root.kinds.get(on) in ("integer", "binary") else None)
+            if want is None or on in fixed_vars or \
+                    sorted(n.get("values") or []) != sorted(want):
+                short.append("{}@{}".format(on, _node_id(n["fixed"]) or "root"))
+        checks.append((t("verify.bb.domain"), not short,
+                       ", ".join(short[:3]) or "-"))
+    else:
+        empty = [_node_id(n["fixed"]) or "root" for n in nodes
+                 if n["why"] == "branch" and not n.get("values")]
+        checks.append((t("verify.bb.domain"), not empty,
+                       ", ".join(empty[:3]) or "-"))
 
     # Every node is closed, or branches and its children are all present.
     bad_close, missing, open_nodes = [], [], []
@@ -4886,6 +5307,12 @@ def _verify_core_by_farkas(cert) -> VerifyReport:
     tied = _rows_match_smt2(rows, p.get("core_smt2") or "")
 
     used = [n for (n, _, _), l in zip(rows, lams) if l]
+    # THE NAMES ARE THE ROWS'. `names` is what a reader quotes and what
+    # `compose` reads to see which hypotheses a step used; reversed or cut
+    # short, it named other hypotheses than the rows the combination closes.
+    named = (len(lams) == len(rows)
+             and list(p.get("names") or []) == [n for n, _, _ in rows])
+    tied = tied and named
     checks = [
         (t("verify.core.rows_match"), tied, ""),
         (t("verify.farkas.nonneg"), nonneg, ""),
@@ -4959,9 +5386,16 @@ def _verify_core_by_solver(cert, limits) -> VerifyReport:
     r = s.check()
     ok = r == z3.unsat
     n = len(cert.payload["names"])
+    # One name per formula of the core, each once.
+    formulas = len(list(z3.parse_smt2_string(cert.payload["core_smt2"])))
+    named = n == formulas and len(set(cert.payload["names"])) == n
+    ok = ok and named
     return VerifyReport(
         ok, "unsat_core", False,
-        checks=[(t("verify.core.unsat"), ok, str(r))],
+        checks=[(t("verify.core.unsat"), r == z3.unsat, str(r)),
+                (t("verify.core.named"), named,
+                 t("verify.proof.assumptions_count", names=n,
+                   formulas=formulas))],
         warnings=_core_warnings(cert),
         detail=t("verify.core.detail", n=n),
     )
@@ -5044,7 +5478,9 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
             warnings.append(t("verify.lp.ilp_bound"))
         else:
             xi = exact.parse_all(pt)
-            feasible = all(v >= 0 for v in xi) and all(
+            # One coordinate per column: `zip` below would read a longer
+            # point on its first entries and say nothing about the rest.
+            feasible = len(xi) == len(c) and all(v >= 0 for v in xi) and all(
                 sum(a * v for a, v in zip(row, xi)) <= rhs
                 for row, rhs in zip(A, b))
             value = sum(ci * v for ci, v in zip(c, xi))
@@ -5147,6 +5583,37 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
                          sense=p.get("sense") or "max",
                          names=", ".join(off) or "-",
                          value=exact.serialize(want["objective"]))))
+    # CUTS: each re-derived from the row in this payload that forces every
+    # pair it joins. A cut nothing forces is a constraint added to make the
+    # bound smaller.
+    if p.get("cuts"):
+        from . import cuts as _cuts
+
+        bad_cuts = _cuts.check(p, A, b)
+        checks.append((t("verify.lp.cuts"), not bad_cuts,
+                       t("verify.lp.cuts_detail", n=len(p["cuts"]),
+                         bad=", ".join(bad_cuts[:3]) or "-")))
+        warnings.append(t("verify.lp.cuts_scope", n=len(p["cuts"])))
+
+    # ROUNDED: the integer optimum's bound, recomputed from the certified
+    # dual bound and the objective's integrality -- never read.
+    if p.get("rounded") is not None:
+        got, off = lp_rounding(p, rep["dual_bound"])
+        r = p["rounded"]
+        claimed = exact.to_fraction(r.get("bound")) if isinstance(r, dict) else None
+        checks.append((t("verify.lp.rounded"), got is not None and claimed == got,
+                       t("verify.lp.rounded_detail", bound=r.get("bound") if isinstance(r, dict) else "-",
+                         names=", ".join(off[:4]) or "-")))
+        pt_val = p.get("integral_objective")
+        if got is not None and pt_val is not None \
+                and flip * exact.to_fraction(pt_val) == got:
+            # The gap the relaxation left is closed by rounding: the warning
+            # that the integer optimum is NOT certified would now be false.
+            gap = t("verify.lp.ilp_gap", value=exact.serialize(got),
+                    bound=exact.serialize(flip * rep["objective"]))
+            warnings = [w for w in warnings if w != gap]
+            warnings.append(t("verify.lp.rounded_optimal",
+                              value=exact.serialize(got)))
     detail = (t("verify.lp.exact.detail", value=value)
               if not p.get("integer")
               else t("verify.lp.ilp.detail",
@@ -5219,7 +5686,7 @@ def _check_packing_map(p, A):
         detail = problems[-1]
     warnings = [t("verify.lp.map_scope")]
     if m.get("not_cliques") or m.get("not_edges"):
-        warnings.append(t("verify.lp.map_outside",
+        warnings.append(_note("partial", "verify.lp.map_outside",
                           items=len(m.get("not_cliques") or []),
                           rows=len(m.get("not_edges") or [])))
     return ([(t("verify.lp.map"), not problems, detail)], warnings)
@@ -5302,7 +5769,7 @@ def _verify_lp_dual_float(p) -> VerifyReport:
     ok = nonneg and feas and tight and agrees
     return VerifyReport(
         ok, "lp_dual", True, checks=checks,
-        warnings=[t("verify.lp.float.warning")],
+        warnings=[_note("partial", "verify.lp.float.warning")],
         detail=t("verify.lp.float.detail"),
     )
 
@@ -5525,7 +5992,7 @@ def _verify_bisect(cert, limits) -> VerifyReport:
     warnings = []
     gi, bi = p.get("good_instance"), p.get("bad_instance")
     if gi is None or bi is None:
-        warnings.append(t("verify.bisect.untied"))
+        warnings.append(_note("partial", "verify.bisect.untied"))
     else:
         checks.append((t("verify.bisect.tied_good", t=p["good_t"]),
                        _bisect_holds(gi, good, limits), gi.get("kind")))
@@ -5533,7 +6000,7 @@ def _verify_bisect(cert, limits) -> VerifyReport:
                        _bisect_fails(bi, bad, limits), bi.get("kind")))
         same, why = _bisect_same_family(cert, p, gi, bi)
         if same is None:
-            warnings.append(t("verify.bisect.family_unchecked", why=why))
+            warnings.append(_note("partial", "verify.bisect.family_unchecked", why=why))
         else:
             checks.append((t("verify.bisect.family"), same, why))
 
@@ -5678,8 +6145,43 @@ def _verify_synth_proved(cert, limits) -> VerifyReport:
         rep = verify(Certificate.from_dict(sub), limits)
         free = free and rep.solver_free
         checks.append((label + " ({})".format(sub["kind"]), rep.ok, rep.detail))
+
+    # TIED TO THE CANDIDATE. Each half verified on its own proved nothing
+    # about the other: the universal proof could be of any true statement.
+    # The candidate is the one the search found, and the universal proof
+    # closes the universal statement rebuilt for it from the spec.
+    impl = ((p.get("synth") or {}).get("payload") or {}).get("implementation") or {}
+    found = {n: v[1] for n, v in impl.items()}
+    checks.append((t("verify.synth.candidate"),
+                   bool(found) and p.get("candidate") == found,
+                   str(found)))
+    warnings = []
+    uni = p.get("universal")
+    path, why = _spec_from(cert)
+    if uni is None:
+        pass
+    elif path is None:
+        warnings.append(_note("partial", "verify.synth.untied",
+                              why=t("verify.sweep.replay." + (why or "no_path"))))
+    else:
+        try:
+            import z3
+
+            from .engines.cegis import universal_spec
+            from .spec import load_spec
+
+            uspec = universal_spec(load_spec(path), impl)
+            neg = z3.And(*([f for _n, f in uspec.assumptions]
+                           + [z3.Not(uspec.goal)]))
+            obl = obligations_of(uni)
+            checks.append((t("verify.synth.tied"),
+                           bool(obl) and entails(neg, obl, limits), path.name))
+        except Exception as e:  # noqa: BLE001 -- a spec that no longer builds
+            warnings.append(_note("partial", "verify.synth.untied",
+                                  why="{}: {}".format(type(e).__name__, e)))
     return VerifyReport(
         all(k[1] for k in checks), "synth_proved", free, checks=checks,
+        warnings=warnings,
         detail=t("verify.synth.detail", candidate=p.get("candidate")),
     )
 
@@ -5820,7 +6322,7 @@ def _verify_core_matrix(cert, limits) -> VerifyReport:
 
     warnings = []
     if p.get("inconclusive"):
-        warnings.append(t("verify.matrix.inconclusive", n=len(p["inconclusive"])))
+        warnings.append(_note("partial", "verify.matrix.inconclusive", n=len(p["inconclusive"])))
 
     return VerifyReport(
         all(c[1] for c in checks), "core_matrix", free, checks=checks,
@@ -5837,6 +6339,12 @@ def _verify_sweep_range(cert, limits) -> VerifyReport:
     sizes = p["sizes"]
     checks.append((t("verify.range.ordered"), sizes == sorted(sizes),
                    "n = {}".format(sizes)))
+    # One entry per size it names, each once: emptied, the entries checked
+    # nothing and every size "passed".
+    checks.append((t("verify.range.every_size"),
+                   sorted(e["n"] for e in p["entries"]) == sorted(sizes)
+                   and len(set(sizes)) == len(sizes),
+                   "{} / {}".format(len(p["entries"]), len(sizes))))
 
     for e in p["entries"]:
         sub = e.get("cert")
@@ -5990,7 +6498,7 @@ def _predicate_level(cert, limits, kind):
 
     ok, detail = _replay(cert, limits, kind)
     if ok is None:
-        warnings.append(t("verify.sweep.replay.skipped", reason=detail))
+        warnings.append(_note("partial", "verify.sweep.replay.skipped", reason=detail))
     else:
         checks.append((t("verify.sweep.replay"), ok, detail))
 
@@ -6001,7 +6509,7 @@ def _predicate_level(cert, limits, kind):
     # "only the domain was checked" underneath would read as a lesser problem
     # than "this certificate no longer describes what the spec does".
     if uncertified and ok is not False:
-        warnings.append(t("verify.sweep.uncertified." + level,
+        warnings.append(_note("partial", "verify.sweep.uncertified." + level,
                           n=uncertified, total=evaluations))
     return checks, warnings, level
 
@@ -6024,7 +6532,7 @@ def _by_orbit_checks(p, checks, warnings):
     checks.append((t("verify.orbits.spot"),
                    bool(spot) and all(s_.get("agreed") for s_ in spot),
                    t("verify.orbits.spot_n", n=len(spot))))
-    warnings.insert(0, t("verify.orbits.assumed",
+    warnings.insert(0, _note("assumed", "verify.orbits.assumed",
                          evaluated=p.get("evaluated", "?"), n=len(spot)))
     return checks, warnings
 
@@ -6154,6 +6662,8 @@ VERIFIERS = {
     "affine_semigroup": _verify_affine_semigroup,
     "clique_lp": _verify_clique_lp,
     "parametric_atlas": _verify_parametric_atlas,
+    "polynomial_nonneg": _verify_polynomial_nonneg,
+    "pinned_value": _verify_pinned_value,
     "capacity_profile": _verify_capacity_profile,
     "equitable_quotient": _verify_equitable_quotient,
     "linear_system": _verify_linear_system,

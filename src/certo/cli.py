@@ -106,6 +106,12 @@ def _as_json(res, args) -> dict:
     for keeping.
     """
     out = res.to_dict()
+    if res.certificate is not None and res.certificate.kind == "model":
+        from . import explain
+
+        rows = explain.model_summary(res.certificate)
+        if rows:
+            out["explained"] = rows
     if not getattr(args, "brief", False) or not out.get("certificate"):
         return out
     cert = res.certificate
@@ -117,6 +123,22 @@ def _as_json(res, args) -> dict:
         "summarised": True,
     }
     return out
+
+
+def _print_explained(cert, md=False) -> None:
+    """What each formula does at a counterexample's point, exactly: the rest
+    of the answer, which the reader used to recompute by hand."""
+    from . import explain
+
+    rows = explain.model_summary(cert) if cert is not None else None
+    if not rows:
+        return
+    if md:
+        print(explain.markdown(rows))
+        return
+    print("  " + t("cli.explain.header"))
+    for line in explain.lines(rows):
+        print("    " + line)
 
 
 def emit(res: Result, args) -> int:
@@ -147,6 +169,7 @@ def emit(res: Result, args) -> int:
                            else "cli.witness"))
             for k, v in sorted(ce.items()):
                 print("    {} = {}".format(k, v))
+            _print_explained(res.certificate)
 
         for k, v in sorted(res.meta.items()):
             if k in _HIDDEN_META:
@@ -471,6 +494,67 @@ def cmd_report(args):
     return 0
 
 
+def cmd_pin(args):
+    from .engines import algebra
+    from .spec import PinSpec, load_spec
+
+    spec = load_spec(args.spec, PinSpec)
+    return emit(algebra.pin(spec, limits_from(args), spec_path=args.spec), args)
+
+
+def cmd_nonneg(args):
+    from .engines import algebra
+    from .spec import NonnegSpec, load_spec
+
+    spec = load_spec(args.spec, NonnegSpec)
+    return emit(algebra.nonneg(spec, limits_from(args), spec_path=args.spec), args)
+
+
+def cmd_batch(args):
+    from . import api, batch
+
+    if args.command not in api.runnable():
+        print(t("cli.batch.not_runnable", command=args.command,
+                commands=", ".join(api.runnable())), file=sys.stderr)
+        return 3
+    files = batch.specs_in(args.dir, args.glob)
+    if not files:
+        print(t("cli.batch.empty", dir=args.dir, glob=args.glob), file=sys.stderr)
+        return 3
+    out_dir = args.out or str(Path(args.dir) / "certs")
+    quiet = getattr(args, "json", False)
+
+    def show(row):
+        if quiet:
+            return
+        mark = {"proved": "ok", "refuted": "NO"}.get(row["verdict"] or "", "..")
+        if row["status"] == "error":
+            mark = "XX"
+        print("  [{}] {:<36} {:<12} {:>8.1f} ms  {}".format(
+            mark, Path(row["spec"]).name[:36], row["verdict"] or "error",
+            row["ms"], row.get("error") or ""))
+
+    lim = limits_from(args)
+    rows = batch.run(args.command, files, out_dir, jobs=max(1, args.jobs),
+                     timeout_ms=lim.timeout_ms, gz=args.gz, on_row=show)
+    summ = batch.summary(rows)
+    if quiet:
+        print(json.dumps({"command": args.command, "out": out_dir,
+                          "summary": summ, "rows": rows},
+                         indent=2, ensure_ascii=False))
+    else:
+        print("  " + t("cli.batch.summary", n=summ["specs"],
+                       proved=summ.get("proved", 0),
+                       refuted=summ.get("refuted", 0),
+                       errors=summ["errors"], out=out_dir,
+                       other=summ["specs"] - summ.get("proved", 0)
+                       - summ.get("refuted", 0) - summ["errors"]))
+    if summ["errors"]:
+        return 3
+    conclusive = summ.get("proved", 0) + summ.get("refuted", 0)
+    return 0 if conclusive == summ["specs"] else 2
+
+
 def cmd_atlas(args):
     from .engines import algebra
     from .spec import AtlasSpec, load_spec
@@ -551,7 +635,12 @@ def cmd_mcp(args):
 def cmd_pack(args):
     from . import store
 
-    out = store.pack(args.src, args.out)
+    # `-o`, or `--cert` as on every other command, or DIR.zip beside DIR: the
+    # one command where `--cert` was not the output was the one that refused
+    # to run without being told twice.
+    target = (args.out or getattr(args, "cert", None)
+              or str(Path(args.src).resolve()) + ".zip")
+    out = store.pack(args.src, target)
     if getattr(args, "json", False):
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return 0 if out["count"] else 2
@@ -1003,6 +1092,15 @@ def cmd_doctor(args):
 
     if getattr(args, "repair", False):
         return _repair(args, doctor)
+    if getattr(args, "launcher", None):
+        from . import nosite
+
+        path = nosite.write_launcher(args.launcher)
+        if args.json:
+            print(json.dumps({"launcher": path}, indent=2))
+        else:
+            print("  " + t("doctor.launcher.written", path=path))
+        return 0
 
     rep = doctor.report()
     if args.json:
@@ -1573,7 +1671,9 @@ def cmd_opt(args):
             name, _, w = part.partition("=")
             direction[name.strip()] = w.strip() or "1"
     res = lp.opt(spec, limits_from(args), use_exact=not args.no_exact,
-                 target=args.target, dual_direction=direction)
+                 target=args.target, dual_direction=direction,
+                 round=getattr(args, "round", False),
+                 cuts=getattr(args, "cuts", None))
     rc = emit(res, args)
     if not args.json:
         sol = res.meta.get("solution") or {}
@@ -1979,6 +2079,13 @@ def _tamper(cert, args) -> int:
 
     out = tamper.probe(cert, limits_from(args),
                        excuse=not getattr(args, "tamper_all", False))
+    # The STRUCTURAL forgeries too -- emptied lists, negative indices,
+    # swapped sub-certificates, one value rewritten everywhere -- the shapes
+    # one field at a time cannot reach, and the ones an audit found.
+    st = (tamper.probe_structural(cert, limits_from(args))
+          if out["original_ok"] else {"caught": [], "survived": []})
+    out["structural"] = {"caught": len(st["caught"]),
+                         "survived": st["survived"]}
     if args.json:
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return 0 if out["original_ok"] else 1
@@ -2002,6 +2109,12 @@ def _tamper(cert, args) -> int:
                        names=", ".join(out["unshaped"][:6])))
     if out["excused"]:
         print("  " + t("cli.tamper.excused", n=len(out["excused"])))
+    print("  " + t("cli.tamper.structural", caught=len(st["caught"]),
+                   n=len(st["caught"]) + len(st["survived"])))
+    for lab in st["survived"][:24]:
+        print("    !!  " + lab)
+    if st["survived"]:
+        print("  " + t("cli.tamper.structural_means"))
     return 0
 
 
@@ -2039,8 +2152,18 @@ def cmd_verify(args):
         return _tamper(cert, args)
 
     rep = verify_cert(cert, limits_from(args))
+    if getattr(args, "md", False):
+        _print_explained(cert, md=True)
+        return 0 if rep.ok else 1
     if args.json:
-        print(json.dumps(rep.to_dict(), indent=2, ensure_ascii=False))
+        out = rep.to_dict()
+        if cert.kind == "model":
+            from . import explain
+
+            rows = explain.model_summary(cert)
+            if rows:
+                out["explained"] = rows
+        print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         print(t("cli.verify.header",
                 state=t("cli.verify.valid" if rep.ok else "cli.verify.invalid"),
@@ -2053,12 +2176,17 @@ def cmd_verify(args):
                                        "  ({})".format(detail) if detail else ""))
         for w in rep.warnings:
             print("  " + t("cli.warning", text=w))
+        n = len(rep.partial) if rep.degree == "partial" else len(rep.assumed)
+        print("  " + t("cli.verify.degree", degree=rep.degree,
+                       what=t("verify.degree." + rep.degree, n=n)))
         if rep.detail:
             # The detail describes what the certificate SAYS about itself.
             # After a failure, a bare trailing summary reads as an
             # endorsement of the thing the checks above just refuted.
             print("  " + (rep.detail if rep.ok
                           else t("cli.verify.despite", detail=rep.detail)))
+        if rep.ok:
+            _print_explained(cert)
     return 0 if rep.ok else 1
 
 
@@ -2551,6 +2679,16 @@ def build_parser():
     sp.add_argument("--by-type", action="store_true", dest="by_type",
                     help="with a PackingSpec: also report the optimum of each "
                          "item kind on its own, to see if mixing buys anything")
+    sp.add_argument("--cuts", choices=["clique"],
+                    help="add the clique cuts of the conflict graph -- pairs "
+                         "of 0/1 variables some row forbids together -- each "
+                         "recorded with the row that forces it. The bound is "
+                         "then on the INTEGER optimum; with --round, rounded")
+    sp.add_argument("--round", action="store_true",
+                    help="with an integer objective (integer coefficients on "
+                         "integer variables): also certify `integer optimum "
+                         "<= floor(LP)` (`>= ceil` for a min), recomputed by "
+                         "verify from the dual")
     sp.set_defaults(func=cmd_opt)
 
     sp = add("mixed", "a discrete skeleton found by search, with the "
@@ -2652,6 +2790,31 @@ def build_parser():
                     help="where to write the folder (default: "
                          "./certo-report-<time>-<triage>)")
     sp.set_defaults(func=cmd_report)
+    sp = add("batch", "every spec in a directory through ONE command, in one "
+                      "process (or N with --jobs): one certificate per spec, "
+                      "start-up paid once")
+    sp.add_argument("command", help="the command to run on each spec, e.g. "
+                                    "parametric")
+    sp.add_argument("dir", help="directory of spec files")
+    sp.add_argument("-o", "--out", metavar="DIR",
+                    help="where the certificates go (default: DIR/certs), "
+                         "named after each spec")
+    sp.add_argument("--glob", default="*.py", metavar="PATTERN",
+                    help="which files are specs (default *.py)")
+    sp.add_argument("--jobs", type=int, default=1, metavar="N",
+                    help="worker processes, each started once")
+    sp.add_argument("--gz", action="store_true",
+                    help="write .json.gz certificates")
+    sp.set_defaults(func=cmd_batch)
+    sp = add("pin", "a value pinned from both sides: cp(G) <= X by a cover, "
+                    ">= X by a clique LP rounded up, both tied to ONE graph")
+    sp.add_argument("spec", help=".py file returning a PinSpec")
+    sp.set_defaults(func=cmd_pin)
+    sp = add("nonneg", "a polynomial is >= 0 on a box, or on the part of it "
+                       "a region cuts: Bernstein coefficients, subdivided, "
+                       "or the point where it fails")
+    sp.add_argument("spec", help=".py file returning a NonnegSpec")
+    sp.set_defaults(func=cmd_nonneg)
     sp = add("atlas", "a parameter domain covered by boxes, each certified by "
                       "`parametric`, and ONE statement for the whole: the "
                       "covering and every piece rechecked")
@@ -2722,8 +2885,10 @@ def build_parser():
                      "manifest: each member compressed and readable alone")
     sp.add_argument("src", help="directory of certificates (searched "
                                 "recursively; .json and .json.gz)")
-    sp.add_argument("-o", "--out", required=True, metavar="FILE.zip",
-                    help="the archive to write")
+    sp.add_argument("-o", "--out", metavar="FILE.zip",
+                    help="the archive to write; `--cert` says the same, as "
+                         "on every other command, and without either it is "
+                         "DIR.zip beside the directory")
     sp.set_defaults(func=cmd_pack)
 
     sp = add("mcp", "which certo MCP servers are running and which run old "
@@ -2783,6 +2948,11 @@ def build_parser():
                          "virtual environment's interpreter, after checking "
                          "it imports certo and mcp and runs no start-up hook "
                          "known to kill interpreters. Creates nothing")
+    sp.add_argument("--launcher", metavar="DIR",
+                    help="write `certo-nosite` into DIR: certo started without "
+                         "the `.pth` hooks doctor warns about -- their paths "
+                         "kept, their code not run. One file, written only "
+                         "when asked; the hook still serves every other program")
     sp.set_defaults(func=cmd_doctor)
 
     sp = add("ideal", "polynomial equations: refute them outright, or certify "
@@ -3008,6 +3178,9 @@ def build_parser():
                          "certo records as descriptive for its OWN kinds -- "
                          "which is what you want for a certificate that is "
                          "not one of certo's")
+    sp.add_argument("--md", action="store_true",
+                    help="for a counterexample: what each formula does at its "
+                         "point, as a Markdown table to paste into a proof")
     sp.set_defaults(func=cmd_verify)
 
     sp = add("export", "dump the spec to SMT-LIB2 or DIMACS, or a "

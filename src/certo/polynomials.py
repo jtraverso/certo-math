@@ -101,7 +101,25 @@ class Poly:
     def __hash__(self):
         return hash((self.vars, tuple(sorted(self.terms.items()))))
 
+    def _coerce(self, other):
+        """`other` as a polynomial of THIS ring: a Poly over the same
+        variables, or an exact number. A Poly over other variables is refused:
+        its exponent tuples mean something else, and adding them position by
+        position silently combined x with y."""
+        if isinstance(other, Poly):
+            if other.vars is not self.vars and other.vars != self.vars:
+                raise ValueError(t("poly.ring_mismatch",
+                                   got=", ".join(other.vars),
+                                   want=", ".join(self.vars)))
+            return other
+        if isinstance(other, (int, Fraction)) and not isinstance(other, bool):
+            return Poly.const(self.vars, other)
+        return NotImplemented
+
     def __add__(self, other):
+        other = self._coerce(other)
+        if other is NotImplemented:
+            return other
         out = dict(self.terms)
         for e, c in other.terms.items():
             out[e] = out.get(e, Fraction(0)) + c
@@ -109,16 +127,48 @@ class Poly:
                 del out[e]
         return Poly._exact(self.vars, out)
 
+    __radd__ = __add__
+
+    def __neg__(self):
+        return self.scaled(-1)
+
     def __sub__(self, other):
+        other = self._coerce(other)
+        if other is NotImplemented:
+            return other
         return self + other.scaled(-1)
 
+    def __rsub__(self, other):
+        other = self._coerce(other)
+        if other is NotImplemented:
+            return other
+        return other + self.scaled(-1)
+
+    def __pow__(self, k):
+        """`p ** k` for an integer k >= 0, by repeated squaring."""
+        if isinstance(k, bool) or not isinstance(k, int) or k < 0:
+            raise ValueError(t("poly.pow_exponent", k=k))
+        out, base = Poly.const(self.vars, 1), self
+        while k:
+            if k & 1:
+                out = out * base
+            k >>= 1
+            if k:
+                base = base * base
+        return out
+
     def __mul__(self, other):
+        other = self._coerce(other)
+        if other is NotImplemented:
+            return other
         out = {}
         for e1, c1 in self.terms.items():
             for e2, c2 in other.terms.items():
                 e = tuple(a + b for a, b in zip(e1, e2))
                 out[e] = out.get(e, Fraction(0)) + c1 * c2
         return Poly._exact(self.vars, {e: c for e, c in out.items() if c})
+
+    __rmul__ = __mul__
 
     def scaled(self, c):
         c = Fraction(c)
@@ -178,8 +228,19 @@ class Poly:
 
     @classmethod
     def parse(cls, variables, data) -> "Poly":
-        return cls(variables, {tuple(int(x) for x in k.split(" ")): Fraction(v)
-                               for k, v in data.items()})
+        """From `serialize`'s form. Every exponent must have one entry per
+        variable: a ring with a variable dropped used to read the same
+        exponents position by position, and the polynomial silently became
+        another one."""
+        variables = tuple(variables)
+        terms = {}
+        for k, v in data.items():
+            e = tuple(int(x) for x in k.split(" "))
+            if len(e) != len(variables):
+                raise ValueError(t("poly.exponent_length", got=len(e),
+                                   want=len(variables)))
+            terms[e] = Fraction(v)
+        return cls(variables, terms)
 
 
 # ---------------------------------------------------------------------------

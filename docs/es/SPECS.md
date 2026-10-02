@@ -58,6 +58,8 @@ devuelven, y una hipótesis sin nombre es una sobre la que no te pueden avisar.
 | `SOSSpec` | `sos` |
 | `NumberSpec` | `number` |
 | `BoundSpec` | `bounds` |
+| `NonnegSpec` | `nonneg` |
+| `PinSpec` | `pin` |
 | `OrderSpec` | `order` |
 | `BisectSpec` | `bisect` |
 

@@ -9029,7 +9029,8 @@ def test_options_come_from_the_engine_signature():
     """Derived, so it cannot drift from what the engine takes."""
     from certo import api
 
-    assert api.options("opt") == ["dual_direction", "target", "use_exact"]
+    assert api.options("opt") == ["cuts", "dual_direction", "round", "target",
+                                  "use_exact"]
     assert "use_geng" in api.options("sweep")
     assert api.options("range") == ["var"]
 
@@ -11572,7 +11573,8 @@ def _atlas_piece(box, **kw):
     return ParametricSpec(parameters={"p": 0, "q": 0}, objective={"x": one},
                           constraints=[("c", {"x": p - q + one.scaled(2)},
                                         "<=", one)],
-                          dual={"c": Fraction(1)}, box=box, claim=one, **kw)
+                          **dict({"dual": {"c": Fraction(1)}, "box": box,
+                                  "claim": one}, **kw))
 
 
 def test_an_atlas_joins_boxes_into_one_statement_and_names_the_sliver():
@@ -11626,14 +11628,57 @@ def test_an_atlas_refuses_pieces_that_are_not_one_statement():
     other.objective = {"x": one.scaled(Fraction(1, 2))}
     r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, other]), LIM)
     assert r.certificate is None and "program" in r.meta["failed"]
+    # A piece CLAIMING less than the atlas but CERTIFYING its bound 1 still
+    # gives the claim on its box: the atlas reads the bound, not the claim.
     looser = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)})
     looser.claim = one.scaled(2)
     r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, looser]), LIM)
+    assert r.verdict is Verdict.PROVED, r.detail
+    # A piece whose certified bound is weaker (the dual 2 bounds by 2) does not.
+    weaker = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)},
+                          dual={"c": Fraction(2)}, claim=None)
+    r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, weaker]), LIM)
     assert r.certificate is None and "claim" in r.meta["failed"]
     assuming = _atlas_piece({"p": (0, 1), "q": (Fraction(1, 2), 1)},
                             region=[("x", p - q + one)])
     r = algebra.atlas(AtlasSpec(domain=dom, pieces=[a, assuming]), LIM)
     assert r.certificate is None and "region" in r.meta["failed"]
+
+
+def test_an_atlas_carries_its_claim_to_pieces_certified_without_one():
+    """Reported: `claim=` on the AtlasSpec still answered "needs a claim" --
+    the direction was read from the pieces alone. The atlas's claim now
+    reaches a piece through its certified bound: T - B >= 0 on its box, by
+    Bernstein, recomputed by `verify` from the piece's own bound."""
+    import json as _json
+
+    from certo import AtlasSpec
+    from certo.certificate import Certificate
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    R = ("p", "q")
+    dom = {"p": (0, 1), "q": (0, 1)}
+    h = Fraction(1, 2)
+    bare = [_atlas_piece(b, claim=None) for b in (
+        {"p": (0, h), "q": (0, 1)}, {"p": (h, 1), "q": (0, 1)})]
+    r = algebra.atlas(AtlasSpec(domain=dom, pieces=bare), LIM)
+    assert r.certificate is None and "claim=" in r.detail
+    for claim in (2, ("<=", Fraction(3, 2)), 1):
+        r = algebra.atlas(AtlasSpec(domain=dom, claim=claim, pieces=bare), LIM)
+        assert r.verdict is Verdict.PROVED, (claim, r.detail)
+        assert verify(r.certificate, LIM).ok
+    for claim in (Fraction(1, 2), (">=", 0)):
+        r = algebra.atlas(AtlasSpec(domain=dom, claim=claim, pieces=bare), LIM)
+        assert r.certificate is None and "claim" in r.meta["failed"], claim
+    r = algebra.atlas(AtlasSpec(domain=dom, claim=2, pieces=bare), LIM)
+    good = _json.loads(_json.dumps(r.certificate.to_dict()))
+    forged = _json.loads(_json.dumps(good))
+    forged["payload"]["claim"]["target"] = Poly.const(R, h).serialize()
+    assert not verify(Certificate.from_dict(forged), LIM).ok
+    forged = _json.loads(_json.dumps(good))
+    forged["payload"]["pieces"][0].pop("claim_by")
+    assert not verify(Certificate.from_dict(forged), LIM).ok
 
 
 def test_an_atlas_references_pieces_by_path_and_digest():
@@ -14249,6 +14294,102 @@ def test_the_pair_clique_parts_returns_is_refused_by_name():
     else:
         raise AssertionError("the pair was accepted")
     assert check(edges, pair[0])["ok"]
+
+
+def test_the_nosite_launcher_keeps_pth_paths_and_skips_their_code():
+    """Reported three times: the default `certo` pays the `.pth` hook doctor
+    warns about. The launcher starts Python with -S and puts the paths back
+    itself; a `.pth` line that runs code is the one thing it leaves out."""
+    import tempfile
+
+    from certo import nosite
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        (root / "extra").mkdir()
+        (root / "hook.pth").write_text("import os; os.environ['CERTO_HOOK_RAN'] = '1'\n"
+                                       "extra\n# a comment\n", encoding="utf-8")
+        got = nosite._paths_from_pth(str(root))
+        assert got == [str((root / "extra").resolve())] or \
+            [os.path.normcase(p) for p in got] == [os.path.normcase(
+                os.path.normpath(str(root / "extra")))]
+        assert "CERTO_HOOK_RAN" not in os.environ
+    for windows in (True, False):
+        text = nosite.launcher_text(["/a/site-packages"], python="py",
+                                    windows=windows)
+        assert " -S -c " in text and "certo.nosite import boot" in text
+        assert ("%*" in text) == windows and ('"$@"' in text) != windows
+
+
+def test_a_batch_runs_many_specs_in_one_process_and_in_order():
+    """Reported: 179 lemma pieces were 179 processes. `batch` runs a
+    directory through one command; every certificate is self-checked as a
+    single run is, the rows come back in the directory's order with one
+    process or several, and a broken spec is a row, not a crash."""
+    import tempfile
+    import textwrap
+
+    from certo import batch
+    from certo.certificate import Certificate
+    from certo import store
+
+    src = textwrap.dedent("""\
+        from fractions import Fraction
+        from certo import ParametricSpec
+        from certo.polynomials import Poly
+        R = ('p',)
+        p = Poly.var(R, 'p'); ONE = Poly.const(R, 1)
+        def spec():
+            return ParametricSpec(parameters={'p': 0}, objective={'x': ONE},
+                constraints=[('c', {'x': p + ONE.scaled(2)}, '<=', ONE)],
+                dual={'c': Fraction(1, 2)}, box={'p': (%s, %s)},
+                claim=ONE.scaled(Fraction(1, 2)))
+        """)
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp)
+        for i in range(4):
+            (d / "box{}.py".format(i)).write_text(
+                src % ("Fraction(%d, 4)" % i, "Fraction(%d, 4)" % (i + 1)),
+                encoding="utf-8")
+        (d / "zz_broken.py").write_text("def spec():\n    return 42\n",
+                                        encoding="utf-8")
+        files = batch.specs_in(d)
+        one = batch.run("parametric", files, d / "one")
+        two = batch.run("parametric", files, d / "two", jobs=2)
+        assert [r["spec"] for r in one] == [r["spec"] for r in two] == files
+        assert [r["verdict"] for r in one] == [r["verdict"] for r in two]
+        assert batch.summary(one) == {"specs": 5, "errors": 1, "proved": 4}
+        assert one[-1]["status"] == "error" and "TypeError" in one[-1]["error"]
+        for r in one[:4]:
+            assert verify(Certificate.from_dict(store.read_json(r["certificate"])),
+                          LIM).ok
+
+
+def test_a_counterexample_comes_back_as_mathematics():
+    """Reported: a refutation printed `a = 2, b = 3` and the reader recomputed
+    the rest. Each formula is evaluated exactly at the point: both sides, the
+    slack, the margin by which the claim fails, and which inequality is
+    ACTIVE -- computed from the certificate, never stored."""
+    import z3
+
+    from certo import Spec, explain
+    from certo.engines import smt
+
+    a, b = z3.Reals("a b")
+    s = Spec()
+    s.assume("dom", z3.And(a >= 1, b == 2 * a))
+    s.assume("cap", a <= 1)
+    s.claim(a * b <= 1)
+    cert = smt.prove(s, LIM).certificate
+    assert cert.kind == "model"
+    rows = explain.model_summary(cert)
+    by = {r["formula"]: r for r in rows}
+    assert by["a >= 1"]["active"] and by["a <= 1"]["active"]
+    assert by["b == 2*a"]["lhs"] == "2" and by["b == 2*a"]["holds"]
+    claim = by["a*b <= 1"]
+    assert claim["fails"] and claim["lhs"] == "2" and claim["by"] == "1"
+    assert "| `a*b <= 1` | 2 <= 1 |" in explain.markdown(rows)
+    assert "payload" in cert.to_dict() and "explained" not in cert.payload
 
 
 def test_a_partition_that_fails_decides_nothing():

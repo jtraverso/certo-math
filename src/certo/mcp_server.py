@@ -299,6 +299,33 @@ of these objects. You can pass the file (`spec_path`) or the code itself
     # ASSUMES MONOTONICITY in t. It checks the endpoints and warns if they
     # do not line up.
 
+## NonnegSpec -> nonneg (a polynomial >= 0 on a box)
+    from fractions import Fraction
+    from certo import NonnegSpec
+    from certo.polynomials import Poly
+    x = Poly.var(("x",), "x")                    # `**`, `-`, ints work on Poly
+    def spec():
+        return NonnegSpec(poly=Fraction(3, 10) - x, box={"x": (0, Fraction(1, 2))},
+                          region=[("r", Fraction(3, 40) - x**2)])   # g >= 0
+    # PROVED: Bernstein coefficients. REFUTED: a point and its exact value.
+    # A region writes an algebraic endpoint exactly: [0, sqrt(3/40)] here.
+
+## AtlasSpec -> atlas (N box certificates, ONE statement)
+    AtlasSpec(domain={"p": (0, 1)}, claim=("<=", T), pieces=["box1.json", ...])
+    # ONE program for every piece. A piece proving its own bound B counts
+    # where T - B >= 0 on its box. `region=` cuts the domain (scope).
+
+## PinSpec -> pin (cp(G) = X, from both sides)
+    PinSpec(edges=E, max_size=3, upper=CoverSpec(..., cliques=True),
+            lower=CliqueLPSpec(edges=E, problem="partition",
+                               weight={"constant": 1}, max_size=3))
+    # Both halves must be about THE SAME edges. A lower bound from your own
+    # LP (`opt` with round=True) needs assumption="why it bounds cp", and is
+    # then RELATIVE.
+
+Many small specs: `batch(command, directory)` runs them all in one process.
+`opt` takes round=True (integer optimum <= floor(LP)) and cuts="clique".
+
 ## Limits (every command)
     timeout_ms, rlimit (z3's deterministic work unit), conflict_budget (SAT),
     max_iterations (synth). Determinism comes from rlimit/conflict_budget,
@@ -1022,7 +1049,8 @@ async def synth(spec_path: str | None = None, spec_source: str | None = None,
 @_guard
 async def opt(spec_path: str | None = None, spec_source: str | None = None,
               timeout_ms: int = 10_000, by_type: bool = False,
-              explore: bool = False) -> dict:
+              explore: bool = False, round: bool = False,
+              cuts: str | None = None) -> dict:
     from .engines import lp
     from .packing import PackingSpec
     from .spec import LPSpec, load_spec
@@ -1042,7 +1070,7 @@ async def opt(spec_path: str | None = None, spec_source: str | None = None,
 
         return _emit(await _off(ex.lp, "opt", sp, _limits(timeout_ms)),
                      spec_file=f)
-    res = await _off(lp.opt, sp, _limits(timeout_ms))
+    res = await _off(lp.opt, sp, _limits(timeout_ms), round=round, cuts=cuts)
     out = _emit(res, spec_file=f)
     if packing is not None:
         from .packing import loads_from_dual
@@ -1713,6 +1741,77 @@ async def atlas(spec_path: str | None = None, spec_source: str | None = None,
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), AtlasSpec)
     res = await _off(algebra.atlas, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
+    "BATCH: every spec file in a workspace directory through ONE command, in "
+    "this server's process (or `jobs` worker processes): one certificate per "
+    "spec, written beside the others and named after it, each self-checked "
+    "as a single run is. Rows in the directory's order. Nothing is joined "
+    "into one claim -- that is `atlas` (boxes) or `status --manifest`."))
+@_guard
+async def batch(command: str, directory: str, pattern: str = "*.py",
+                out_directory: str | None = None, jobs: int = 1,
+                timeout_ms: int = 60_000) -> dict:
+    from . import api
+    from . import batch as B
+    from .i18n import t as _t
+
+    if command not in api.runnable():
+        return {"ok": False, "error": _t("cli.batch.not_runnable", command=command,
+                                        commands=", ".join(api.runnable()))}
+    d = _resolve(directory)
+    out = _resolve(out_directory) if out_directory else d / "certs"
+    files = B.specs_in(d, pattern)
+    rows = await _off(B.run, command, files, out, max(1, jobs), timeout_ms)
+    ws = _workspace()
+    for r in rows:
+        for k in ("spec", "certificate"):
+            if r.get(k):
+                try:
+                    r[k] = str(Path(r[k]).resolve().relative_to(ws))
+                except ValueError:
+                    pass
+    return {"command": command, "summary": B.summary(rows),
+            "rows": rows[:_CAP], "rows_total": len(rows)}
+
+
+@mcp.tool(description=(
+    "PIN: the clique partition number of a graph pinned from both sides. "
+    "`upper` an exact cover by cliques (cp <= X), `lower` a clique LP "
+    "(cp >= ceil(L)) -- certificates or specs -- both re-verified and shown "
+    "to be about the SAME edge list before their numbers are compared. Equal: "
+    "cp = X PROVED. Otherwise the range, certified. A lower bound from an "
+    "`opt --round` of your own program needs `assumption=`, and is relative."))
+@_guard
+async def pin(spec_path: str | None = None, spec_source: str | None = None,
+              timeout_ms: int = 120_000) -> dict:
+    from .engines import algebra
+    from .spec import PinSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), PinSpec)
+    res = await _off(algebra.pin, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
+    "NONNEG: a polynomial is >= 0 on a box, or on the part of it a region "
+    "`g >= 0` cuts. PROVED carries Bernstein coefficients on a subdivision "
+    "(and constant multipliers of the region's conditions); REFUTED carries a "
+    "point of the box inside the region with the exact negative value. A "
+    "region also writes an algebraic endpoint exactly: [0, sqrt(3/40)] is the "
+    "box [0, 1/2] with 3/40 - x^2 >= 0. Solver-free."))
+@_guard
+async def nonneg(spec_path: str | None = None, spec_source: str | None = None,
+                 timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import NonnegSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), NonnegSpec)
+    res = await _off(algebra.nonneg, spec, _limits(timeout_ms), str(f))
     return _emit(res, spec_file=f)
 
 

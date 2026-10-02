@@ -66,6 +66,8 @@ abajo es el mapa; la cabecera es el territorio.
 | `equitable_quotient` | la partición, ambas regularidades, y los dos mapas | **sí**, conteo exacto |
 | `integer_matrix` | rango, determinante, Hermite, Smith, con las transformaciones | **sí**, multiplicación de matrices |
 | `clique_lp` | un óptimo LP sobre todas las cliques de un grafo, sin listarlas | **sí**, aritmética racional y la búsqueda de precios repetida |
+| `polynomial_nonneg` | un polinomio >= 0 en una caja (cortada por una región), o el punto donde es negativo | **sí**, coeficientes de Bernstein recalculados, o una evaluación |
+| `pinned_value` | `cp_r(G)` entre dos cotas certificadas -- iguales, o el rango | **sí**, ambas mitades re-verificadas y atadas a una lista de aristas |
 | `parametric_atlas` | una cota paramétrica en todo un dominio, a partir de N certificados en N cajas | **sí**, cada pieza re-verificada y el cubrimiento recalculado |
 | `symmetric_inertia` | la inercia de una matriz simétrica racional, PSD, y un vector que refuta PSD | **sí**, dos productos racionales: `S A Sᵀ = D`, `S S⁻¹ = I` |
 | `affine_semigroup` | puntiagudo, pertenencia al cono, al grupo y al semigrupo, refutación de normalidad, base de Hilbert propuesta | **sí**, las negativas rehaciendo la búsqueda acotada |

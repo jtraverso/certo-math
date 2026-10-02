@@ -528,7 +528,8 @@ class Vectors:
 
 
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
-        target=None, dual_direction=None, _vectors_only: bool = False) -> Result:
+        target=None, dual_direction=None, _vectors_only: bool = False,
+        round: bool = False, cuts=None) -> Result:
     """`_vectors_only=True` is for callers that keep only the dual and the
     primal -- branch and bound, which derives every node's program from the
     root. Serialising the whole matrix into a certificate at every node was
@@ -537,6 +538,24 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     same one; only the artefact is smaller."""
     lim = limits or Limits()
     t0 = time.perf_counter()
+
+    # `cuts="clique"`: the conflict graph's clique cuts, derived from the
+    # rows and added, each recorded with the row that forces every pair --
+    # so `verify` re-derives them. The LP with them bounds the INTEGER
+    # optimum, and the detail says that rather than "the optimum".
+    if cuts:
+        if cuts != "clique":
+            raise ValueError(t("engine.opt.cuts_kind", kind=cuts))
+        from ..cuts import clique_cuts
+
+        aug, found = clique_cuts(spec)
+        res = opt(aug, lim, use_exact=use_exact, target=target,
+                  dual_direction=dual_direction, round=round)
+        if res.certificate is not None:
+            res.certificate.payload["cuts"] = found
+        res.meta["cuts"] = len(found)
+        res.detail = t("engine.opt.with_cuts", n=len(found)) + " " + (res.detail or "")
+        return res
 
     for v, (lo, hi) in spec.bounds.items():
         if lo is not None and lo < 0:
@@ -756,9 +775,39 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                 cert = None
                 detail = t("engine.opt.unverifiable", value=repr(objective))
 
+    # `--round`: the integer optimum's bound, from the certified dual bound
+    # and an integral objective -- the step users did by hand beside an LP.
+    rounded = None
+    if round:
+        if cert is None or not exact_ok:
+            detail = detail + " -- " + t("engine.opt.round_inexact")
+        else:
+            from ..certificate import lp_rounding
+
+            dual_bound = sum((bi * yi for bi, yi in zip(
+                exact.parse_all(cert.payload["b"]),
+                exact.parse_all(cert.payload["dual"]))), exact.to_fraction(0))
+            got, off = lp_rounding(cert.payload, dual_bound)
+            if got is None:
+                detail = detail + " -- " + t("engine.opt.cannot_round",
+                                             names=", ".join(off[:4]))
+            else:
+                rounded = exact.serialize(got)
+                cert.payload["rounded"] = {"bound": rounded}
+                flip = -1 if spec.sense == "min" else 1
+                ip = cert.payload.get("integral_objective")
+                if ip is not None and flip * exact.to_fraction(ip) == got:
+                    detail = t("engine.opt.rounded_optimal", value=rounded,
+                               lp=exact.serialize(flip * dual_bound))
+                else:
+                    detail = detail + " -- " + t(
+                        "engine.opt.rounded", bound=rounded,
+                        rel="<=" if spec.sense != "min" else ">=",
+                        lp=exact.serialize(flip * dual_bound))
+
     return Result(
         "opt", Status.SAT, Verdict.SATISFIABLE, engine(), ms(), cert, detail,
-        meta={"objective": meta_obj,
+        meta={"objective": meta_obj, "rounded": rounded,
               "lp_solver": engine(),
               "objective_float": (None if meta_obj is None
                                   else float(exact.to_fraction(meta_obj))),

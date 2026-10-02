@@ -159,6 +159,19 @@ def prove_candidate(spec, impl_assign, limits: Limits | None = None):
     from . import smt
 
     values = {n: v for n, (_, v) in impl_assign.items()}
+    uspec = universal_spec(spec, impl_assign)
+    res = smt.prove(uspec, limits)
+    res.command = "prove_candidate"
+    res.meta["candidate"] = values
+    return res
+
+
+def universal_spec(spec, impl_assign):
+    """The universal statement for THIS candidate: the spec's `universal`, or
+    its correctness with the candidate substituted under
+    `universal_behavior`. One definition, used by the producer and by
+    `verify`, which rebuilds it to tie the proof to the candidate."""
+    values = {n: v for n, (_, v) in impl_assign.items()}
 
     if spec.universal is not None:
         uspec = spec.universal(values)
@@ -173,8 +186,4 @@ def prove_candidate(spec, impl_assign, limits: Limits | None = None):
         uspec.claim(z3.substitute(corr, *subs))
     else:
         raise ValueError(t("engine.synth.no_universal"))
-
-    res = smt.prove(uspec, limits)
-    res.command = "prove_candidate"
-    res.meta["candidate"] = values
-    return res
+    return uspec

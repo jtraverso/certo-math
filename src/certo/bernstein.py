@@ -268,6 +268,8 @@ def _region_leaf_holds(poly, box, leaf, terms):
 
     try:
         d = tuple(int(x) for x in leaf["deg"])
+        if len(d) != len(poly.vars):
+            return False
         rest = poly
         for name, v in (leaf.get("region") or {}).items():
             lam = Fraction(v)
@@ -295,6 +297,11 @@ def check(poly, box, tree, max_depth=64, terms=None):
         try:
             d = (degrees_of(poly) if tree is None
                  else tuple(int(x) for x in tree["deg"]))
+            # One degree per variable, none below the polynomial's own: a
+            # longer list was read on its first entries.
+            if len(d) != len(poly.vars) or any(
+                    x < y for x, y in zip(d, degrees_of(poly))):
+                return False
             return all(v >= 0 for v in coefficients(poly, box, d).values())
         except (KeyError, TypeError, ValueError):
             return False

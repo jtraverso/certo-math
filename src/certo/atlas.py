@@ -235,6 +235,96 @@ def resolve(record):
     return None, t("atlas.piece_missing", path=raw)
 
 
+def piece_bound(p, ring):
+    """`(B, upper)`: the bound a parametric piece certifies and whether it
+    bounds the optimum from ABOVE -- or None for a piece whose witness carries
+    no single bound (a split into sub-pieces)."""
+    from .polynomials import Poly
+
+    witness = p.get("witness", "dual")
+    if witness not in ("dual", "primal") or p.get("bound") is None:
+        return None
+    minimising = p.get("sense", "max") == "min"
+    return Poly.parse(ring, p["bound"]), (witness == "dual") != minimising
+
+
+def claim_gap(p, ring, claim):
+    """What must be >= 0 on a piece's box for ITS bound to give the atlas's
+    claim: `T - B` for `<=`, `B - T` for `>=`. None when the piece bounds the
+    optimum from the other side, so no bound of it can give the claim."""
+    from .polynomials import Poly
+
+    got = piece_bound(p, ring)
+    if got is None or claim.get("relation") not in ("<=", ">="):
+        return None
+    bound, upper = got
+    if upper != (claim["relation"] == "<="):
+        return None
+    target = Poly.parse(ring, claim["target"])
+    return (target - bound) if upper else (bound - target)
+
+
+def _region_terms(conditions):
+    from . import bernstein
+
+    return bernstein.region_terms(conditions) if conditions else []
+
+
+def carry_claim(p, ring, claim, conditions, depth):
+    """`claim_by` for a piece certified with another bound, or none: the
+    Bernstein tree showing `T - B >= 0` on its box (cut by the domain's
+    region), or the shift test on its ray. None when it does not hold."""
+    from fractions import Fraction
+
+    from . import bernstein
+
+    gap = claim_gap(p, ring, claim)
+    if gap is None:
+        return None
+    if p.get("box"):
+        box = {n: (Fraction(lo), Fraction(hi)) for n, (lo, hi) in p["box"].items()}
+        terms = _region_terms(conditions)
+        ok, tree = (bernstein.nonneg_region(gap, box, terms, depth) if terms
+                    else bernstein.nonneg(gap, box, depth))
+        return {"tree": tree} if ok else None
+    from .parametric import nonneg_on_region, region_terms
+
+    lows = p["parameters"]
+    ok = nonneg_on_region(gap, lows, region_terms(conditions, lows))[0]
+    return {"ray": True} if ok else None
+
+
+def carried_holds(p, ring, claim, conditions, by) -> bool:
+    """The claim carried to a piece, RECOMPUTED: the gap from the verified
+    piece's own bound and the atlas's target -- never read from the record --
+    and its tree checked leaf by leaf."""
+    from fractions import Fraction
+
+    from . import bernstein
+
+    gap = claim_gap(p, ring, claim)
+    if gap is None or not isinstance(by, dict):
+        return False
+    if p.get("box"):
+        if "tree" not in by:
+            return False
+        box = {n: (Fraction(lo), Fraction(hi)) for n, (lo, hi) in p["box"].items()}
+        terms = dict(_region_terms(conditions)) or None
+        return bernstein.check(gap, box, by["tree"], terms=terms)
+    if by.get("ray") is not True:
+        return False
+    from .parametric import nonneg_on_region, region_terms
+
+    lows = p["parameters"]
+    return nonneg_on_region(gap, lows, region_terms(conditions, lows))[0]
+
+
+def program_diff(a, b) -> list:
+    """Which parts of two programs differ: the words a user can act on."""
+    return [k for k in ("parameters", "objective", "constraints", "sense",
+                        "free") if a.get(k) != b.get(k)]
+
+
 def check_pieces(payload, certs, limits=None) -> list:
     """`(label, ok, detail)` for the per-piece claims, from resolved certs."""
     from .certificate import verify
@@ -247,6 +337,9 @@ def check_pieces(payload, certs, limits=None) -> list:
     out = []
     bad_verify, other_program, other_claim, other_region, not_param = \
         [], [], [], [], []
+    records = payload.get("pieces") or [{}] * len(certs)
+    conditions = conditions_of(payload)
+    differs = set()
     for k, c in enumerate(certs):
         if c is None:
             bad_verify.append(str(k))
@@ -259,9 +352,15 @@ def check_pieces(payload, certs, limits=None) -> list:
             bad_verify.append(str(k))
         if program_of(p) != want:
             other_program.append(str(k))
+            differs.update(program_diff(program_of(p), want))
         pc = p.get("claim") or {}
-        if not (pc.get("holds") is True and pc.get("target") == claim["target"]
-                and pc.get("relation") == claim["relation"]):
+        same = (pc.get("holds") is True and pc.get("target") == claim["target"]
+                and pc.get("relation") == claim["relation"])
+        # A piece certified with ANOTHER bound, or none, still gives the claim
+        # where `T - B >= 0` on its box -- recomputed here from its own bound.
+        by = records[k].get("claim_by") if k < len(records) else None
+        if not same and not (by is not None and carried_holds(
+                p, ring, claim, conditions, by)):
             other_claim.append(str(k))
         own = p.get("region") or {}
         mine = {Poly.parse(ring, g) for g in region.values()}
@@ -269,8 +368,12 @@ def check_pieces(payload, certs, limits=None) -> list:
             other_region.append(str(k))
     out.append(("kind", not not_param, ", ".join(not_param[:4]) or "-"))
     out.append(("verified", not bad_verify, ", ".join(bad_verify[:4]) or "-"))
-    out.append(("program", not other_program, ", ".join(other_program[:4]) or "-"))
-    out.append(("claim", not other_claim, ", ".join(other_claim[:4]) or "-"))
+    out.append(("program", not other_program,
+                t("atlas.program_differs", pieces=", ".join(other_program[:4]),
+                  what=", ".join(sorted(differs))) if other_program else "-"))
+    out.append(("claim", not other_claim,
+                t("atlas.claim_not_given", pieces=", ".join(other_claim[:4]),
+                  relation=claim["relation"]) if other_claim else "-"))
     out.append(("region", not other_region, ", ".join(other_region[:4]) or "-"))
     return out
 

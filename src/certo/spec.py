@@ -1396,6 +1396,57 @@ class CliqueLPSpec:
 
 
 @dataclass
+class PinSpec:
+    """A value pinned from both sides: the clique partition number of a graph.
+
+        PinSpec(edges=[(0, 1), ...], max_size=3,
+                upper="out/cover.json",        # or a CoverSpec, run here
+                lower="out/columns.json")      # or a CliqueLPSpec, run here
+
+    `upper` is an exact cover by cliques (`cp_r <= X`); `lower` a clique LP
+    (`cp_r >= ceil(L)`) or an `opt --round` certificate of a program of your
+    own -- then `assumption=` must say why that program bounds `cp_r` from
+    below, and the result is RELATIVE to it. Both halves must be about
+    `edges`; `max_size` is r, the largest order a piece may have.
+    """
+
+    edges: object
+    upper: object
+    lower: object
+    max_size: object = None
+    assumption: str = ""
+    title: str = ""
+
+
+@dataclass
+class NonnegSpec:
+    """A polynomial is >= 0 on a box -- or on the part of it a region cuts.
+
+        NonnegSpec(poly=x**3 - x + Fraction(1, 2),
+                   box={"x": (0, 1)},
+                   region=[("below", Fraction(3, 40) - x**2)])
+
+    `poly` is a `Poly` over the box's variables (in the box's order), a z3
+    term, or a number; so is each region condition, read as `g >= 0`.
+
+    PROVED carries the Bernstein coefficients' certificate: the box halved up
+    to `subdivide` times, and where the region is needed, constant multipliers
+    of its conditions. REFUTED carries a point of the box where every
+    condition holds and the polynomial is negative, with its exact value.
+    Neither is approximate: `verify` recomputes both.
+
+    A region is how an ALGEBRAIC endpoint is written exactly: `[0, sqrt(3/40)]`
+    is the box `[0, 1/2]` with `3/40 - x^2 >= 0`, not a rational cut nearby.
+    """
+
+    poly: object
+    box: dict
+    region: list = field(default_factory=list)
+    subdivide: int = 12
+    title: str = ""
+
+
+@dataclass
 class AtlasSpec:
     """A parameter domain covered by boxes, each certified on its own, and
     ONE statement for the whole.
@@ -1409,6 +1460,17 @@ class AtlasSpec:
     large atlas need not carry them), Certificates or ParametricSpecs (run
     and embedded). `cited` covers boxes by an external result instead:
     `[({"p": (a, b), ...}, "source"), ...]`, and makes the statement relative.
+
+    ONE PROGRAM. Every piece must be a certificate about the same program --
+    objective, constraints, sense, free variables, parameters -- because the
+    statement is about that program's optimum. A refusal names the pieces
+    that differ and in what.
+
+    THE CLAIM. `claim=("<=", T)`, or `claim=T` with the direction the pieces
+    bound the optimum in. A piece certified with its own bound B -- or with no
+    claim at all -- still counts where `T - B >= 0` on its box, which is
+    checked by Bernstein coefficients (subdivided up to `subdivide` times),
+    so pieces may prove a tighter bound than the statement needs.
     """
 
     domain: dict
@@ -1417,6 +1479,7 @@ class AtlasSpec:
     claim: object = None
     cited: list = field(default_factory=list)
     title: str = ""
+    subdivide: int = 8
 
 
 @dataclass

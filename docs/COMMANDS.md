@@ -1,4 +1,4 @@
-# The fifty-four commands
+# The fifty-seven commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -410,6 +410,12 @@ its path printed. Locally, and still never sent.
 **Certificate** — none
 **Not established** — nothing; it makes no mathematical claim.
 
+`certo doctor --launcher DIR` writes `certo-nosite` into DIR: certo started
+with `python -S`, the site directories put back by the launcher itself, each
+`.pth` read for the paths it adds and NOT for the code it runs -- the start-up
+hook `doctor` warns about stays out of certo and keeps serving every other
+program. One file, written only when asked; deleting it undoes it.
+
 ```
 $ certo doctor
   capability   present   what for
@@ -478,6 +484,16 @@ CBC works in floating point and returns `10.66666656003499` where the answer
 is `32/3`. certo solves in floating point, **reconstructs rationals and
 verifies in `Fraction`**, accepting only if the exact check passes, so a bad
 reconstruction rejects itself.
+
+`--round`, with an integer objective (integer coefficients on integer
+variables), also certifies `integer optimum <= floor(LP)` (`>= ceil` for a
+min) -- recomputed by `verify` from the dual bound, never read. When an
+integral point reaches it, that IS the integer optimum, proved.
+`--cuts clique` adds the clique cuts of the conflict graph -- pairs of 0/1
+variables some row of the program forbids together -- each recorded with the
+row that forces every pair it joins, and re-derived by `verify`. The bound is
+then on the INTEGER optimum, which is what one such cut did for a symmetric
+instance branch and bound could not close: `examples/opt_clique_cuts.py`.
 
 ```
 $ certo verify out/lp.json
@@ -1296,8 +1312,64 @@ shift-test certificate on a ray `p ≥ p0` covers everything above its floors.
 `cited=[(box, "source")]` covers boxes by an external result: the statement
 is then **relative** to it, and every verification lists them.
 
+**One program, one claim.** Every piece must be certified for the same
+program -- objective, constraints, sense, free variables -- and a refusal
+names the pieces that differ and in what. The claim is `claim=("<=", T)`, or
+`claim=T` with the direction the pieces bound the optimum in; a piece
+certified with its OWN bound `B` -- or with no claim at all -- counts where
+`T - B >= 0` on its box, which is checked by Bernstein coefficients and
+recomputed by `verify` from the piece's own bound. So pieces may prove a
+tighter bound than the statement needs, and need not be re-certified with it.
+
 Not yet: **charts**. A domain covered in several coordinate systems needs the
 change of coordinates to be part of what is checked, and that is not here.
+
+### `certo nonneg`
+
+**Question** — Is this polynomial >= 0 on a box -- or on the part of it a
+region cuts?
+**Spec** — `NonnegSpec`
+**Answers** — PROVED with the Bernstein certificate, or REFUTED with a point
+of the box, inside the region, and the exact negative value there
+**Certificate** — `polynomial_nonneg`, **solver-free**: Bernstein
+coefficients recomputed on every leaf, or the point evaluated
+**Not established** — anything when it is INCONCLUSIVE: the coefficients
+stayed negative after `subdivide` halvings and no grid point was negative.
+It may still hold; the detail says where to cut.
+
+    NonnegSpec(poly=Fraction(3, 10) - x, box={"x": (0, Fraction(1, 2))},
+               region=[("below_root", Fraction(3, 40) - x**2)])
+
+"P >= 0 on a box" used to be disguised as an LP with a zero dual. The region
+is also how an ALGEBRAIC endpoint is written exactly: `[0, sqrt(3/40)]` is the
+box `[0, 1/2]` with `3/40 - x^2 >= 0`, instead of a rational cut nearby and
+two bounds justified by hand. The machinery is the one `parametric` and
+`atlas` already use; this is it as a command.
+
+### `certo pin`
+
+**Question** — A cover gives `cp(G) <= X` and an LP gives `cp(G) >= X`: can the
+two be ONE certificate that `cp(G) = X`?
+**Spec** — `PinSpec`
+**Answers** — `cp_r(G) = X` PROVED when the bounds meet; the certified range
+`ceil(L) <= cp_r(G) <= X` when they do not
+**Certificate** — `pinned_value`, **solver-free**: both halves re-verified,
+tied to one edge list, and their numbers compared
+**Not established** — for a lower half from your own LP (`opt --round`), that
+the LP bounds `cp(G)` from below: `assumption=` states it, and the result is
+RELATIVE to it.
+
+    PinSpec(edges=EDGES, max_size=3,
+            upper=CoverSpec(universe=EDGES, parts=FANO, cliques=True, max_size=3),
+            lower=CliqueLPSpec(edges=EDGES, problem="partition",
+                               weight={"constant": 1}, max_size=3))
+
+The tie is the point, and it is the lesson of the 0.20.0 audit: two
+certificates each verified on its own say nothing about each other. Here the
+cover must be by cliques of order <= r of exactly the payload's edges, and
+the LP must count cliques, cover each edge once and allow every piece of
+order <= r -- an LP over fewer pieces has a LARGER optimum and bounds
+nothing. `examples/pin_fano.py`: the Fano plane gives `cp_3(K_7) = 7`.
 
 ### `certo peak`
 
@@ -1829,6 +1901,18 @@ The warnings are the part that ages well. A vacuous proof keeps saying it is
 vacuous; a sweep keeps saying what it did not certify; a multiplicity keeps
 naming its lattice. Months later, on the artefact alone.
 
+Every report ends with its **degree of checking**, one word instead of one
+`ok`: `complete` (every step re-derived by certo's exact arithmetic),
+`with_solver` (re-derived by asking a solver again), `relative` (valid, and
+resting on bridges, cited results or a declared symmetry, listed), `partial`
+(part of it not re-derived -- a spec that could not be replayed, a predicate
+nothing certified -- listed). `--json` carries `degree`, `partial` and
+`assumed`. For a counterexample, `verify` also prints what each formula does
+at its point, exactly, and `--md` gives that as a table to paste into a
+proof. `--tamper` adds the STRUCTURAL forgeries -- emptied and shortened
+lists, out-of-range indices, swapped sub-certificates, one value rewritten
+everywhere -- which is how the 0.22 fixes were found.
+
 ### `certo bind`
 
 **Question** — Does the Lean lemma actually give what my certificate assumed?
@@ -2009,7 +2093,7 @@ manifest
 **Not established** — anything about a member beyond what verifying it
 establishes. Packing moves bytes.
 
-    certo pack out/family -o family.zip
+    certo pack out/family                 # family.zip beside it; -o or --cert to choose
     certo verify family.zip --jobs 4
     certo verify "family.zip#box0412.json"
 
@@ -2022,6 +2106,25 @@ compressed on its own too: `--cert x.json.gz` writes gzip, and everything that
 reads a certificate reads it (`verify`, `atlas`, `status`, `repro`, MCP). The
 digest is over the content, so compression changes nothing a certificate
 says. `atlas` takes `family.zip#member` wherever it takes a path.
+
+### `certo batch`
+
+**Question** — Hundreds of small specs: can they run without one process
+each?
+**Spec** — none; a command and a directory of specs
+**Answers** — one row per spec, in the directory's order: verdict, time, and
+the certificate written beside the others, named after the spec
+**Certificate** — one per spec, each self-checked exactly as a single run is
+**Not established** — anything about the specs together. A batch is many
+separate runs; joining boxes into one statement is `atlas`, and "each
+exactly once" is `status --manifest`.
+
+    certo batch parametric pieces/ -o pieces/certs --jobs 4
+
+179 lemma pieces were 179 processes, each paying the interpreter and the
+imports for twenty milliseconds of work. `--jobs N` uses N workers, each
+started once; a worker that dies at start-up (a `site` hook does that on some
+machines) has its specs run in this process instead of lost.
 
 ### `certo mcp`
 
