@@ -1396,11 +1396,29 @@ def _from_example(name, command, *flags):
     from certo import cli, store
 
     root = Path(__file__).resolve().parent.parent
-    out = Path(tempfile.mkdtemp(prefix="certo_adv_")) / "cert.json"
-    with contextlib.redirect_stdout(io.StringIO()):
-        cli.main([command, str(root / "examples" / name), *flags,
-                  "--cert", str(out)])
+    work = Path(tempfile.mkdtemp(prefix="certo_adv_"))
+    out = work / "cert.json"
+    # Run from a scratch directory, with what the example reads from `out/`
+    # made there first: in CI this suite runs before the examples, so the
+    # repository's `out/` does not exist yet.
+    here = _os.getcwd()
+    (work / "out").mkdir()
+    _os.chdir(work)
+    try:
+        with contextlib.redirect_stdout(io.StringIO()):
+            for ex, cmd, rel in PREREQUISITES.get(name, ()):
+                cli.main([cmd, str(root / "examples" / ex), "--cert", rel])
+            cli.main([command, str(root / "examples" / name), *flags,
+                      "--cert", str(out)])
+    finally:
+        _os.chdir(here)
     return store.read_json(str(out))
+
+
+#: What an example reads from `out/`, produced first by `_from_example`.
+PREREQUISITES = {
+    "lean_binding.py": [("counting_bound.py", "prove", "out/counting_bound.json")],
+}
 
 
 #: The kinds with no hand-built fixture above, each from the example that

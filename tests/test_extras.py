@@ -14444,9 +14444,14 @@ def test_a_route_tells_reducing_the_crux_from_closing_another_case():
             with contextlib.redirect_stdout(io.StringIO()):
                 cli.main([cmd, str(root / "examples" / ex), "--cert", str(d / name)])
 
-        make("compose", "walkthrough_proof.py", "theorem.json")
+        # A target that builds on nothing outside this directory: an
+        # induction, whose schema is the bridge it owes. (A `compose` proof
+        # over `out/` lemmas passed here and failed in CI, where `out/` is
+        # made only later, by the examples.)
+        make("induct", "induct_sum.py", "theorem.json")
         before = status_report.route(d / "theorem.json", d, LIM)
-        assert before["kind"] == "proof" and before["degree"] == "relative"
+        assert before["kind"] == "induction"
+        assert len(before["nodes"]) > 1
         assert {o["sort"] for o in before["owed"]} >= {"bridge"}
         assert before["off_route"] == []
         # another case closed: it lands OFF the route, and nothing under the
