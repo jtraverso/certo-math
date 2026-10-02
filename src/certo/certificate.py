@@ -1959,6 +1959,12 @@ def verify(cert, limits=None) -> VerifyReport:
         return VerifyReport(False, cert.kind, cert.solver_free, checks=[(
             t("verify.names_unique"), False, ", ".join(dup))],
             detail=t("verify.names_unique"))
+    # A SENSE is `max` or `min`. Anything that is not `min` was read as `max`,
+    # so a sense nobody wrote verified as one.
+    if "sense" in cert.payload and cert.payload["sense"] not in ("max", "min"):
+        return VerifyReport(False, cert.kind, cert.solver_free, checks=[(
+            t("verify.sense_known"), False, str(cert.payload["sense"]))],
+            detail=t("verify.sense_known"))
     try:
         rep = fn(cert, limits)
         rep.warnings = _provenance_warnings(cert) + list(rep.warnings)
@@ -2284,14 +2290,19 @@ def _verify_induction(cert, limits) -> VerifyReport:
         phi = _parse_one(p["step_smt2"])
         goal = phi.arg(1) if z3.is_implies(phi) else phi
         k = None
+        declared_missing = False
         if p.get("k"):
             from . import z3util
 
             k = next((c for c in z3util.free_consts(goal)
                       if str(c) == p["k"]), None)
-        k = induction_var(goal) if k is None else k
+            # A DECLARED variable the goal does not have is an error, not a
+            # cue to guess: falling back hid the mismatch.
+            declared_missing = k is None
+        else:
+            k = induction_var(goal)
         obl = obligations_of(step)
-        if k is None:
+        if k is None or declared_missing:
             linked = False
         else:
             needed = required_step(goal, k, step_from)
@@ -2646,6 +2657,25 @@ def _verify_parametric_symmetry(cert, limits) -> VerifyReport:
                    agreed == len(p["points"]),
                    t("verify.paramsym.points", ok=agreed, n=len(p["points"]))))
 
+    # 5. the summaries a reader quotes, recomputed from the points: how many
+    # were checked, which failed, the overall verdict, how many fell in each
+    # regime, and the objects polynomial as text.
+    regimes = {}
+    for row in p["points"]:
+        key = ",".join(row["rows"]) or "(none)"
+        regimes[key] = regimes.get(key, 0) + 1
+    failed = [paramsym._point_text(row["point"]) for row in p["points"]
+              if not row["ok"]]
+    off = [k for k, ok in (
+        ("checked", p.get("checked") == len(p["points"])),
+        ("failed", sorted(map(str, p.get("failed") or [])) == sorted(failed)),
+        ("ok", p.get("ok") is (agreed == len(p["points"]) and not failed)),
+        ("regimes", p.get("regimes") == regimes),
+        ("objects_text", p.get("objects_text") == str(Poly.parse(ring, p["objects"]))),
+    ) if not ok]
+    checks.append((t("verify.paramsym.summaries"), not off,
+                   ", ".join(off) or "-"))
+
     return VerifyReport(
         all(c[1] for c in checks), "parametric_symmetry", True, checks=checks,
         warnings=[t("verify.paramsym.scope", n=len(p["points"])),
@@ -2755,6 +2785,14 @@ def _verify_linear_system(cert, limits) -> VerifyReport:
         ok_rank = ok_rank and len(kernel) == m - rank
     checks.append((t("verify.solve.rank"), ok_rank,
                    t("verify.solve.rank_is", r=rank, cols=m)))
+    # The words a reader quotes, from what was derived: `unique` exactly when
+    # nothing is left free, and a domain the checks above know -- an unknown
+    # one skipped the integrality check while the payload said integer.
+    free = (len(kernel) > 0) if p["domain"] == "integer" else rank < m
+    checks.append((t("verify.solve.status"),
+                   p["domain"] in ("rational", "integer")
+                   and p["status"] == (linsolve.MANY if free else linsolve.UNIQUE),
+                   "{} / {}".format(p["status"], p["domain"])))
 
     warnings = [t("verify.solve.scope")]
     if p["status"] == linsolve.MANY:
@@ -2802,6 +2840,22 @@ def _verify_equitable_quotient(cert, limits) -> VerifyReport:
     # 1. the double count. Both regularities were established against the
     # physical matrix when this was produced; that they COHERE is arithmetic,
     # and it is what catches one of them having been used as the other.
+    # THE CLASSES ARE THE SIZES the double count uses: each class has N[i]
+    # (or M[j]) members, none in two classes, and the physical totals are the
+    # sums. They were carried as the partition and compared with nothing.
+    def _classes_ok(classes, sizes, total):
+        members = [m for ms in (classes or {}).values() for m in ms]
+        return (sorted(classes or {}) == sorted(sizes)
+                and all(len(classes[k]) == sizes[k] for k in sizes)
+                and len(set(members)) == len(members) == total
+                and sum(sizes.values()) == total)
+
+    checks.append((t("verify.quotient.classes"),
+                   _classes_ok(p.get("row_classes"), N, p.get("physical_rows"))
+                   and _classes_ok(p.get("column_classes"), M,
+                                   p.get("physical_columns")),
+                   "{} / {}".format(p.get("physical_rows"), p.get("physical_columns"))))
+
     off = [(i, j) for (i, j) in set(B) | set(H)
            if N[i] * H.get((i, j), Fraction(0))
            != M[j] * B.get((i, j), Fraction(0))]
@@ -2942,6 +2996,36 @@ def _verify_toric_cone(cert, limits) -> VerifyReport:
                          n=len(p["discrepancies"]) + len(p.get("subdivision")
                                                          or {}),
                          bad=", ".join(wrong[:3]) or "-")))
+
+    # THE CONCLUSIONS, recomputed. `regular`, `height_one`, `crepant`, the
+    # heights, the determinant and the rest are what a reader quotes -- and
+    # several are what a formalisation of smoothness rests on -- and they
+    # were carried beside the checks above and compared with nothing. The
+    # whole report is rebuilt by the producer's own `certify` and compared
+    # field by field.
+    from types import SimpleNamespace
+
+    try:
+        again = toric.certify(SimpleNamespace(
+            rays=p["rays"], order=order, lattice=basis,
+            subdivision={n: e["coords"] for n, e in
+                         (p.get("subdivision") or {}).items()}))
+        fields = ("dimension", "multiplicity", "determinant",
+                  "multiplicity_in", "regular", "height_one", "height_unique",
+                  "heights", "discrepancies", "crepant",
+                  "generators_at_height_one", "outside_lattice", "primitive",
+                  "height_functional")
+        off = [f for f in fields
+               if json.loads(json.dumps(again.get(f))) != p.get(f)]
+        sub_off = [n for n, e in (again.get("subdivision") or {}).items()
+                   if json.loads(json.dumps(e)) != (p.get("subdivision") or {}).get(n)]
+        if sorted(again.get("subdivision") or {}) != sorted(p.get("subdivision") or {}):
+            sub_off.append("subdivision")
+        off += sub_off
+    except toric.NotToric as e:
+        off = ["{}: {}".format(type(e).__name__, e)]
+    checks.append((t("verify.toric.summaries"), not off,
+                   ", ".join(off[:4]) or "-"))
 
     return VerifyReport(
         all(c[1] for c in checks), "toric_cone", True, checks=checks,
@@ -3522,9 +3606,24 @@ def _verify_variable_range(cert, limits) -> VerifyReport:
                              rows=", ".join(sorted(end["multipliers"]))[:48]
                              or "-")))
 
+    # The interval a reader quotes, and the word `empty`, from the two ends.
+    # EMPTY is a claim -- the regime has no point -- and nothing in the payload
+    # shows it: both ends were accepted on its say-so. Until it carries a
+    # Farkas ray, it is consistent or refused, and reported as not re-derived.
+    from . import rangebound as _rb
+
+    ends_empty = all(p[s].get("bound") is None and p[s].get("why") == _rb.EMPTY
+                     for s in ("lower", "upper"))
+    want_interval = "(empty)" if p.get("empty") else _rb._interval(p["lower"], p["upper"])
+    checks.append((t("verify.varrange.interval"),
+                   bool(p.get("empty")) == ends_empty
+                   and p.get("interval") == want_interval,
+                   str(p.get("interval"))))
+
     warnings = [t("verify.varrange.regime_only")]
     if p.get("empty"):
         warnings.append(t("verify.varrange.empty_scope"))
+        warnings.append(_note("partial", "verify.varrange.empty_unproved"))
     for side in ("lower", "upper"):
         if p[side].get("strict"):
             warnings.append(t("verify.varrange.strict", side=side))
@@ -3608,6 +3707,22 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
             t("verify.bind.source_detail",
               kind=str(src.get("kind")), digest=(inner.digest() if inner
                                                  else "-"))))
+        # WHAT IT DISCHARGES is a hypothesis of that certificate, and the
+        # formula the binding was checked against is that hypothesis's. The
+        # name was carried beside `needed_smt2` and compared with nothing.
+        import z3
+
+        try:
+            sp = src.get("payload") or {}
+            names = list(sp.get("names") or [])
+            core = list(z3.parse_smt2_string(sp.get("core_smt2") or ""))
+            needed = list(z3.parse_smt2_string(p.get("needed_smt2") or ""))
+            i = names.index(p["discharges"])
+            named = (len(core) == len(names) and len(needed) == 1
+                     and core[i].eq(needed[0]))
+        except (ValueError, KeyError, IndexError, z3.Z3Exception):
+            named = False
+        checks.append((t("verify.bind.discharges"), named, p.get("discharges")))
 
     warnings = [t("verify.bind.bridge", decl=p["declaration"] or "-")]
     if p["spec"].get("stale"):
@@ -4832,6 +4947,12 @@ def _verify_farkas_ray(cert, limits) -> VerifyReport:
     A = [exact.parse_all(r) for r in p["A"]]
     b, y = exact.parse_all(p["b"]), exact.parse_all(p["y"])
     cols = len(A[0]) if A else 0
+    # One multiplier and one right-hand side per row, every row one length:
+    # `zip` below would read a shorter system on its prefix.
+    if not (len(y) == len(A) == len(b) and all(len(r) == cols for r in A)):
+        return VerifyReport(False, "farkas_ray", True, checks=[(
+            t("verify.lp.shapes"), False,
+            "{} rows, {} rhs, {} multipliers".format(len(A), len(b), len(y)))])
 
     checks = [
         (t("verify.ray.nonneg"), all(v >= 0 for v in y),
@@ -5032,6 +5153,23 @@ def _verify_branch_frontier(cert, limits) -> VerifyReport:
     # Every branching node has all its children, and each child is accounted
     # for: closed, branching, or open. A frontier that dropped a subtree
     # reads exactly like one that explored it.
+    # The root is there -- explored or still open -- and a branch lists every
+    # value its variable can take: the two holes `branch_bound` had in 0.22.
+    from .engines.bb import _values
+
+    checks.append((t("verify.bb.root"), "" in by_key or "" in open_by_key,
+                   str(len(nodes) + len(opens))))
+    short = []
+    for n in nodes:
+        if n["why"] != "branch":
+            continue
+        on = n.get("on")
+        want = (_values(root, on) if on in root.bounds
+                and root.kinds.get(on) in ("integer", "binary") else None)
+        if want is None or on in {v for v, _x in n["fixed"]} or \
+                sorted(n.get("values") or []) != sorted(want):
+            short.append("{}@{}".format(on, _node_id(n["fixed"]) or "root"))
+    checks.append((t("verify.bb.domain"), not short, ", ".join(short[:3]) or "-"))
     missing = []
     for n in nodes:
         if n["why"] != "branch":
@@ -5899,6 +6037,16 @@ def _verify_shrink_graph(cert, limits) -> VerifyReport:
 
     checks.append((t("verify.shrink.still_ce"), is_ce(minimal),
                    "n={} m={}".format(minimal.n, minimal.m)))
+    # The START is tied too: a counterexample itself, no smaller than what it
+    # shrank to, and both written exactly -- `from_graph6` reads the characters
+    # it needs and ignores the rest.
+    original = Graph.from_graph6(p["original"])
+    checks.append((t("verify.shrink.from_original"),
+                   is_ce(original) and minimal.n <= original.n
+                   and minimal.m <= original.m
+                   and original.to_graph6() == p["original"]
+                   and minimal.to_graph6() == p["minimal"],
+                   "{} -> {}".format(p["original"], p["minimal"])))
 
     recomputed = list(_reductions(minimal))
     checks.append((t("verify.shrink.complete"),

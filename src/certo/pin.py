@@ -53,7 +53,9 @@ def upper_bound(cert, max_size):
             or p.get("exact") is False:
         raise NotAPin(t("pin.upper_kind", kind=cert.get("kind")))
     own = p.get("max_size")
-    if max_size is not None and (own is None or int(own) > int(max_size)):
+    if max_size is not None and own is None:
+        raise NotAPin(t("pin.upper_no_order", want=max_size))
+    if max_size is not None and int(own) > int(max_size):
         raise NotAPin(t("pin.upper_order", own=own, want=max_size))
     if p.get("multiplicities"):
         raise NotAPin(t("pin.upper_multiplicities"))

@@ -436,6 +436,12 @@ def pin(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
 
     def half(x):
         if isinstance(x, CoverSpec):
+            # The pin's r reaches the cover it runs: a CoverSpec left without
+            # `max_size` was refused as "pieces of order None".
+            if getattr(x, "max_size", None) is None and spec.max_size is not None:
+                from dataclasses import replace
+
+                x = replace(x, max_size=spec.max_size)
             return cover(x, limits).certificate
         if isinstance(x, CliqueLPSpec):
             return clique_lp(x, limits).certificate
@@ -574,7 +580,11 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                           meta={"point": {n: str(x) for n, x in pt.items()},
                                 "value": str(v)})
     where = ""
-    if hint and hint.get("split"):
+    roots = [(n, bernstein.touching_cut(poly, box, n)) for n in ring]
+    roots = [(n, r) for n, r in roots if r is not None]
+    if roots:
+        where = t("nonneg.root_hint", name=roots[0][0], at=str(roots[0][1]))
+    elif hint and hint.get("split"):
         where = t("nonneg.split_hint", name=hint["split"], at=hint["at"])
     return Result("nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                   ENGINE_NONNEG, ms(), None,

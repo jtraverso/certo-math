@@ -320,6 +320,17 @@ files for statements of the shape `theorem foo : True := by`, skipping
 wrong — it verifies on its own — but it no longer describes the file next to
 it, and six months later nobody remembers which.
 
+`certo status <dir> --root CERT` answers the question a directory cannot:
+*did this week's work reduce the target, or close another case?* It reports
+UNDER one certificate -- the tree it is built from, each node with its degree
+of checking -- and lists every obligation still open beneath it: bridges,
+cited results, assumptions, optimality not claimed, cases settled only for a
+finite window, hypotheses discharged in Lean (from `bind` certificates in the
+directory). Then what in the directory hangs from nothing under the target:
+work, perhaps, but not on this route. `--since FILE` compares with a previous
+`--root --json` report and says what was discharged, added or changed under
+the target.
+
 `certo status <dir> --manifest` answers a different question: *did I certify
 every one, exactly once?* A count is not that guarantee -- two runs over 71
 cells with one duplicate also count 72.
@@ -484,6 +495,10 @@ CBC works in floating point and returns `10.66666656003499` where the answer
 is `32/3`. certo solves in floating point, **reconstructs rationals and
 verifies in `Fraction`**, accepting only if the exact check passes, so a bad
 reconstruction rejects itself.
+
+An INFEASIBLE program comes back with its exact Farkas ray -- `y >= 0`,
+`A^T y >= 0`, `b.y < 0`, kind `farkas_ray` -- and `mixed` keeps it when the
+relaxation is already infeasible.
 
 `--round`, with an integer objective (integer coefficients on integer
 variables), also certifies `integer optimum <= floor(LP)` (`>= ceil` for a
@@ -1344,7 +1359,10 @@ It may still hold; the detail says where to cut.
 is also how an ALGEBRAIC endpoint is written exactly: `[0, sqrt(3/40)]` is the
 box `[0, 1/2]` with `3/40 - x^2 >= 0`, instead of a rational cut nearby and
 two bounds justified by hand. The machinery is the one `parametric` and
-`atlas` already use; this is it as a command.
+`atlas` already use; this is it as a command. A zero that TOUCHES inside the
+box -- `x^2` on `[-1, 0.99]` -- keeps a coefficient negative on every cell
+around it, so the box is cut at the rational roots of the polynomial and its
+derivative, and the cut point is recorded and rechecked.
 
 ### `certo pin`
 
@@ -1908,7 +1926,9 @@ resting on bridges, cited results or a declared symmetry, listed), `partial`
 (part of it not re-derived -- a spec that could not be replayed, a predicate
 nothing certified -- listed). `--json` carries `degree`, `partial` and
 `assumed`. For a counterexample, `verify` also prints what each formula does
-at its point, exactly, and `--md` gives that as a table to paste into a
+at its point, exactly; for a core, which hypotheses it used and which it did
+not; for a Farkas certificate, the combination as an identity; for an LP
+dual, which rows are tight and what each is worth, and `--md` gives that as a table to paste into a
 proof. `--tamper` adds the STRUCTURAL forgeries -- emptied and shortened
 lists, out-of-range indices, swapped sub-certificates, one value rewritten
 everywhere -- which is how the 0.22 fixes were found.
@@ -1948,18 +1968,39 @@ checked against a statement that has since changed would be worse than none.
 
 **Question** — Get this into Lean
 **Spec** — none; it takes a certificate or a spec
-**Answers** — a spec as SMT-LIB2 or DIMACS; a **linear Farkas certificate** as
-a runnable `linarith` example
+**Answers** — a spec as SMT-LIB2 or DIMACS; to Lean, four kinds: a **linear
+Farkas certificate** and an **exact LP bound** as `linarith` examples, an
+**integer matrix** as literal matrices and the identities over them, and an
+**affine semigroup** as its membership, pointedness, irreducibility and
+freeness theorems
 **Certificate** — none
-**Not established** — anything else. `--lean` emits **one** thing, on purpose.
+**Not established** — anything for the other kinds: they are refused rather
+than written hopefully. Each exporter joined only after its output compiled
+against a real Mathlib.
 
 ```lean
-theorem from_core (x y : ℝ)
+set_option maxRecDepth 512 in
+set_option linter.unusedVariables false in
+example (x y : ℝ)
     (x_ge_1 : 1 - x ≤ 0)
     (y_ge_1 : 1 - y ≤ 0)
     : -2 + x + y ≥ 0 := by
-  linarith [x_ge_1, y_ge_1]
+  linarith only [x_ge_1, y_ge_1]
 ```
+
+`linarith only` is handed exactly the hypotheses the certificate used, and
+`maxRecDepth` grows with them: a combination of 169 rows used to stop at
+Lean's default depth with every step right.
+
+**An affine semigroup** goes out in four stages, every fact `decide`d by Lean
+and every consequence proved once in the file: (1) each point shown in the
+semigroup, by its non-negative combination; (2) with a grading, the semigroup
+is POINTED -- a non-negative combination giving 0 is zero; (3) each generator
+is IRREDUCIBLE -- not a non-negative combination of the others -- by a
+separating functional, and a generator in the cone of the rest is left out
+and said; (4) for a unimodular generator matrix, its integer inverse and the
+statement that a point is in the semigroup exactly when its coordinates are
+non-negative: the free monoid on the generators.
 
 Everything else certo used to emit was scaffolding that did not compile, and
 a Lean file that does not compile is worse than no Lean file: it costs a build

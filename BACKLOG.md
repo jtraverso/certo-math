@@ -110,11 +110,13 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P1** | Route coverage: a report ROOTED at one target (the crux), not over a directory -- the tree of obligations under it, each node proved (and how: solver-free, re-solved), assumed (a bridge, with its text), cited (with its source), bound to Lean, finite-only (the range a `sweep`/`cases` settled) or a region left out (an `atlas` gap or cited box); and `--since` from the `ledger`, saying what changed UNDER the target since last time | **M** | high | high | user feedback: tells "we closed another case" from "we reduced the crux". A certificate off the target's tree changes nothing under it, and says so. Extends `status` (`--root`), reading what `compose`, `bind` and `atlas` already record; no certificate, like `status`, and it needs the degree-of-checking row below |
-| **P1** | `export --lean` for `affine_semigroup`, deep and in stages: (1) membership, the N-combination as a vector identity by `decide`; (2) pointedness, the grading's positive degrees plus one lemma proved once in an emitted preamble; (3) minimality, per generator the separating functional that puts it outside the cone of the others (y.g_j >= 0, y.g_i < 0, then `linarith`), and only where none exists the graded bounded search by `decide`, refused honestly if the kernel cannot; (4) for a unimodular generator matrix, its inverse identity by `decide`, so a user's own "unimodular => free monoid" lemma consumes it (via `bind`) | **M** | high | med | user feedback, formalising toric charts: 72 semigroup certificates verify, and the free-monoid identification still had to be written by hand because the exporter refuses the kind. Stage (3) by separation covers every simplicial case. NOT exported: the Hilbert basis and absence from a non-normal semigroup beyond small degrees; normality is never claimed anyway |
+| **P2** | `farkas` for infeasibility directly: an `LPSpec`, or a claim `False` -- and on a FEASIBLE system, REFUTED with the feasible point rather than `unknown_solver` | **S** | med | med | user feedback: an LP had to be rewritten in z3 by hand, and an absurd claim invented for "no solution". Partly answered by the `opt` row above |
+| **P2** | `nonneg` on unbounded boxes `(0, None)`: the shift test `parametric` already uses on a ray (coefficients after `p = p0 + u`), declared | **S-M** | med | med | user feedback: a polynomial with every coefficient positive on the orthant could not be stated for all u, w >= 0, only on a box |
+| **P2** | `opt` at scale: progress by default above ~500 variables, and a pointer to `columns` / `--explore` before the exact path | **S** | med | low | user feedback: 586 variables in 3.7 s, about 1000 not done in 12 minutes, with nothing printed. The cliff itself is the P2 B&B/exact-reconstruction rows below |
+| **P3** | `divisibility`: the incidence matrix pieces x edges built for you, and "Q yes / Z no" with the obstruction -- a thin entry point over `solve` | **S-M** | med | low | user feedback: the Smith-normal-form step is what divisibility arguments need, and `solve` already does it once the matrix is written |
+| **P2** | `variable_range` on an EMPTY regime: carry the Farkas combination of its rows that shows it, so `empty` is re-derived rather than reported as not | **S** | high | med | found by the 0.23 battery: an empty regime was accepted on its word; it is now consistent-or-refused and `partial` |
+| **P3** | `farkas_ray` tied to the program it is about when it travels alone (a spec digest, or the LP's own rows by name) | **S** | med | low | a standalone ray is about the system in its payload, which is true and checked; nothing says which user program that system is |
 | **P2** | Piecewise programs in `atlas`: a DECLARED piecewise definition (region k -> program k), each piece checked against the program declared for its region, the statement about that declared function | **M** | med | med | user feedback (a piecewise phi): one program for the whole domain forced a reformulation as a max of lines, which is not always possible. Declared, not inferred from the pieces -- otherwise the atlas would define the function it claims to bound |
-| **P2** | `api.run(..., self_check="all")`: also verify solver-backed certificates (`unsat_core`, `model`) before returning them | **S** | high | low | today only solver-free certificates are self-checked; CM-01 was one `verify` away from being caught |
-| **P2** | The same mathematical summary for proofs: the hypotheses a core actually used and the ones it did not, a Farkas / Positivstellensatz combination written as an identity, an LP's active constraints and their prices, the sub-boxes where a parametric bound is tight | **M** | med | med | the second half of the row above. Each kind's summary is derived from what `verify` already checks, one kind at a time; a "simplest counterexample" (small denominators, via optimisation) is a later step, P3 |
 | **P2** | A declarative spec notation that is not code: typed variables, named hypotheses, infix formulas, parsed without `eval`; certo DERIVES the structure (the induction step from P(k), the family of a bisect), echoes a canonical reading back, and hashes it. SMT-LIB accepted as an alternative | **M-L** | med | high | specs other than the 10 JSON types are Python that certo executes. This makes third-party specs safe for `prove`, `induct`, `parametric`, `bisect`, gives a model less to get wrong than Python + z3, and removes by construction the class of CM-08 (a step that is not the one the chain needs). First stage `Spec` and `induct`, then `parametric` and `bisect`; `sweep` predicates stay in Python. Natural language stays OUTSIDE certo: a model writes the notation, certo parses it, reads it back and lints it, a person confirms |
 | **P2** | python-flint for the polynomial arithmetic behind the checks (`fmpq_mpoly`) | **M** | med | med | exact and much faster than `Poly` over `Fraction`, which is where a large parametric verification spends its time (19 s before the `shift` fix, 2.4 s after). Nothing changes in what is trusted: the same exact arithmetic, a faster implementation, `Poly` kept as the fallback when flint is absent |
 | **P2** | mpmath `identify` / `findpoly` (PSLQ) in `--explore`: guess a closed form for an explored constant, then certify THAT | **S-M** | med | low | exploration returns 0.6666667 or 1.618034; PSLQ proposes 2/3 or (1+sqrt5)/2; certo certifies the conjectured exact value. The library proposes, certo checks -- `explore -> promote` with the constant named |
@@ -353,6 +355,14 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| A report rooted at one target | `status --root`, `--since`, **0.23.0** |
+| Semigroups to Lean, four stages | `export --lean`, **0.23.0** |
+| Self-check of solver-backed certificates | `self_check="all"`, **0.23.0** |
+| A proof as mathematics | `certo.explain`, **0.23.0** |
+| An infeasible LP with its Farkas ray | `opt`, `mixed`, **0.23.0** |
+| `nonneg` cuts where a zero touches | `nonneg`, **0.23.0** |
+| `pin` propagates `max_size` | `pin`, **0.23.0** |
+| Large Farkas exports compile | `export --lean`, **0.23.0** |
 | Structural forgeries per kind, held in the suite | `certo.tamper.forgeries`, `verify --tamper`, **0.22.0** |
 | Composite kinds re-derive their numbers and tie their parts | eleven holes closed, **0.22.0** |
 | A counterexample as mathematics | `certo.explain`, `verify --md`, **0.22.0** |
@@ -1035,7 +1045,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.22.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.23.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

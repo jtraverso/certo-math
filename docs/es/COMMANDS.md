@@ -326,6 +326,17 @@ que es un valor alcanzado y no un máximo demostrado. También escanea archivos
 mal —verifica por su cuenta— pero ya no describe el archivo que tiene al lado,
 y seis meses después nadie recuerda cuál.
 
+`certo status <dir> --root CERT` responde la pregunta que un directorio no
+puede: *¿el trabajo de esta semana redujo el objetivo, o cerró otro caso?*
+Informa BAJO un certificado -- el árbol del que está hecho, cada nodo con su
+grado de comprobación -- y lista cada obligación todavía abierta debajo:
+puentes, resultados citados, supuestos, optimalidad no afirmada, casos
+resueltos solo en una ventana finita, hipótesis descargadas en Lean (desde
+certificados `bind` del directorio). Luego, lo que en el directorio no cuelga
+de nada bajo el objetivo: trabajo, quizá, pero no en esta ruta. `--since
+FILE` compara con un informe `--root --json` anterior y dice qué se descargó,
+agregó o cambió bajo el objetivo.
+
 `certo status <dir> --manifest` responde otra pregunta: *¿certifiqué todos,
 exactamente una vez?* Un conteo no es esa garantía —dos corridas sobre 71
 celdas con un duplicado también cuentan 72—.
@@ -495,6 +506,10 @@ CBC trabaja en punto flotante y devuelve `10.66666656003499` donde la respuesta
 es `32/3`. certo resuelve en flotante, **reconstruye racionales y verifica en
 `Fraction`**, aceptando solo si la comprobación exacta pasa, así que una mala
 reconstrucción se rechaza sola.
+
+Un programa INFACTIBLE vuelve con su rayo de Farkas exacto -- `y >= 0`,
+`A^T y >= 0`, `b.y < 0`, tipo `farkas_ray` -- y `mixed` lo conserva cuando la
+relajación ya es infactible.
 
 `--round`, con un objetivo entero (coeficientes enteros sobre variables
 enteras), certifica además `óptimo entero <= floor(LP)` (`>= ceil` si se
@@ -1370,7 +1385,10 @@ negativo. Puede que igual valga; el detalle dice dónde cortar.
 también la forma de escribir exacto un extremo ALGEBRAICO: `[0, sqrt(3/40)]`
 es la caja `[0, 1/2]` con `3/40 - x^2 >= 0`, en vez de un corte racional
 cercano y dos cotas justificadas a mano. La maquinaria es la que ya usan
-`parametric` y `atlas`; esto es ella como comando.
+`parametric` y `atlas`; esto es ella como comando. Un cero que TOCA dentro de
+la caja -- `x^2` en `[-1, 0.99]` -- deja un coeficiente negativo en cada celda
+a su alrededor, así que la caja se corta en las raíces racionales del
+polinomio y de su derivada, y el punto de corte se registra y se recomprueba.
 
 ### `certo pin`
 
@@ -1949,7 +1967,9 @@ Cada reporte termina con su **grado de comprobación**, una palabra en vez de un
 listados), `partial` (parte no re-derivada -- un spec que no se pudo
 reproducir, un predicado que nada certificó -- listada). `--json` trae
 `degree`, `partial` y `assumed`. Para un contraejemplo, `verify` imprime
-además qué hace cada fórmula en su punto, exacto, y `--md` lo da como tabla
+además qué hace cada fórmula en su punto, exacto; para un core, qué hipótesis
+usó y cuáles no; para un certificado de Farkas, la combinación como
+identidad; para un dual de LP, qué filas son justas y cuánto vale cada una, y `--md` lo da como tabla
 para pegar en una demostración. `--tamper` agrega las falsificaciones
 ESTRUCTURALES -- listas vaciadas y acortadas, índices fuera de rango,
 subcertificados intercambiados, un valor reescrito en todas partes -- que es
@@ -1989,18 +2009,40 @@ comprobada contra un enunciado que ha cambiado sería peor que ninguna.
 
 **Pregunta** — Llévame esto a Lean
 **Spec** — ninguno; toma un certificado o un spec
-**Responde** — un spec como SMT-LIB2 o DIMACS; un **certificado de Farkas
-lineal** como ejemplo `linarith` ejecutable
+**Responde** — un spec como SMT-LIB2 o DIMACS; a Lean, cuatro tipos: un
+**certificado de Farkas lineal** y una **cota exacta de LP** como ejemplos
+`linarith`, una **matriz entera** como matrices literales y las identidades
+entre ellas, y un **semigrupo afín** como sus teoremas de pertenencia,
+apuntado, irreducibilidad y libertad
 **Certificado** — ninguno
-**No establece** — nada más. `--lean` emite **una** cosa, a propósito.
+**No establece** — nada para los demás tipos: se rechazan en vez de escribirse
+con esperanza. Cada exportador entró solo después de que su salida compilara
+contra un Mathlib real.
 
 ```lean
-theorem from_core (x y : ℝ)
+set_option maxRecDepth 512 in
+set_option linter.unusedVariables false in
+example (x y : ℝ)
     (x_ge_1 : 1 - x ≤ 0)
     (y_ge_1 : 1 - y ≤ 0)
     : -2 + x + y ≥ 0 := by
-  linarith [x_ge_1, y_ge_1]
+  linarith only [x_ge_1, y_ge_1]
 ```
+
+`linarith only` recibe exactamente las hipótesis que usó el certificado, y
+`maxRecDepth` crece con ellas: una combinación de 169 filas se detenía en la
+profundidad por defecto de Lean con cada paso correcto.
+
+**Un semigrupo afín** sale en cuatro etapas, cada hecho decidido por Lean con
+`decide` y cada consecuencia demostrada una vez en el archivo: (1) cada punto
+mostrado en el semigrupo, por su combinación no negativa; (2) con una
+graduación, el semigrupo es APUNTADO -- una combinación no negativa que da 0
+es cero; (3) cada generador es IRREDUCIBLE -- no es combinación no negativa
+de los otros -- por un funcional separador, y un generador en el cono de los
+demás se omite y se dice; (4) para una matriz de generadores unimodular, su
+inversa entera y el enunciado de que un punto está en el semigrupo
+exactamente cuando sus coordenadas son no negativas: el monoide libre sobre
+los generadores.
 
 Todo lo demás que certo solía emitir era andamiaje que no compilaba, y un
 archivo Lean que no compila es peor que ninguno: cuesta una compilación

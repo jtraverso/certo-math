@@ -121,6 +121,10 @@ IMPORTS = {
     # `Mathlib.Data.Matrix.Notation`, and multiplication is in `.Mul` rather
     # than `.Basic`. Found by compiling, which is the whole reason this is a
     # table rather than a guess.
+    # `ᵥ*`, `*ᵥ` and `⬝ᵥ` are scoped to `Matrix` (hence `open Matrix`), and
+    # the lemmas -- sums of non-negatives, `linarith` -- are all over Mathlib.
+    "semigroup": ["Mathlib.LinearAlgebra.Matrix.Notation",
+                  "Mathlib.Data.Matrix.Mul", "Mathlib.Tactic"],
     "smith": ["Mathlib.LinearAlgebra.Matrix.Notation",
               "Mathlib.Data.Matrix.Mul",
               # Without this, `certo_U.det` does not resolve and Lean reports
@@ -226,6 +230,14 @@ def farkas_to_lean(data: dict, source="") -> str:
     types = "ℝ" if not any(sorts.get(v) == "Int" for v in variables) else "ℤ"
 
     lines = [_header("farkas", data.get("digest", "?"), source), ""]
+    # A combination of many rows is a DEEP proof term: 169 hypotheses hit
+    # Lean's default `maxRecDepth` of 512 and the file did not compile, with
+    # every step right. The depth is set from what is emitted. `linarith` may
+    # close the goal with a subset of what it is handed, and the rest would
+    # warn `unused variable` -- noise beside a declared core, so silenced.
+    # Both BEFORE the doc comment, which must sit right on the declaration.
+    lines.append("set_option maxRecDepth {} in".format(max(512, 256 * len(hyps))))
+    lines.append("set_option linter.unusedVariables false in")
     lines.append("/-- The hypotheses the certificate actually used, and the")
     lines.append("goal they close. `linarith` is given exactly those: the")
     lines.append("certificate's whole content is which ones matter. -/")
@@ -254,7 +266,7 @@ def farkas_to_lean(data: dict, source="") -> str:
         # between a call that closes and one that times out when somebody
         # retypes the lemma later with more around it.
         hints = [_safe(n) for n, _, _ in hyps]
-        lines.append("  linarith{}".format(
+        lines.append("  linarith only{}".format(
             " [{}]".format(", ".join(hints)) if hints else ""))
 
     lines.append("")
@@ -624,6 +636,227 @@ def smith_to_lean(data: dict, source="") -> str:
     return _trim_header("\n".join(lines))
 
 
+
+# ---------------------------------------------------------------------------
+# affine_semigroup -> membership, pointedness, irreducibility, and freeness
+# ---------------------------------------------------------------------------
+#
+# A user formalising toric charts wrote the identification of a semigroup
+# with a free monoid by hand, beside 72 certificates that had established its
+# ingredients. This writes those ingredients as Lean -- the generators as a
+# literal matrix, every fact about them DECIDED by Lean's own arithmetic --
+# and the general lemmas that turn the facts into statements, proved once in
+# the file from Mathlib, with no `sorry`:
+#
+#   1. a point IS in the semigroup: its N-combination, `c ᵥ* G = p`, by decide
+#   2. the semigroup is POINTED: the grading's degrees are positive (decide),
+#      so a non-negative combination giving 0 is the zero combination
+#   3. each generator is IRREDUCIBLE: a functional y with y.g_j >= 0 for the
+#      others and y.g_i < 0 (decide), so g_i is no N-combination of the
+#      others. Where no such y exists -- the generator is in the cone of the
+#      rest, as in a non-normal semigroup -- the step is left out and said.
+#   4. for a UNIMODULAR generator matrix: its integer inverse (decide), and
+#      `p` is in the semigroup exactly when `p ᵥ* G⁻¹ >= 0` -- the free
+#      monoid on the generators, in coordinates.
+#
+# Nothing here is a solver's word: the separators are found by an exact LP,
+# but what Lean is given is the integer vector, checked by `decide`.
+
+
+def _vec(v) -> str:
+    return "![" + ", ".join(str(int(x)) for x in v) + "]"
+
+
+def _int_scaled(vec):
+    """A rational vector times the lcm of its denominators: same signs."""
+    from math import lcm
+
+    fr = [Fraction(x) for x in vec]
+    L = lcm(*[f.denominator for f in fr]) if fr else 1
+    return [int(f * L) for f in fr]
+
+
+def _separator(A, i):
+    """An integer y with A[j].y >= 0 for j != i and A[i].y < 0, or None --
+    found by an exact LP, checked here before it is returned."""
+    from .engines import lp
+    from .limits import Limits
+    from .spec import LPSpec
+    from .status import Verdict
+
+    d = len(A[0])
+    s = LPSpec(sense="min", title="separator")
+    for k in range(d):
+        s.variable("p%d" % k)
+        s.variable("n%d" % k)
+    s.objective({**{"p%d" % k: 1 for k in range(d)}, **{"n%d" % k: 1 for k in range(d)}})
+    for j, row in enumerate(A):
+        coeffs = {**{"p%d" % k: row[k] for k in range(d) if row[k]},
+                  **{"n%d" % k: -row[k] for k in range(d) if row[k]}}
+        if j == i:
+            s.constraint(coeffs, "<=", -1, name="own")
+        else:
+            s.constraint(coeffs, ">=", 0, name="g%d" % j)
+    r = lp.opt(s, Limits(timeout_ms=30_000), _ray=False)
+    if r.verdict is not Verdict.SATISFIABLE or not r.meta.get("exact"):
+        return None
+    sol = r.meta["solution"]
+    y = _int_scaled([Fraction(sol["p%d" % k]) - Fraction(sol["n%d" % k])
+                     for k in range(d)])
+    dots = [sum(a * b for a, b in zip(row, y)) for row in A]
+    if dots[i] < 0 and all(v >= 0 for j, v in enumerate(dots) if j != i):
+        return y
+    return None
+
+
+def _integer_inverse(A):
+    """The inverse of a square integer matrix when it is an integer matrix
+    (det = +-1), else None. Exact Gauss-Jordan."""
+    n = len(A)
+    if any(len(r) != n for r in A):
+        return None
+    M = [[Fraction(x) for x in row] + [Fraction(int(i == j)) for j in range(n)]
+         for i, row in enumerate(A)]
+    for c in range(n):
+        piv = next((r for r in range(c, n) if M[r][c] != 0), None)
+        if piv is None:
+            return None
+        M[c], M[piv] = M[piv], M[c]
+        lead = M[c][c]
+        M[c] = [x / lead for x in M[c]]
+        for r in range(n):
+            if r != c and M[r][c] != 0:
+                f = M[r][c]
+                M[r] = [a - f * b for a, b in zip(M[r], M[c])]
+    inv = [row[n:] for row in M]
+    if any(x.denominator != 1 for row in inv for x in row):
+        return None
+    return [[int(x) for x in row] for row in inv]
+
+
+def semigroup_to_lean(data: dict, source="") -> str:
+    p = data["payload"]
+    order = list(p["order"])
+    A = [[int(x) for x in p["generators"][n]] for n in order]
+    k, d = len(A), len(A[0]) if A else 0
+    if not A or d == 0:
+        raise NotExportable(t("lean.semigroup.empty"))
+    lines = [_header("semigroup", data.get("digest", "?"), source), "",
+             "open Matrix", ""]
+    lines.append("/-- The generators, one per row, in the certificate's order: "
+                 + ", ".join(order) + ". -/")
+    lines.append("def certo_G : Matrix (Fin {}) (Fin {}) ℤ := {}".format(
+        k, d, _matrix_to_lean(A)))
+    lines.append("")
+
+    # 1. membership
+    for name, e in sorted((p.get("points") or {}).items()):
+        c = e.get("semigroup_coefficients")
+        if e.get("in_semigroup") is not True or c is None:
+            continue
+        lines.append("/-- `{}` is in the semigroup: a non-negative integer "
+                     "combination of the generators. -/".format(name))
+        lines.append("theorem certo_mem_{} : ({} : Fin {} → ℤ) ᵥ* certo_G = {} ∧ "
+                     "∀ i, 0 ≤ ({} : Fin {} → ℤ) i := by decide".format(
+                         _safe(name), _vec(c), k, _vec(e["point"]), _vec(c), k))
+        lines.append("")
+
+    # 2. pointed
+    u = p.get("grading")
+    if u is not None:
+        uz = _int_scaled(u)
+        lines.append("/-- A grading: every generator has a positive degree. -/")
+        lines.append("def certo_u : Fin {} → ℤ := {}".format(d, _vec(uz)))
+        lines.append("theorem certo_degrees_pos : ∀ i, 0 < (certo_G *ᵥ certo_u) i "
+                     ":= by decide")
+        lines.append("")
+        lines.append("/-- POINTED: a non-negative combination of the generators "
+                     "is zero only when it is the zero combination. -/")
+        lines += _POINTED.format(k=k).splitlines()
+        lines.append("")
+
+    # 3. irreducible, generator by generator
+    left_out = []
+    for i, name in enumerate(order):
+        y = _separator(A, i)
+        if y is None:
+            left_out.append(name)
+            continue
+        lines.append("/-- `{}` is not a non-negative integer combination of the "
+                     "other generators: a functional separates it. -/".format(name))
+        lines.append("def certo_y{} : Fin {} → ℤ := {}".format(i, d, _vec(y)))
+        lines.append("theorem certo_sep_{i} : (∀ j, j ≠ {i} → 0 ≤ (certo_G *ᵥ "
+                     "certo_y{i}) j) ∧ (certo_G *ᵥ certo_y{i}) {i} < 0 := by "
+                     "decide".format(i=i))
+        lines += _IRREDUCIBLE.format(i=i, k=k).splitlines()
+        lines.append("")
+    if left_out:
+        lines.append("/- Not stated: irreducibility of {} -- each lies in the cone "
+                     "of the other generators, so no functional separates it, and "
+                     "the argument above does not apply. That is not a claim that "
+                     "it is reducible. -/".format(", ".join(left_out)))
+        lines.append("")
+
+    # 4. unimodular -> free
+    inv = _integer_inverse(A) if k == d else None
+    if inv is not None:
+        lines.append("/-- The generator matrix is UNIMODULAR: its inverse is an "
+                     "integer matrix. -/")
+        lines.append("def certo_Ginv : Matrix (Fin {0}) (Fin {0}) ℤ := {1}".format(
+            k, _matrix_to_lean(inv)))
+        lines.append("theorem certo_unimodular : certo_G * certo_Ginv = 1 ∧ "
+                     "certo_Ginv * certo_G = 1 := by decide")
+        lines.append("")
+        lines.append("/-- FREE: an integer point is in the semigroup exactly when "
+                     "its coordinates in the generators are non-negative -- the "
+                     "free monoid on the generators. -/")
+        lines += _FREE.format(k=k).splitlines()
+        lines.append("")
+    lines.append(FOOTER)
+    return _trim_header("\n".join(lines))
+
+
+_POINTED = """theorem certo_pointed (c : Fin {k} → ℤ) (hc : ∀ i, 0 ≤ c i)
+    (h : c ᵥ* certo_G = 0) : c = 0 := by
+  have hd := certo_degrees_pos
+  have key : c ⬝ᵥ (certo_G *ᵥ certo_u) = 0 := by
+    rw [dotProduct_mulVec, h, zero_dotProduct]
+  unfold dotProduct at key
+  have hsum : ∀ i ∈ Finset.univ, 0 ≤ c i * (certo_G *ᵥ certo_u) i :=
+    fun i _ => mul_nonneg (hc i) (le_of_lt (hd i))
+  have hz := (Finset.sum_eq_zero_iff_of_nonneg hsum).1 key
+  funext i
+  rcases mul_eq_zero.1 (hz i (Finset.mem_univ i)) with h0 | h0
+  · simpa using h0
+  · exact absurd h0 (ne_of_gt (hd i))"""
+
+_IRREDUCIBLE = """theorem certo_irreducible_{i} (c : Fin {k} → ℤ) (hc : ∀ j, 0 ≤ c j)
+    (hi : c {i} = 0) (h : c ᵥ* certo_G = certo_G {i}) : False := by
+  obtain ⟨hpos, hneg⟩ := certo_sep_{i}
+  have key : c ⬝ᵥ (certo_G *ᵥ certo_y{i}) = (certo_G *ᵥ certo_y{i}) {i} := by
+    rw [dotProduct_mulVec, h]; rfl
+  have nn : 0 ≤ c ⬝ᵥ (certo_G *ᵥ certo_y{i}) := by
+    unfold dotProduct
+    apply Finset.sum_nonneg
+    intro j _
+    by_cases hj : j = {i}
+    · subst hj; simp [hi]
+    · exact mul_nonneg (hc j) (hpos j hj)
+  linarith"""
+
+_FREE = """theorem certo_free (p : Fin {k} → ℤ) :
+    (∃ c : Fin {k} → ℤ, (∀ i, 0 ≤ c i) ∧ c ᵥ* certo_G = p) ↔
+      ∀ i, 0 ≤ (p ᵥ* certo_Ginv) i := by
+  constructor
+  · rintro ⟨c, hc, h⟩
+    have : p ᵥ* certo_Ginv = c := by
+      rw [← h, vecMul_vecMul, certo_unimodular.1, vecMul_one]
+    rw [this]; exact hc
+  · intro hp
+    refine ⟨p ᵥ* certo_Ginv, hp, ?_⟩
+    rw [vecMul_vecMul, certo_unimodular.2, vecMul_one]"""
+
+
 EXPORTERS = {
     "farkas": farkas_to_lean,
     # Registered only after it elaborated against a real Mathlib, which took
@@ -637,6 +870,10 @@ EXPORTERS = {
     # maximisation and a covering minimisation with rational coefficients --
     # compiled against the pinned Mathlib with no `sorry`.
     "lp_dual": lp_to_lean,
+    # Registered after it compiled against Mathlib with no `sorry`: all four
+    # stages, on a unimodular cone and on a semigroup where one generator lies
+    # in the cone of the others and stage 3 leaves it out.
+    "affine_semigroup": semigroup_to_lean,
 }
 
 

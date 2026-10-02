@@ -116,13 +116,86 @@ def _corners(d):
     return [tuple(c) for c in product(*((0, di) for di in d))]
 
 
-def halves(box, name):
+def halves(box, name, at=None):
+    """The box cut in two along `name`: at the midpoint, or at `at`."""
     lo, hi = box[name]
-    mid = (lo + hi) / 2
+    mid = (lo + hi) / 2 if at is None else at
     left, right = dict(box), dict(box)
     left[name] = (lo, mid)
     right[name] = (mid, hi)
     return left, right
+
+
+# --- where a zero touches --------------------------------------------------
+#
+# A polynomial that is >= 0 and has a zero INSIDE the box -- `x^2` on
+# `[-1, 0.99]` -- has a negative Bernstein coefficient on every cell that
+# contains the zero, so halving never ends: the zero is never at a midpoint.
+# Cut AT it, and both sides close at once. The zeros that touch are double
+# roots, so they are roots of the polynomial and of its derivative; the
+# rational ones are found exactly by the rational root theorem.
+
+#: Divisor enumeration is cheap below this; above it, no rational root is
+#: looked for rather than a slow search started.
+ROOT_LIMIT = 10 ** 6
+
+
+def _univariate(poly, name):
+    """`{power: coefficient}` if `poly` depends on `name` only, else None."""
+    i = list(poly.vars).index(name)
+    out = {}
+    for e, c in poly.terms.items():
+        if any(x for k, x in enumerate(e) if k != i):
+            return None
+        out[e[i]] = c
+    return out
+
+
+def _divisors(n):
+    n = abs(int(n))
+    small = [d for d in range(1, int(n ** 0.5) + 1) if n % d == 0]
+    return sorted(set(small + [n // d for d in small]))
+
+
+def _rational_roots(coeffs):
+    """Every rational root of a univariate polynomial `{power: c}`."""
+    from math import lcm
+
+    if not coeffs:
+        return []
+    deg = max(coeffs)
+    L = lcm(*[Fraction(c).denominator for c in coeffs.values()])
+    ints = [int(Fraction(coeffs.get(k, 0)) * L) for k in range(deg + 1)]
+    low = next(k for k, v in enumerate(ints) if v)
+    roots = [Fraction(0)] if low > 0 else []
+    ints = ints[low:]
+    if len(ints) <= 1:
+        return roots
+    a0, an = ints[0], ints[-1]
+    if abs(a0) > ROOT_LIMIT or abs(an) > ROOT_LIMIT:
+        return roots
+    for num in _divisors(a0):
+        for den in _divisors(an):
+            for r in (Fraction(num, den), Fraction(-num, den)):
+                if sum(v * r ** k for k, v in enumerate(ints)) == 0:
+                    roots.append(r)
+    return sorted(set(roots))
+
+
+def touching_cut(poly, box, name):
+    """A rational root of `poly` or of its derivative strictly inside the
+    box's interval for `name`, the one nearest the midpoint -- or None."""
+    coeffs = _univariate(poly, name)
+    if coeffs is None:
+        return None
+    lo, hi = box[name]
+    deriv = {k - 1: k * c for k, c in coeffs.items() if k > 0}
+    cands = [r for r in set(_rational_roots(coeffs)) | set(_rational_roots(deriv))
+             if lo < r < hi]
+    if not cands:
+        return None
+    mid = (lo + hi) / 2
+    return min(cands, key=lambda r: (abs(r - mid), r))
 
 
 def _leaf_degrees(poly, degrees):
@@ -137,7 +210,9 @@ def nonneg(poly, box, depth=0, degrees=None):
     `{"deg": [...]}` when a higher degree was asked for (a dual found in this
     basis is non-negative at the degree it was found at, which can be above
     the residual's own, where the coefficients are looser). A split is
-    `[name, left, right]` at the midpoint of `name`. A negative CORNER
+    `[name, left, right]` at the midpoint of `name`, or `[name, left, right,
+    "at"]` at a root of the polynomial or its derivative inside the interval
+    -- where a zero touches, and where halving would never end. A negative CORNER
     coefficient is the polynomial's value at a vertex, so it ends the search:
     no subdivision makes a polynomial non-negative where it is negative."""
     if not poly.terms:
@@ -153,14 +228,15 @@ def nonneg(poly, box, depth=0, degrees=None):
     own = degrees_of(poly)
     used = [n for i, n in enumerate(poly.vars) if own[i] > 0] or list(poly.vars)
     name = max(used, key=lambda n: (box[n][1] - box[n][0], -used.index(n)))
-    left, right = halves(box, name)
+    at = touching_cut(poly, box, name)
+    left, right = halves(box, name, at)
     ok_l, tl = nonneg(poly, left, depth - 1, degrees)
     if not ok_l:
         return False, None
     ok_r, tr = nonneg(poly, right, depth - 1, degrees)
     if not ok_r:
         return False, None
-    return True, [name, tl, tr]
+    return True, [name, tl, tr] if at is None else [name, tl, tr, str(at)]
 
 
 def diagnose(poly, box, degrees=None):
@@ -305,12 +381,22 @@ def check(poly, box, tree, max_depth=64, terms=None):
             return all(v >= 0 for v in coefficients(poly, box, d).values())
         except (KeyError, TypeError, ValueError):
             return False
-    if max_depth <= 0 or not isinstance(tree, list) or len(tree) != 3:
+    if max_depth <= 0 or not isinstance(tree, list) or len(tree) not in (3, 4):
         return False
-    name, tl, tr = tree
+    name, tl, tr = tree[:3]
     if name not in box:
         return False
-    left, right = halves(box, name)
+    at = None
+    if len(tree) == 4:
+        # A cut at a recorded point, which must lie strictly inside: on an
+        # end, one side would be a box of width zero and prove nothing.
+        try:
+            at = Fraction(tree[3])
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False
+        if not box[name][0] < at < box[name][1]:
+            return False
+    left, right = halves(box, name, at)
     return (check(poly, left, tl, max_depth - 1, terms)
             and check(poly, right, tr, max_depth - 1, terms))
 

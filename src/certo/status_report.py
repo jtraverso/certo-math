@@ -60,6 +60,10 @@ CHILDREN = {
     # source travels now, so the thing it is about stops reading as an
     # unconsumed result sitting beside it.
     "lean_binding": lambda p: [p.get("source")],
+    "pinned_value": lambda p: [p.get("upper"), p.get("lower")],
+    # An atlas's pieces: embedded ones here; ones referenced by path and
+    # digest are resolved by `route`, which knows where to look.
+    "parametric_atlas": lambda p: [r.get("cert") for r in p.get("pieces", [])],
 }
 
 
@@ -480,3 +484,169 @@ def edges(rows) -> list:
                 "via": "matrix fingerprint", "fingerprint": str(f),
             })
     return sorted(out, key=lambda e: (e["from"], e["to"]))
+
+
+# ---------------------------------------------------------------------------
+# a route: everything UNDER one target, and what it still rests on
+# ---------------------------------------------------------------------------
+#
+# `scan` answers "where does this directory stand". A user working on one
+# crux asked a different question: did this week's certificates reduce IT, or
+# did they close another case? That needs the report ROOTED at the target:
+# the tree of certificates it is built from, each with how much of it was
+# checked, and every obligation still open under it -- bridges, cited
+# results, assumptions, cases settled only for a finite window -- and the
+# certificates in the directory that hang from nothing under it.
+
+#: Kinds that settle a FINITE case, never the general statement.
+FINITE = {"sweep", "domain_sweep", "sweep_range", "orbit_witnesses",
+          "graph_set", "cnf_model", "drat", "shrink_graph", "shrink_domain"}
+
+
+def _finite_scope(data) -> str:
+    p = data.get("payload") or {}
+    kind = data.get("kind")
+    if kind == "sweep":
+        return t("route.finite.sweep", n=p.get("n", "?"),
+                 count=p.get("family_count", "?"))
+    if kind == "sweep_range":
+        return t("route.finite.range", sizes=", ".join(map(str, p.get("sizes") or [])))
+    if kind == "domain_sweep":
+        return t("route.finite.domain", count=p.get("count", "?"))
+    return t("route.finite.instance")
+
+
+def _resolve_children(data, where) -> list:
+    """Embedded children, and an atlas's pieces referenced by path."""
+    out = _children(data)
+    if data.get("kind") == "parametric_atlas":
+        from . import atlas as A
+
+        for rec in (data.get("payload") or {}).get("pieces", []):
+            if rec.get("cert") is None:
+                c, _why = A.resolve(rec)
+                if c is not None:
+                    out.append(c.to_dict())
+    return out
+
+
+def route(target, where=".", limits=None) -> dict:
+    """The report rooted at `target`: every certificate under it, verified,
+    with its degree of checking and every obligation still open."""
+    from .certificate import verify as verify_cert
+
+    from . import store
+
+    raw = store.read_json(str(target))
+    top = Certificate.unwrap(raw) if isinstance(raw, dict) else raw
+    if not isinstance(top, dict) or "kind" not in top:
+        raise ValueError(t("route.not_a_certificate", path=str(target)))
+
+    # Lean bindings in the directory, by the digest of what they are about.
+    bindings = {}
+    root = Path(where)
+    for ref, rel, data in (store.walk(root) if root.exists() else []):
+        d = Certificate.unwrap(data) if isinstance(data, dict) else None
+        if isinstance(d, dict) and d.get("kind") == "lean_binding":
+            src = (d.get("payload") or {}).get("source")
+            if isinstance(src, dict):
+                key = Certificate.from_dict(src).digest()
+                bindings.setdefault(key, []).append({
+                    "rel": rel, "declaration": d["payload"].get("declaration"),
+                    "discharges": d["payload"].get("discharges"),
+                    "covers": bool(d["payload"].get("covers"))})
+
+    nodes, seen = [], set()
+
+    def visit(data, depth, via):
+        cert = Certificate.from_dict(data)
+        digest = cert.digest()
+        if digest in seen:
+            return
+        seen.add(digest)
+        rep = verify_cert(cert, limits)
+        owed = [dict(o, node=digest) for o in _owed(data)]
+        p = data.get("payload") or {}
+        for c in p.get("cited") or []:          # an atlas's cited boxes
+            if isinstance(c, dict) and c.get("source"):
+                owed.append({"sort": "cited", "name": json.dumps(c.get("box")),
+                             "why": c["source"], "node": digest})
+        for lem in p.get("lemmas") or []:       # a proof's cited lemmas
+            if lem.get("cited"):
+                owed.append({"sort": "cited", "name": lem.get("name", "?"),
+                             "why": lem["cited"], "node": digest})
+        if data.get("kind") == "pinned_value" and p.get("assumption"):
+            owed.append({"sort": "assumed", "name": t("route.pin_lower"),
+                         "why": p["assumption"], "node": digest})
+        node = {
+            "digest": digest, "kind": data["kind"], "depth": depth, "via": via,
+            "headline": _headline(data), "ok": rep.ok, "degree": rep.degree,
+            "partial": rep.partial, "assumed": rep.assumed, "owed": owed,
+            "hollow": _hollow(data), "stale": _stale(data),
+            "finite": _finite_scope(data) if data["kind"] in FINITE else None,
+            "lean": bindings.get(digest, []),
+        }
+        nodes.append(node)
+        for child in _resolve_children(data, where):
+            visit(child, depth + 1, digest)
+
+    visit(top, 0, None)
+
+    # Off the route: certificates here that are not under the target, and
+    # are not bindings of something that is.
+    under = {n["digest"] for n in nodes}
+    off = []
+    if root.exists():
+        for ref, rel, data in store.walk(root):
+            d = Certificate.unwrap(data) if isinstance(data, dict) else None
+            if not isinstance(d, dict) or "kind" not in d:
+                continue
+            try:
+                dg = Certificate.from_dict(d).digest()
+            except (KeyError, TypeError):
+                continue
+            if dg in under:
+                continue
+            if d.get("kind") == "lean_binding":
+                src = (d.get("payload") or {}).get("source")
+                if isinstance(src, dict) and Certificate.from_dict(src).digest() in under:
+                    continue
+            off.append({"rel": rel, "kind": d["kind"], "headline": _headline(d)})
+
+    owed = [o for n in nodes for o in n["owed"]]
+    degrees = {}
+    for n in nodes:
+        degrees[n["degree"]] = degrees.get(n["degree"], 0) + 1
+    return {
+        "target": str(target), "digest": nodes[0]["digest"],
+        "kind": nodes[0]["kind"], "headline": nodes[0]["headline"],
+        "degree": nodes[0]["degree"], "nodes": nodes, "degrees": degrees,
+        "owed": owed, "finite": [n for n in nodes if n["finite"]],
+        "partial": [n for n in nodes if n["partial"]],
+        "lean": [dict(b, node=n["digest"]) for n in nodes for b in n["lean"]],
+        "off_route": off,
+    }
+
+
+def _owed_key(o) -> str:
+    return "{}|{}|{}".format(o.get("sort"), o.get("name"), o.get("why"))
+
+
+def since(now: dict, before: dict) -> dict:
+    """What changed UNDER the target between two route reports."""
+    a = {_owed_key(o) for o in before.get("owed", [])}
+    b = {_owed_key(o) for o in now.get("owed", [])}
+    na = {n["digest"]: n for n in before.get("nodes", [])}
+    nb = {n["digest"]: n for n in now.get("nodes", [])}
+    return {
+        "same_target": before.get("headline") == now.get("headline")
+                       and before.get("kind") == now.get("kind"),
+        "discharged": sorted(a - b), "new_owed": sorted(b - a),
+        "nodes_added": sorted(n["kind"] + ": " + (n["headline"] or n["digest"][:12])
+                              for d, n in nb.items() if d not in na),
+        "nodes_gone": sorted(n["kind"] + ": " + (n["headline"] or n["digest"][:12])
+                             for d, n in na.items() if d not in nb),
+        "degree_before": before.get("degree"), "degree_now": now.get("degree"),
+        "off_route_before": len(before.get("off_route", [])),
+        "off_route_now": len(now.get("off_route", [])),
+    }

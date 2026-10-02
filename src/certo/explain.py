@@ -167,3 +167,110 @@ def markdown(rows) -> str:
     for r in rows or []:
         out.append("| `{}` | {} | {} |".format(r["formula"], _values(r), _tag(r)))
     return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# a PROOF as mathematics: what it used, how it combines, what is tight
+# ---------------------------------------------------------------------------
+#
+# The other half of the summary above. A core says which hypotheses the claim
+# needed and which it did not; a Farkas certificate IS an identity, the
+# multipliers times the rows summing to a contradiction; an LP dual says which
+# constraints are tight at the optimum and what each is worth. All three were
+# in the payload and printed as lists of numbers. Computed from the
+# certificate when it is read, never stored, like the counterexample.
+
+
+def _poly_text(poly) -> str:
+    """A linarith row's polynomial `{monomial: c}` as text."""
+    out = []
+    for mono, c in sorted(poly.items(), key=lambda kv: (len(kv[0]), kv[0])):
+        if not c:
+            continue
+        name = "*".join(mono)
+        mag = abs(c)
+        coef = "" if (mag == 1 and name) else _text(mag)
+        term = (coef + ("*" if coef and name else "") + name) or "0"
+        out.append(("- " if c < 0 else "+ ") + term)
+    if not out:
+        return "0"
+    text = " ".join(out)
+    return text[2:] if text.startswith("+ ") else "-" + text[2:]
+
+
+def proof_summary(cert) -> list | None:
+    """Rows for a core, a Farkas combination or an LP dual -- or None."""
+    from fractions import Fraction
+
+    kind = getattr(cert, "kind", None)
+    p = getattr(cert, "payload", {}) or {}
+    if kind == "unsat_core":
+        rows = [{"role": "used", "name": n} for n in p.get("names") or []
+                if n != "__goal__"]
+        rows += [{"role": "unused", "name": n} for n in p.get("dropped") or []]
+        if p.get("multipliers"):
+            rows += _combination(p)
+        return rows
+    if kind == "farkas":
+        return _combination(p)
+    if kind == "lp_dual" and p.get("exact"):
+        from . import exact
+
+        A = [exact.parse_all(r) for r in p["A"]]
+        b, x = exact.parse_all(p["b"]), exact.parse_all(p["primal"] or [])
+        y = exact.parse_all(p["dual"])
+        out = []
+        for name, row, rhs, price in zip(p.get("names") or [], A, b, y):
+            if len(x) != len(row):
+                return None
+            slack = rhs - sum(a * v for a, v in zip(row, x))
+            out.append({"role": "row", "name": name, "slack": _text(slack),
+                        "price": _text(price), "active": slack == 0})
+        return out
+    return None
+
+
+def _combination(p) -> list:
+    from fractions import Fraction
+
+    from . import linarith
+
+    rows = linarith.parse_rows(p["rows"])
+    lams = [Fraction(v) for v in p["multipliers"]]
+    out = [{"role": "term", "name": n, "times": _text(l),
+            "row": "{} {} 0".format(_poly_text(poly), rel)}
+           for (n, poly, rel), l in zip(rows, lams) if l]
+    total = linarith.combination(rows, lams)
+    const = total.get(linarith.CONST, 0)
+    # The combination's relation: strict as soon as one strict row enters
+    # with a positive weight.
+    strict = any(r == "<" and l > 0 for (_n, _p, r), l in zip(rows, lams))
+    rel = "<" if strict else "<="
+    out.append({"role": "sum", "row": "{} {} 0".format(_poly_text(total), rel),
+                "constant": _text(Fraction(const))})
+    return out
+
+
+def proof_lines(rows) -> list:
+    from .i18n import t
+
+    out = []
+    for r in rows or []:
+        role = r["role"]
+        if role == "used":
+            out.append(t("explain.used", name=r["name"]))
+        elif role == "unused":
+            out.append(t("explain.unused", name=r["name"]))
+        elif role == "term":
+            out.append("{:>8} * ({})   [{}]".format(r["times"], r["row"], r["name"]))
+        elif role == "sum":
+            out.append(t("explain.sum", row=r["row"]))
+        elif role == "row":
+            out.append("{:<18} {}".format(r["name"], t(
+                "explain.active_row" if r["active"] else "explain.slack_row",
+                slack=r["slack"], price=r["price"])))
+    return out
+
+
+def proof_markdown(rows) -> str:
+    return "\n".join("- " + line.strip() for line in proof_lines(rows))

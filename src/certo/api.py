@@ -34,8 +34,9 @@ SELF-CHECK. `run` verifies what it produced, the way the CLI does, and raises
 `SelfCheckFailed` rather than returning a certificate that fails its own
 verifier -- for SOLVER-FREE certificates only. One whose check calls a solver
 again (`unsat_core`, `model`, ...) is returned unchecked, and
-`res.meta["self_check"]` is absent rather than "ok"; call `verify` on it when
-that matters. It costs 0.7% of an `opt` and it is what caught the defects in
+`res.meta["self_check"]` is absent rather than "ok". `self_check="all"` checks
+those too -- it asks the solver again -- which is what would have caught a
+`prove` answer whose own certificate did not verify. It costs 0.7% of an `opt` and it is what caught the defects in
 0.11.3. Pass `self_check=False` in a hot loop if you have measured that it
 matters; you will be turning off the thing that reads certo's own output.
 """
@@ -139,7 +140,7 @@ def options(command: str, spec=None) -> list:
 
 
 def run(command: str, spec, limits=None, *, spec_path=None,
-        self_check: bool = True, **kwargs) -> Result:
+        self_check=True, **kwargs) -> Result:
     """Run one command on one spec, in this process. Returns a `Result`.
 
     `limits` is a `Limits`, or None for the defaults. `spec_path` stamps the
@@ -183,7 +184,7 @@ def run(command: str, spec, limits=None, *, spec_path=None,
     if res.certificate is not None and spec_path is not None:
         res.certificate.stamp(spec_path)
     if self_check and res.certificate is not None:
-        _check(res, limits)
+        _check(res, limits, every=self_check == "all")
 
     # The in-process surface is the one a model sweeping a route space uses,
     # so it is the one whose unanswered questions are worth the most. Silent
@@ -194,7 +195,7 @@ def run(command: str, spec, limits=None, *, spec_path=None,
     return res
 
 
-def _check(res, limits) -> None:
+def _check(res, limits, every=False) -> None:
     """The CLI's self-check, with an exception where it has an exit code.
 
     The CLI prints to stderr and returns 1, and the caller decides. In a
@@ -204,7 +205,7 @@ def _check(res, limits) -> None:
     """
     from .certificate import verify
 
-    if not res.certificate.solver_free:
+    if not res.certificate.solver_free and not every:
         return          # re-running a search on every call is a cost nobody asked for
     report = verify(res.certificate, limits)
     res.meta["self_check"] = "ok" if report.ok else "FAILED"

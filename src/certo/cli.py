@@ -132,6 +132,17 @@ def _print_explained(cert, md=False) -> None:
 
     rows = explain.model_summary(cert) if cert is not None else None
     if not rows:
+        # Not a counterexample: a core, a Farkas combination or an LP dual,
+        # read as what it used, how it combines and what is tight.
+        proof = explain.proof_summary(cert) if cert is not None else None
+        if not proof:
+            return
+        if md:
+            print(explain.proof_markdown(proof))
+            return
+        print("  " + t("cli.explain.proof_header"))
+        for line in explain.proof_lines(proof):
+            print("    " + line)
         return
     if md:
         print(explain.markdown(rows))
@@ -2157,12 +2168,12 @@ def cmd_verify(args):
         return 0 if rep.ok else 1
     if args.json:
         out = rep.to_dict()
-        if cert.kind == "model":
-            from . import explain
+        from . import explain
 
-            rows = explain.model_summary(cert)
-            if rows:
-                out["explained"] = rows
+        rows = (explain.model_summary(cert) if cert.kind == "model"
+                else explain.proof_summary(cert))
+        if rows:
+            out["explained"] = rows
         print(json.dumps(out, indent=2, ensure_ascii=False))
     else:
         print(t("cli.verify.header",
@@ -2317,12 +2328,67 @@ def _manifest(args, status_report):
     return 1 if rep.get("missing") or rep.get("unexpected") else 0
 
 
+def _route(args, status_report) -> int:
+    """`status --root CERT`: the report under one target, and `--since`."""
+    rep = status_report.route(args.root, args.where, limits_from(args))
+    if getattr(args, "since", None):
+        before = json.loads(Path(args.since).read_text(encoding="utf-8"))
+        rep["since"] = status_report.since(rep, before.get("route", before))
+    if args.json:
+        print(json.dumps({"route": rep} if not rep.get("since")
+                         else {"route": rep, "since": rep["since"]},
+                         indent=2, ensure_ascii=False))
+        return 0 if rep["nodes"][0]["ok"] else 1
+    print(t("cli.route.header", kind=rep["kind"], headline=rep["headline"] or rep["target"],
+            n=len(rep["nodes"]), degree=rep["degree"]))
+    for n in rep["nodes"]:
+        mark = "ok" if n["ok"] else "XX"
+        print("  {}[{}] {:<18} {:<11} {}".format(
+            "  " * n["depth"], mark, n["kind"], n["degree"],
+            (n["headline"] or n["digest"][:12])[:60]).rstrip())
+    sections = (
+        ("cli.route.owed", ["{}: {} -- {}".format(o["sort"], o["name"], o["why"])
+                            for o in rep["owed"]]),
+        ("cli.route.finite", ["{}: {}".format(n["kind"], n["finite"])
+                              for n in rep["finite"]]),
+        ("cli.route.partial", ["{}: {}".format(n["kind"], w)
+                               for n in rep["partial"] for w in n["partial"]]),
+        ("cli.route.lean", ["{} <- {}{}".format(b["discharges"], b["declaration"],
+                                                "" if b["covers"] else " (" + t("cli.route.lean_gap") + ")")
+                            for b in rep["lean"]]),
+        ("cli.route.off", ["{} ({})".format(o["rel"], o["kind"])
+                           for o in rep["off_route"]]),
+    )
+    for key, lines in sections:
+        print("  " + t(key, n=len(lines)))
+        for line in lines[:12]:
+            print("    " + line)
+        if len(lines) > 12:
+            print("    " + t("cli.solution.more", n=len(lines) - 12))
+    s = rep.get("since")
+    if s:
+        print("  " + t("cli.route.since", discharged=len(s["discharged"]),
+                       new=len(s["new_owed"]), added=len(s["nodes_added"]),
+                       gone=len(s["nodes_gone"]), before=s["degree_before"],
+                       now=s["degree_now"], off_before=s["off_route_before"],
+                       off_now=s["off_route_now"]))
+        for line in s["discharged"][:8]:
+            print("    - " + line)
+        for line in s["new_owed"][:8]:
+            print("    + " + line)
+        if not s["same_target"]:
+            print("  !! " + t("cli.route.other_target"))
+    return 0 if rep["nodes"][0]["ok"] else 1
+
+
 def cmd_status(args):
     """Where the proof stands, read off the certificates themselves."""
     from . import status_report
 
     if getattr(args, "manifest", None):
         return _manifest(args, status_report)
+    if getattr(args, "root", None):
+        return _route(args, status_report)
 
     try:
         rep = status_report.scan(args.where, verify_all=args.verify,
@@ -2926,6 +2992,15 @@ def build_parser():
     sp.add_argument("--expect", metavar="RUTA",
                     help="a file of headlines, one per line: --manifest then "
                          "names what is missing rather than only what is here")
+    sp.add_argument("--root", metavar="CERT",
+                    help="the report UNDER one target: every certificate it is "
+                         "built from, how each was checked, and every "
+                         "obligation still open -- bridges, cited results, "
+                         "finite windows -- plus what in the directory is off "
+                         "the route")
+    sp.add_argument("--since", metavar="FILE",
+                    help="with --root: a previous `--root --json` report; says "
+                         "what was discharged, added or changed under the target")
     sp.set_defaults(func=cmd_status)
 
     sp = add("doctor", "what this install can and cannot do, and what each "

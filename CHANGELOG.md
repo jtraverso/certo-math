@@ -6,7 +6,80 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
-## [0.22.0] — 2026-10-02
+## [0.23.0] — 2026-10-02
+
+**Every kind in the battery, a report rooted at the target, and semigroups
+in Lean.** No new commands (57) or kinds (55); the schema stays 5.
+
+### Soundness: the battery over every kind
+
+The structural forgeries of 0.22 ran over 29 kinds. They run over all 55 now,
+and the suite fails when a kind joins without a fixture. On the 25 new ones
+they found nine more conclusions nothing recomputed:
+
+- **`toric_cone`**: `regular`, `height_one`, `crepant`, `heights`, the
+  determinant and the rest were carried beside the checks and compared with
+  nothing -- the conclusions a formalisation of smoothness rests on. The whole
+  report is rebuilt by the producer's `certify` and compared field by field.
+- **`linear_system`**: `status` was not tied to the rank -- `unique` could be
+  said of a system with free variables -- and an unknown `domain` skipped the
+  integrality check.
+- **`branch_frontier`**: the two holes `branch_bound` had in 0.22, no root
+  required and a branch's values not its variable's domain.
+- **`equitable_quotient`**: the row and column classes, and the physical
+  totals, are tied to the sizes the double count uses.
+- **`parametric_symmetry`**: `checked`, `failed`, `ok`, `regimes` and
+  `objects_text` are recomputed from the points.
+- **`shrink_graph`**: the start is a counterexample too, no smaller than the
+  minimum, and both graphs are written exactly.
+- **`induction`**: a declared variable the goal does not have is refused
+  instead of guessed past.
+- **`lean_binding`**: what it discharges is a hypothesis of the source, and
+  the formula checked is that hypothesis's.
+- **`variable_range`**: the interval and `empty` are what the two ends say,
+  and an EMPTY regime -- accepted on its word -- is reported as not
+  re-derived until it carries a Farkas ray.
+- **Everywhere**: a `sense` that is neither `max` nor `min` is refused (it
+  was read as `max`), and `farkas_ray` checks its shapes.
+
+### From a user's report (a new use: certifying a paper's finite cases)
+
+- **`opt` on an infeasible LP returns the exact Farkas ray** (`farkas_ray`),
+  self-checked, instead of "infeasible" with no certificate -- cross-cutting
+  rule 1, broken in the one case where the evidence is the whole answer. `mixed`
+  keeps it when the relaxation is already infeasible.
+- **`nonneg` cuts where a zero touches**: at the rational roots of the
+  polynomial and its derivative, recorded in the tree and rechecked.
+  `x^2 >= 0` on `[-1, 0.99]` was INCONCLUSIVE; it is proved, and the hint
+  names the root.
+- **`pin` takes its `max_size` to the cover it runs**, and a cover certificate
+  without one is refused by naming the field.
+- **`export --lean` for large Farkas certificates**: `maxRecDepth` sized to
+  what is emitted, `linarith only` over the core, the unused-variable noise
+  silenced. 170 rows compile against Mathlib; they stopped at the default
+  depth.
+
+### New
+
+- **`status --root CERT`**: the report UNDER one target -- the tree it is
+  built from, each node's degree of checking, every obligation still open
+  beneath it (bridges, cited results, assumptions, finite windows, hypotheses
+  discharged in Lean), and what in the directory is OFF the route.
+  `--since FILE` compares with an earlier report: what was discharged, added
+  or changed under the target. Over MCP: `status(root=, since=)`.
+- **`export --lean` for `affine_semigroup`**, in four stages, every fact
+  decided by Lean and every consequence proved in the file: membership,
+  pointedness, irreducibility of each generator (by a separating functional;
+  a generator in the cone of the others is left out and said), and for a
+  unimodular generator matrix its integer inverse and freeness. Compiled
+  against Mathlib with no `sorry`.
+- **A proof as mathematics**: for a core, the hypotheses it used and the ones
+  it did not; for a Farkas certificate, the combination as an identity; for
+  an LP dual, which rows are tight and what each is worth. In `verify`, as
+  `explained` in JSON, and with `--md`.
+- **`api.run(..., self_check="all")`** also self-checks certificates that
+  need a solver.
+
 
 **What three reports asked for, and eleven more holes closed.** There are 57
 commands (`nonneg`, `pin`, `batch`) and 55 kinds (`polynomial_nonneg`,

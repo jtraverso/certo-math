@@ -260,7 +260,7 @@ res.certificate           # the artefact `--cert` would have written
 than hand back a certificate that fails its own verifier. That covers
 solver-free certificates; one whose check calls a solver again (`unsat_core`,
 `model`, …) comes back unchecked, with no `meta["self_check"]` — call
-`certo.verify` on it when it matters. It costs under 1% of an `opt`. Pass
+`certo.verify` on it when it matters, or pass `self_check="all"`. It costs under 1% of an `opt`. Pass
 `self_check=False` only after measuring.
 
 The engine modules under `certo.engines` stay private; `run`, `runnable` and

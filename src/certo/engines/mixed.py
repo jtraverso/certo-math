@@ -122,6 +122,13 @@ def mixed(spec, limits: Limits | None = None, spec_path: str = "",
                                    n=len(missing)))
     else:
         found = lp.opt(_as_milp(spec), lim, use_exact=False)
+        if (found.verdict is Verdict.UNSATISFIABLE and found.certificate is not None
+                and found.certificate.kind == "farkas_ray"):
+            # The RELAXATION is infeasible, with its ray: then so is every
+            # integer point, and that is the answer, certified.
+            return Result("mixed", Status.UNSAT, Verdict.UNSATISFIABLE, ENGINE,
+                          ms(), found.certificate,
+                          detail=t("engine.mixed.infeasible_ray"))
         if found.verdict is not Verdict.SATISFIABLE:
             return Result("mixed", found.status, Verdict.INCONCLUSIVE, ENGINE,
                           ms(), None, detail=t("engine.mixed.search_failed",

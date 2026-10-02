@@ -2066,10 +2066,24 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000) -> dict:
     "reads the certificates rather than re-verifying them unless you ask."))
 @_guard
 async def status(directory: str | None = None, verify_all: bool = False,
-                 timeout_ms: int = 60_000) -> dict:
+                 timeout_ms: int = 60_000, root: str | None = None,
+                 since: str | None = None) -> dict:
+    """With `root` (a certificate path): the report UNDER that target -- every
+    certificate it is built from with its degree of checking, every
+    obligation still open, and what in the directory is off the route.
+    `since`: a previous such report, saved as JSON, to say what changed."""
+    import json as _json
+
     from . import status_report
 
     where = _resolve(directory) if directory else _workspace()
+    if root:
+        rep = await _off(status_report.route, str(_resolve(root)), str(where),
+                         _limits(timeout_ms))
+        if since:
+            before = _json.loads(_resolve(since).read_text(encoding="utf-8"))
+            rep["since"] = status_report.since(rep, before.get("route", before))
+        return {"route": rep}
     return await _off(status_report.scan, str(where), verify_all,
                       _limits(timeout_ms))
 

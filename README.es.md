@@ -261,7 +261,7 @@ res.certificate           # el artefacto que habría escrito `--cert`
 devolver un certificado que no pasa su propio verificador. Eso cubre los
 certificados sin solver; uno cuya comprobación vuelve a llamar a un solver
 (`unsat_core`, `model`, …) vuelve sin comprobar, sin `meta["self_check"]`:
-llama a `certo.verify` sobre él cuando importe. Cuesta menos del 1% de un
+llama a `certo.verify` sobre él cuando importe, o pasa `self_check="all"`. Cuesta menos del 1% de un
 `opt`. Pon `self_check=False` solo después de medirlo.
 
 Los módulos de `certo.engines` siguen siendo privados; la promesa son `run`,

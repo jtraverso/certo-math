@@ -4096,7 +4096,7 @@ def test_a_farkas_certificate_becomes_a_runnable_linarith_example():
 
     text = leanexport.farkas_to_lean(_farkas_cert())
     assert "example (x y : \u211d)" in text
-    assert "linarith [x_ge_1, y_ge_1]" in text
+    assert "linarith only [x_ge_1, y_ge_1]" in text
     assert "import Mathlib.Data.Real.Basic" in text   # linarith alone is not enough
     assert "\u00ac" not in text                      # the goal is positive, not a negation
 
@@ -7140,8 +7140,11 @@ def test_lean_is_emitted_for_two_things_and_refused_for_the_rest():
 
     # `lp_dual` joined in 0.18 after a maximisation and a minimisation with
     # rational coefficients both compiled against the pinned Mathlib.
-    assert sorted(leanexport.EXPORTERS) == ["farkas", "integer_matrix",
-                                            "lp_dual"]
+    # `affine_semigroup` joined in 0.23 after a unimodular 4-dimensional cone
+    # (all four stages) and a semigroup with a generator in the cone of the
+    # others (stage 3 leaving it out) both compiled, with no `sorry`.
+    assert sorted(leanexport.EXPORTERS) == ["affine_semigroup", "farkas",
+                                            "integer_matrix", "lp_dual"]
 
     root = pathlib.Path(__file__).resolve().parent.parent
     cert = farkas.farkas(
@@ -9749,7 +9752,9 @@ def test_a_binding_written_before_the_source_travelled_still_verifies():
     old["payload"].pop("source")
     rep = verify(Certificate.from_dict(old))
     assert rep.ok
-    assert len(rep.checks) == n_new - 1
+    # two checks need the source: that it verifies, and that what the
+    # binding discharges is one of its hypotheses (0.23)
+    assert len(rep.checks) == n_new - 2
 
 
 def test_an_embedded_source_stops_reading_as_an_unconsumed_result():
@@ -14296,6 +14301,179 @@ def test_the_pair_clique_parts_returns_is_refused_by_name():
     assert check(edges, pair[0])["ok"]
 
 
+def test_a_semigroup_goes_to_lean_in_four_stages():
+    """Asked for by a user formalising toric charts, who wrote the free-monoid
+    identification by hand: membership, pointedness, irreducibility of each
+    generator and, for a unimodular matrix, freeness -- every fact `decide`d
+    by Lean, every consequence proved once in the file. Compiled against
+    Mathlib by hand for both cases below, with no `sorry`."""
+    from certo import SemigroupSpec, leanexport
+    from certo.engines import algebra
+
+    def export(gens, points=None):
+        c = algebra.affine_semigroup(SemigroupSpec(generators=gens,
+                                                   points=points or {}), LIM).certificate
+        return leanexport.EXPORTERS["affine_semigroup"](dict(c.to_dict(),
+                                                             digest=c.digest()))
+
+    free = export({"e0": (1, 0, 0, 0), "e1": (1, 1, 0, 0), "e2": (1, 1, 1, 0),
+                   "e3": (1, 1, 1, 1)}, {"p": (4, 3, 2, 1)})
+    for name in ("certo_mem_p", "certo_pointed", "certo_irreducible_3",
+                 "certo_unimodular", "certo_free"):
+        assert "theorem " + name in free, name
+    assert "sorry" not in free and not leanexport.check_emission(free, "affine_semigroup")
+
+    # b = (1, 1) lies in the cone of a and c: no functional separates it, and
+    # stage 3 says so instead of claiming anything; no stage 4 off the square
+    part = export({"a": (1, 0), "b": (1, 1), "c": (1, 3)})
+    assert "theorem certo_irreducible_0" in part and "theorem certo_irreducible_2" in part
+    assert "theorem certo_irreducible_1" not in part
+    assert "Not stated: irreducibility of b" in part and "certo_free" not in part
+
+
+def test_a_large_farkas_export_sets_the_depth_it_needs():
+    """Reported: 169 hypotheses hit Lean's `maximum recursion depth` and the
+    file did not compile, every step right. The depth is set from what is
+    emitted -- before the doc comment, which must sit on the declaration --
+    `linarith only` is handed the core, and the unused-variable noise is
+    silenced. Compiled against Mathlib by hand: 170 rows, clean."""
+    import z3
+
+    from certo import Spec, leanexport
+    from certo.engines import farkas
+
+    n = 40
+    xs = z3.Reals(" ".join("x%d" % i for i in range(n)))
+    s = Spec().assume("h0", xs[0] >= 1)
+    for i in range(n - 1):
+        s.assume("h%d" % (i + 1), xs[i + 1] >= xs[i] + 1)
+    s.claim(xs[n - 1] >= n)
+    c = farkas.farkas(s, LIM).certificate
+    text = leanexport.EXPORTERS["farkas"](dict(c.to_dict(), digest=c.digest()))
+    lines = text.splitlines()
+    at = next(i for i, l in enumerate(lines) if l.startswith("set_option maxRecDepth"))
+    assert int(lines[at].split()[2]) >= 256 * n
+    assert lines[at + 1] == "set_option linter.unusedVariables false in"
+    assert lines[at + 2].startswith("/--")
+    assert "linarith only [" in text
+    assert not leanexport.check_emission(text, "farkas")
+
+
+def test_nonneg_cuts_where_a_zero_touches():
+    """Reported: `x^2 >= 0` on [-1, 0.99] stayed INCONCLUSIVE -- a double zero
+    inside keeps a Bernstein coefficient negative on every cell around it,
+    and the midpoint never lands on it. The cut is made AT the rational roots
+    of the polynomial and its derivative, recorded, and rechecked."""
+    from certo import NonnegSpec, api
+    from certo.polynomials import Poly
+
+    x = Poly.var(("x",), "x")
+    for poly, box, cut in ((x ** 2, (-1, Fraction(99, 100)), "0"),
+                           ((x * x - 1) ** 2, (-2, 2), "0")):
+        r = api.run("nonneg", NonnegSpec(poly=poly, box={"x": box}))
+        assert r.verdict is Verdict.PROVED, r.detail
+        assert r.certificate.payload["tree"][3] == cut
+        d = json.loads(json.dumps(r.certificate.to_dict()))
+        d["payload"]["tree"][3] = str(box[0])        # a cut on the end proves nothing
+        assert not verify(Certificate.from_dict(d), LIM).ok
+
+
+def test_pin_takes_its_max_size_to_the_cover_it_runs():
+    """Reported: a CoverSpec without `max_size` inside `PinSpec(max_size=3)`
+    was refused as "pieces of order None"."""
+    from itertools import combinations
+
+    from certo import CoverSpec, PinSpec, api
+    from certo.spec import CliqueLPSpec
+
+    E = list(combinations(range(7), 2))
+    fano = [(0, 1, 3), (1, 2, 4), (2, 3, 5), (3, 4, 6), (4, 5, 0), (5, 6, 1),
+            (6, 0, 2)]
+    r = api.run("pin", PinSpec(
+        edges=E, max_size=3,
+        upper=CoverSpec(universe=E, parts=fano, cliques=True),
+        lower=CliqueLPSpec(edges=E, problem="partition",
+                           weight={"constant": 1}, max_size=3)))
+    assert r.verdict is Verdict.PROVED and r.meta["value"] == 7
+
+
+def test_an_infeasible_lp_comes_back_with_its_farkas_ray():
+    """Reported: `opt` answered "the constraint system is infeasible" with no
+    certificate -- rule 1 broken in the one case, non-existence, where the
+    evidence is the whole answer. The exact ray comes back, and `mixed` keeps
+    it when the relaxation is already infeasible."""
+    from certo import LPSpec, api
+
+    s = LPSpec(sense="max")
+    s.variable("x", 0, None)
+    s.variable("y", 0, None)
+    s.objective({"x": 1})
+    s.constraint({"x": 1, "y": 1}, "==", 1, name="a")
+    s.constraint({"x": 1, "y": 1}, "==", 2, name="b")
+    r = api.run("opt", s)
+    assert r.verdict is Verdict.UNSATISFIABLE
+    assert r.certificate.kind == "farkas_ray" and r.meta["self_check"] == "ok"
+    assert verify(_roundtrip(r.certificate), LIM).ok
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, 1, kind="binary")
+    m.variable("w", 0, None)
+    m.objective({"a": 1, "w": 1})
+    m.constraint({"a": 1, "w": 1}, ">=", 3, name="need")
+    m.constraint({"a": 1, "w": 1}, "<=", 2, name="cap")
+    r = api.run("mixed", m)
+    assert r.verdict is Verdict.UNSATISFIABLE and r.certificate.kind == "farkas_ray"
+
+
+def test_a_route_tells_reducing_the_crux_from_closing_another_case():
+    """Reported: there was no way to tell "we closed another case" from "we
+    reduced the crux". `status --root` reports UNDER one target -- its tree,
+    each node's degree, every obligation open beneath it -- and names what in
+    the directory is off the route; `--since` says what moved under it."""
+    import contextlib
+    import io
+    import tempfile
+
+    from certo import cli, status_report
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as tmp:
+        d = pathlib.Path(tmp)
+
+        def make(cmd, ex, name):
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main([cmd, str(root / "examples" / ex), "--cert", str(d / name)])
+
+        make("compose", "walkthrough_proof.py", "theorem.json")
+        before = status_report.route(d / "theorem.json", d, LIM)
+        assert before["kind"] == "proof" and before["degree"] == "relative"
+        assert {o["sort"] for o in before["owed"]} >= {"bridge"}
+        assert before["off_route"] == []
+        # another case closed: it lands OFF the route, and nothing under the
+        # target moves
+        make("prove", "amgm.py", "side.json")
+        now = status_report.route(d / "theorem.json", d, LIM)
+        assert [o["rel"] for o in now["off_route"]] == ["side.json"]
+        moved = status_report.since(now, before)
+        assert moved["same_target"] and not moved["discharged"]
+        assert not moved["nodes_added"] and moved["off_route_now"] == 1
+
+
+def test_self_check_all_also_checks_what_needs_a_solver():
+    """By default `run` self-checks only solver-free certificates; a
+    `prove` answer is returned unchecked. `self_check="all"` asks again."""
+    import z3
+
+    from certo import Spec, api
+
+    x = z3.Real("x")
+    s = Spec().assume("pos", x > 0).claim(x * x > 0)
+    r = api.run("prove", s)
+    assert not r.certificate.solver_free and "self_check" not in r.meta
+    r = api.run("prove", s, self_check="all")
+    assert r.meta["self_check"] == "ok"
+
+
 def test_the_nosite_launcher_keeps_pth_paths_and_skips_their_code():
     """Reported three times: the default `certo` pays the `.pth` hook doctor
     warns about. The launcher starts Python with -S and puts the paths back
@@ -14363,6 +14541,38 @@ def test_a_batch_runs_many_specs_in_one_process_and_in_order():
         for r in one[:4]:
             assert verify(Certificate.from_dict(store.read_json(r["certificate"])),
                           LIM).ok
+
+
+def test_a_proof_comes_back_as_mathematics_too():
+    """The other half: a core says which hypotheses it used and which it did
+    not; a Farkas certificate IS an identity; an LP dual says what is tight
+    and what each row is worth. Computed from the certificate, never stored."""
+    import z3
+
+    from certo import LPSpec, Spec, explain
+    from certo.engines import farkas, lp, smt
+
+    x, y, z = z3.Reals("x y z")
+    s = (Spec().assume("x_ge_1", x >= 1).assume("y_ge_1", y >= 1)
+         .assume("noise", z <= 100).claim(x + y >= 2))
+    core = explain.proof_summary(smt.prove(s, LIM).certificate)
+    roles = {(r["role"], r.get("name")) for r in core}
+    assert ("used", "x_ge_1") in roles and ("unused", "noise") in roles
+    comb = explain.proof_summary(farkas.farkas(s, LIM).certificate)
+    assert comb[-1]["role"] == "sum" and comb[-1]["row"] == "0 < 0"
+    assert {r["name"] for r in comb if r["role"] == "term"} == {
+        "x_ge_1", "y_ge_1", "__goal__"}
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1, "b": 1})
+    m.constraint({"a": 1}, "<=", 2, name="cap_a")
+    m.constraint({"a": 1, "b": 1}, "<=", 3, name="both")
+    m.constraint({"b": 1}, "<=", 10, name="loose")
+    rows = {r["name"]: r for r in explain.proof_summary(lp.opt(m, LIM).certificate)}
+    assert rows["both"]["active"] and rows["both"]["price"] == "1"
+    assert not rows["loose"]["active"] and rows["loose"]["price"] == "0"
 
 
 def test_a_counterexample_comes_back_as_mathematics():

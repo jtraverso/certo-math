@@ -64,6 +64,7 @@ def project() -> Path | None:
 #: exporter is skipped, not failed.
 SPECS = (
     "farkas_linear.py",
+    "affine_semigroup.py",
 )
 
 

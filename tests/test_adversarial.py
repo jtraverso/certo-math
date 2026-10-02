@@ -74,6 +74,243 @@ from certo.tamper import probe as _probe                            # noqa: E402
 #: `used`, `unused` and hypothesis labels; a core's names; polynomial
 #: exponents read in a ring of the wrong size; duplicated variable names.
 STRUCTURAL_BENIGN = {
+    # the evaluations are the search's trace; the ends are what is checked
+    'bisect': {
+        '=5:coherent', 'bad_cert.provenance:dropkey',
+        'bad_cert.provenance:empty', 'evaluations.*:dropkey',
+        'evaluations.*:empty', 'evaluations:dup', 'evaluations:empty',
+        'evaluations:reversed', 'evaluations:short',
+        'good_cert.payload:dropkey', 'good_cert.provenance:dropkey',
+        'good_cert.provenance:empty',
+    },
+    # a nested certificate's `declared`, `kinds` and provenance carry no claim
+    'branch_frontier': {
+        'incumbent_cert.payload.relaxation.payload.declared:dropkey',
+        'incumbent_cert.payload.relaxation.payload.declared:empty',
+        'incumbent_cert.payload.relaxation.payload.kinds:dropkey',
+        'incumbent_cert.payload.relaxation.payload.kinds:empty',
+        'incumbent_cert.payload.relaxation.provenance:dropkey',
+        'incumbent_cert.payload.relaxation.provenance:empty',
+        'incumbent_cert.payload.residual.payload.declared:dropkey',
+        'incumbent_cert.payload.residual.payload.declared:empty',
+        'incumbent_cert.payload.residual.provenance:dropkey',
+        'incumbent_cert.payload.residual.provenance:empty',
+        'incumbent_cert.provenance:dropkey',
+        'incumbent_cert.provenance:empty', 'nodes.*.values:reversed',
+        'nodes.*:dropkey', 'open:reversed', 'order:empty', 'order:reversed',
+        'order:short', 'system.cons:reversed',
+    },
+    # the counterexamples are the loop's history; the object is re-checked on the domain
+    'cegis': {
+        'counterexamples.*.x:dup', 'counterexamples.*.x:empty',
+        'counterexamples.*.x:reversed', 'counterexamples.*.x:short',
+        'counterexamples.*:dropkey', 'counterexamples.*:empty',
+        'counterexamples:dup', 'counterexamples:empty',
+        'counterexamples:reversed', 'counterexamples:short',
+    },
+    # a core's `dropped`, `sorts` and provenance are labels; the cores are re-solved
+    'core_matrix': {
+        '=5:coherent', 'cores.identity.payload.dropped:dup',
+        'cores.identity.payload.dropped:empty',
+        'cores.identity.payload.dropped:reversed',
+        'cores.identity.payload.dropped:short',
+        'cores.identity.payload:dropkey', 'cores.identity.provenance:dropkey',
+        'cores.identity.provenance:empty',
+        'cores.ordering.payload.dropped:dup',
+        'cores.ordering.payload.dropped:empty',
+        'cores.ordering.payload.dropped:reversed',
+        'cores.ordering.payload.dropped:short',
+        'cores.ordering.payload.multipliers:empty',
+        'cores.ordering.payload.sorts:dropkey',
+        'cores.ordering.payload.sorts:empty',
+        'cores.ordering.payload:dropkey', 'cores.ordering.provenance:dropkey',
+        'cores.ordering.provenance:empty',
+        'cores.positivity.payload.dropped:dup',
+        'cores.positivity.payload.dropped:empty',
+        'cores.positivity.payload.dropped:reversed',
+        'cores.positivity.payload.dropped:short',
+        'cores.positivity.payload.names:reversed',
+        'cores.positivity.payload:dropkey',
+        'cores.positivity.provenance:dropkey',
+        'cores.positivity.provenance:empty', 'cores:dropkey', 'cores:empty',
+        'goals:dup', 'goals:empty', 'goals:reversed', 'goals:short',
+        'hypotheses:dup', 'hypotheses:empty', 'hypotheses:reversed',
+        'hypotheses:short',
+    },
+    # `classes` are declared (and said to be), `cycle` names the chain
+    'dependency_cycle': {
+        '=-2:coherent', 'classes.delta:dropkey', 'classes.delta:empty',
+        'classes.k:dropkey', 'classes.k:empty', 'classes.rho:dropkey',
+        'classes.rho:empty', 'classes:dropkey', 'classes:empty', 'cycle:dup',
+        'cycle:empty', 'cycle:reversed', 'cycle:short', 'steps:dup',
+    },
+    # a column bound `[0, None]` emptied is the default bound
+    'equitable_quotient': {
+        'bounds.k3_002001:empty', 'bounds.k3_002010:empty',
+        'bounds.k3_002100:empty', 'bounds.k3_003000:empty',
+        'bounds.k3_011010:empty', 'bounds.k3_011100:empty',
+        'bounds.k3_012000:empty', 'bounds.k3_020010:empty',
+        'bounds.k3_020100:empty', 'bounds.k3_021000:empty',
+        'bounds.k3_030000:empty', 'bounds.k3_101001:empty',
+        'bounds.k3_101100:empty', 'bounds.k3_102000:empty',
+        'bounds.k3_110100:empty', 'bounds.k3_111000:empty',
+        'bounds.k3_120000:empty', 'bounds.k3_200001:empty',
+        'bounds.k3_200100:empty', 'bounds.k3_201000:empty',
+        'bounds.k3_210000:empty', 'bounds.k4_003001:empty',
+        'bounds.k4_003010:empty', 'bounds.k4_003100:empty',
+        'bounds.k4_004000:empty', 'bounds.k4_012010:empty',
+        'bounds.k4_012100:empty', 'bounds.k4_013000:empty',
+        'bounds.k4_021010:empty', 'bounds.k4_021100:empty',
+        'bounds.k4_022000:empty', 'bounds.k4_030010:empty',
+        'bounds.k4_030100:empty', 'bounds.k4_031000:empty',
+        'bounds.k4_040000:empty', 'bounds.k4_102001:empty',
+        'bounds.k4_102100:empty', 'bounds.k4_103000:empty',
+        'bounds.k4_111100:empty', 'bounds.k4_112000:empty',
+        'bounds.k4_120100:empty', 'bounds.k4_121000:empty',
+        'bounds.k4_130000:empty', 'bounds.k4_201001:empty',
+        'bounds.k4_201100:empty', 'bounds.k4_202000:empty',
+        'bounds.k4_210100:empty', 'bounds.k4_211000:empty',
+        'bounds.k4_220000:empty', 'bounds:dropkey', 'bounds:empty',
+        'column_classes.k3_002001:reversed',
+        'column_classes.k3_002010:reversed',
+        'column_classes.k3_002100:reversed',
+        'column_classes.k3_003000:reversed',
+        'column_classes.k3_011010:reversed',
+        'column_classes.k3_011100:reversed',
+        'column_classes.k3_012000:reversed',
+    },
+    # the order of a range is not its content
+    'family_extremum': {
+        'bounds.*.*:reversed', 'bounds:reversed',
+    },
+    # the ray is about the system the payload states; names are labels
+    'farkas_ray': {
+        '=1/2:coherent', 'A:reversed', 'b:reversed', 'names:dup',
+        'names:empty', 'names:reversed', 'names:short',
+    },
+    # a half's `declared`, `kinds` and provenance carry no claim
+    'gap': {
+        'fractional.payload.declared:dropkey',
+        'fractional.payload.declared:empty',
+        'fractional.payload.kinds:dropkey', 'fractional.payload.kinds:empty',
+        'fractional.provenance:dropkey', 'fractional.provenance:empty',
+    },
+    # fewer filters is a weaker claim about the same graphs
+    'graph_set': {
+        'filters:dup', 'filters:empty', 'filters:short', 'graph6:reversed',
+    },
+    # the counts are recomputed; the order of rows is not content
+    'hypothesis_audit': {
+        'counts:dropkey', 'rows:reversed',
+    },
+    # a link is checked by entailment, which re-proves the statement itself
+    'induction': {
+        'base.*.cert.payload.multipliers:empty',
+        'base.*.cert.payload.multipliers:short',
+        'base.*.cert.payload:dropkey', 'base.*.cert.provenance:dropkey',
+        'base.*.cert.provenance:empty', 'base.*.cert<->base.*.cert:swap',
+        'base.*.cert<->step:swap', 'base.*:dropkey',
+        'step.payload.dropped:dup', 'step.payload.dropped:empty',
+        'step.payload.dropped:reversed', 'step.payload.dropped:short',
+        'step.payload:dropkey', 'step.provenance:dropkey',
+        'step.provenance:empty',
+    },
+    # the fingerprint recipe is prose
+    'integer_matrix': {
+        'fingerprint_recipe:dropkey', 'fingerprint_recipe:empty',
+    },
+    # the spec record and a source's labels carry no claim
+    'lean_binding': {
+        'source.payload.dropped:dup', 'source.payload.dropped:empty',
+        'source.payload.dropped:short', 'source.payload:dropkey',
+        'source.provenance:dropkey', 'spec:dropkey', 'spec:empty',
+    },
+    # the order of a clause's literals
+    'mus': {
+        'mus.*:reversed',
+    },
+    # an orbit's `members` is a sample of at most five, for reading
+    'orbit_witnesses': {
+        'sweep.payload.counts:dropkey', 'sweep.payload.counts:empty',
+        'sweep.payload.entries.*:dropkey', 'sweep.payload.entries.*:empty',
+        'sweep.payload.entries:dup', 'sweep.payload.entries:empty',
+        'sweep.payload.entries:reversed', 'sweep.payload.entries:short',
+        'sweep.payload.orbits.*.members:dup',
+        'sweep.payload.orbits.*.members:empty',
+        'sweep.payload.orbits.*.members:reversed',
+        'sweep.payload.orbits.*.members:short',
+        'sweep.payload.orbits.*:dropkey', 'sweep.payload.orbits:reversed',
+        'sweep.payload:dropkey', 'sweep.provenance:dropkey',
+        'sweep.provenance:empty',
+        'witnesses.*.cert.payload.blocked.*:dropkey',
+        'witnesses.*.cert.payload.blocked.*:empty',
+        'witnesses.*.cert.payload.blocked:dup',
+        'witnesses.*.cert.payload.blocked:empty',
+        'witnesses.*.cert.payload.blocked:reversed',
+        'witnesses.*.cert.payload.blocked:short',
+        'witnesses.*.cert.payload:dropkey', 'witnesses:dup',
+        'witnesses:empty', 'witnesses:reversed', 'witnesses:short',
+    },
+    # a point's order, and a point's own labels
+    'parametric_symmetry': {
+        'points.*:dropkey', 'points:reversed',
+    },
+    # a coherent rewrite of an index the trace records
+    'shrink_domain': {
+        '=1:coherent',
+    },
+    # the blocked moves are recomputed; fewer filters is a weaker claim
+    'shrink_graph': {
+        'blocked.*:dropkey', 'blocked.*:empty', 'blocked:reversed',
+        'filters:dup', 'filters:empty', 'filters:short',
+    },
+    # a size's sweep: counts, statistics and order carry no claim
+    'sweep_range': {
+        '=0:coherent', '=11:coherent', 'entries.*.cert.note_args:dropkey',
+        'entries.*.cert.note_args:empty',
+        'entries.*.cert.payload.counts:dropkey',
+        'entries.*.cert.payload.counts:empty',
+        'entries.*.cert.payload.family_graph6:reversed',
+        'entries.*.cert.payload.stats:dropkey',
+        'entries.*.cert.payload.stats:empty',
+        'entries.*.cert.payload.values.*:dropkey',
+        'entries.*.cert.payload.values:empty',
+        'entries.*.cert.payload.values:reversed',
+        'entries.*.cert.payload.values:short',
+        'entries.*.cert.payload:dropkey', 'entries.*.cert.provenance:dropkey',
+        'entries.*.cert.provenance:empty',
+        'entries.*.cert<->entries.*.cert:swap', 'entries:reversed',
+    },
+    # a partial permutation is another symmetry, and the quotient follows it
+    'symmetry_reduction': {
+        'generators.swap01:dropkey', 'orbits.*:reversed',
+        'quotient.cons.*:dup', 'quotient.kinds:dropkey',
+        'quotient.kinds:empty', 'quotient.var_names:dup', 'system.cons:dup',
+        'system.cons:reversed',
+    },
+    # the counterexamples are history; the universal proof is re-tied
+    'synth_proved': {
+        '=3:coherent', '=5:coherent', 'synth.payload.counterexamples.*.x:dup',
+        'synth.payload.counterexamples.*.x:empty',
+        'synth.payload.counterexamples.*.x:reversed',
+        'synth.payload.counterexamples.*.x:short',
+        'synth.payload.counterexamples.*:dropkey',
+        'synth.payload.counterexamples.*:empty',
+        'synth.payload.counterexamples:dup',
+        'synth.payload.counterexamples:empty',
+        'synth.payload.counterexamples:reversed',
+        'synth.payload.counterexamples:short', 'synth.provenance:dropkey',
+        'synth.provenance:empty', 'universal.payload:dropkey',
+        'universal.provenance:dropkey', 'universal.provenance:empty',
+    },
+    # `used` lists are labels; a row with multiplier 0 does not matter
+    'variable_range': {
+        'lower.used:dup', 'lower.used:empty', 'lower.used:short',
+        'rows.*.coeffs:dropkey', 'rows.*.coeffs:empty', 'rows.*:dropkey',
+        'rows:dup', 'rows:reversed', 'upper.used:dup', 'upper.used:empty',
+        'upper.used:short', 'variables:empty', 'variables:reversed',
+        'variables:short',
+    },
     # an edge list is a set of unordered pairs: order and repeats say nothing
     'pinned_value': {
         'edges.*:reversed', 'edges:dup', 'edges:reversed',
@@ -1164,6 +1401,113 @@ def _from_example(name, command, *flags):
         cli.main([command, str(root / "examples" / name), *flags,
                   "--cert", str(out)])
     return store.read_json(str(out))
+
+
+#: The kinds with no hand-built fixture above, each from the example that
+#: produces it -- so every kind the registry verifies is in the battery, and
+#: a kind added later without one fails `test_every_kind_is_in_the_battery`.
+EXAMPLE_FIXTURES = [
+    ("bisect_constant.py", "bisect", ()),
+    ("synth_constant.py", "synth", ()),
+    ("core_matrix.py", "core", ()),
+    ("dependency_cycle.py", "cycle", ()),
+    ("equitable_quotient.py", "quotient", ()),
+    ("family_max.py", "family", ()),
+    ("walkthrough.py", "opt", ("--gap",)),
+    ("hypothesis_audit.py", "audit", ()),
+    ("induct_sum.py", "induct", ()),
+    ("integer_matrix.py", "matrix", ()),
+    ("lean_binding.py", "bind", ()),
+    ("linear_system.py", "solve", ()),
+    ("mus_ramsey.py", "shrink", ()),
+    ("setfamily_sweep.py", "sweep", ("--witnesses",)),
+    ("parametric_symmetry.py", "reduce", ("--parametric",)),
+    ("shrink_nonchordal.py", "shrink", ()),
+    ("sweep_range_nested.py", "sweep", ("--n-range", "3..4")),
+    ("symmetry_reduction.py", "reduce", ()),
+    ("synth_prove_identity.py", "synth", ("--prove-candidate",)),
+    ("toric_cone.py", "cone", ()),
+    ("variable_range.py", "range", ("--var", "a")),
+]
+
+
+def _built_fixtures() -> list:
+    """The four kinds no example produces, built here."""
+    import tempfile
+    from pathlib import Path
+
+    from certo import LPSpec, PackingSpec
+    from certo.engines import bb, graphsearch, lp, shrink
+    from certo.spec import load_spec
+
+    out = []
+    s = LPSpec(sense="max")
+    s.variable("x")
+    s.objective({"x": 1})
+    s.constraint({"x": 1}, "<=", 1, name="hi")
+    s.constraint({"x": -1}, "<=", -2, name="lo")
+    out.append(lp.infeasible_certificate(s, LIM).to_dict())
+    items = [("e{}".format(i), ("v{}".format(i), "v{}".format((i + 1) % 5)), 1)
+             for i in range(5)]
+    spec = PackingSpec(items=items, capacities=1, integer=True).to_lp()
+    out.append(bb.prove_optimal(spec, LIM, max_nodes=1).certificate.to_dict())
+    out.append(graphsearch.enum(5, ["connected"], LIM).certificate.to_dict())
+    src = Path(tempfile.mkdtemp(prefix="certo_adv_dom_")) / "dom.py"
+    src.write_text(
+        "from fractions import Fraction\nfrom certo import DomainSpec\n"
+        "def spec():\n    return DomainSpec(\n"
+        "        items=[(s, r) for s in range(2, 7) for r in range(2, 7)],\n"
+        "        predicate=lambda p: p[0] * p[1] >= 12,\n"
+        "        reduce=lambda p: ([(p[0] - 1, p[1]), (p[0], p[1] - 1)]\n"
+        "                          if p[0] > 1 and p[1] > 1 else []),\n"
+        "        key=lambda p: 's={},r={}'.format(*p))\n", encoding="utf-8")
+    dspec = load_spec(src)
+    start = next(i for i in dspec.enumerate() if dspec.id_of(i) == "s=2,r=2")
+    out.append(shrink.shrink_domain(dspec, start, LIM,
+                                    spec_path=str(src)).certificate.to_dict())
+    return out
+
+
+#: Fields of the example-built kinds that carry no claim, so `probe` -- one
+#: field at a time -- skips them for that kind only, each with its reason.
+EXAMPLE_SKIPS = {
+    "dependency_cycle": ("classes",   # declared, and the warning says so
+                         "cycle",     # the chain's names, for reading
+                         "empty"),    # True -> False only weakens the claim
+    "integer_matrix": ("fingerprint_recipe",),   # prose
+    "lean_binding": ("certificate", "declaration", "spec"),  # path, Lean name, record
+    "orbit_witnesses": ("sweep",),    # `mutate` reaches the nested title
+    "branch_frontier": ("reason",),   # why the search stopped
+}
+
+#: The kinds the hand-built fixtures above cover; with EXAMPLE_FIXTURES and
+#: `_built_fixtures`, every kind the registry verifies.
+HANDBUILT_KINDS = {
+    "unsat_core", "model", "farkas", "lp_dual", "mixed_design", "exact_cover",
+    "resultant", "branch_bound", "first_entry", "first_moment", "ratio_bound",
+    "integer_peak", "parametric_bound", "ideal", "sos", "number", "asymptotic",
+    "ball", "sweep", "domain_sweep", "drat", "cnf_model", "symmetric_inertia",
+    "clique_lp", "parametric_atlas", "affine_semigroup", "capacity_profile",
+    "proof", "polynomial_nonneg", "pinned_value",
+}
+
+
+def test_every_kind_is_in_the_battery():
+    """Both batteries -- one field at a time, and the structural forgeries --
+    over a certificate of EVERY kind. Run over the 25 kinds that had no
+    fixture, they found nine more conclusions nothing recomputed, among them
+    `toric_cone`'s `regular`, `height_one` and `crepant`, `linear_system`'s
+    `status`, and a branch frontier with no root."""
+    from certo.certificate import VERIFIERS
+
+    certs = ([_from_example(n, c, *f) for n, c, f in EXAMPLE_FIXTURES]
+             + _built_fixtures())
+    kinds = {d["kind"] for d in certs}
+    assert kinds | HANDBUILT_KINDS == set(VERIFIERS), sorted(
+        set(VERIFIERS) - kinds - HANDBUILT_KINDS)
+    for d in certs:
+        _report(d["kind"], probe(Certificate.from_dict(d),
+                                 skip=EXAMPLE_SKIPS.get(d["kind"], ())))
 
 
 def test_the_structural_battery_found_these_in_kinds_it_had_not_reached():

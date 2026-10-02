@@ -529,7 +529,7 @@ class Vectors:
 
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         target=None, dual_direction=None, _vectors_only: bool = False,
-        round: bool = False, cuts=None) -> Result:
+        round: bool = False, cuts=None, _ray: bool = True) -> Result:
     """`_vectors_only=True` is for callers that keep only the dual and the
     primal -- branch and bound, which derives every node's program from the
     root. Serialising the whole matrix into a certificate at every node was
@@ -602,9 +602,16 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     engine = lambda: "pulp/" + "+".join(dict.fromkeys(used))  # noqa: E731
 
     if st_name == "Infeasible":
+        # "Infeasible" WITH its evidence: the exact Farkas ray, checked here
+        # before it is emitted. It came back with no certificate at all, which
+        # is cross-cutting rule 1 broken in the one case -- non-existence --
+        # where the evidence is the whole answer.
+        ray = infeasible_certificate(spec, lim) if _ray else None
+        detail = t("engine.opt.infeasible") + " -- " + t(
+            "engine.opt.infeasible_ray" if ray is not None
+            else "engine.opt.infeasible_no_ray")
         return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
-                      None, detail=t("engine.opt.infeasible"),
-                      meta={"lp_solver": engine()})
+                      ray, detail=detail, meta={"lp_solver": engine()})
     if st_name != "Optimal":
         return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                       engine(), ms(), None,
@@ -871,7 +878,7 @@ def infeasible_certificate(spec, limits=None):
                        name="col{}".format(j))
     aux.constraint({v: 1 for v in ys}, "==", 1, name="norm")
 
-    res = opt(aux, limits)
+    res = opt(aux, limits, _ray=False)
     if res.verdict is not Verdict.SATISFIABLE or not res.meta.get("exact"):
         return None
     y = [exact.to_fraction(res.meta["solution"].get(v, 0)) for v in ys]
