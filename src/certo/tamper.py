@@ -175,16 +175,22 @@ def probe(cert, limits=None, skip=(), excuse=True) -> dict:
         return out
 
     for field, value in sorted(base.get("payload", {}).items()):
-        if field in skip or (excuse and (field in DESCRIPTIVE
-                                         or field in WEAKENING)):
+        if field in skip:
             out["excused"].append(field)
             continue
+        # The excused fields are MUTATED too. The lists are by field name
+        # across every kind, and a name can be a restatement in one kind and
+        # the claim in another: `objective` is the problem in `parametric`
+        # and the certified value in `lp_dual`. A user read `excused` as
+        # "not checked" for an objective `verify` does reject. Excused now
+        # means what it says: mutated, accepted, and benign by declaration.
+        excusable = excuse and (field in DESCRIPTIVE or field in WEAKENING)
         changed = mutate(value)
         if changed is None or changed == value:
             # Nothing of the same shape to put there -- an empty list, a None.
             # Reported rather than silently dropped, because "not probed" and
             # "probed and caught" are different facts.
-            out["unshaped"].append(field)
+            (out["excused"] if excusable else out["unshaped"]).append(field)
             continue
         d = json.loads(json.dumps(base))
         d["payload"][field] = changed
@@ -194,7 +200,8 @@ def probe(cert, limits=None, skip=(), excuse=True) -> dict:
             # A verifier that raises on a malformed payload has still refused
             # it, which is the behaviour that matters here.
             caught = True
-        (out["caught"] if caught else out["uncaught"]).append(field)
+        (out["caught"] if caught else
+         out["excused"] if excusable else out["uncaught"]).append(field)
     return out
 
 

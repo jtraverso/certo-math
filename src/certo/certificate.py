@@ -214,7 +214,11 @@ def _relay(prefix, w) -> Note:
 #: certo's own arithmetic. `with_solver`: re-derived, by asking a solver
 #: again. `relative`: valid, RESTING on something assumed. `partial`: part of
 #: it not re-derived at all. A single `ok` used to stand for all four.
-DEGREES = ("complete", "with_solver", "relative", "partial", "invalid")
+#: `inconclusive` is a check STOPPED by its time budget -- not accepted, and
+#: not shown wrong either. A user's DRAT re-check ran out of 10 s and then of
+#: 180 s at step 2293 of 2547, and the report said `invalid`.
+DEGREES = ("complete", "with_solver", "relative", "partial", "inconclusive",
+           "invalid")
 
 
 @dataclass
@@ -229,6 +233,9 @@ class VerifyReport:
     # which is not the same as saying nothing was run: replaying a sweep runs
     # the user's own predicate. Naming the method keeps the header honest.
     method_key: str = ""
+    # The failure, if any, is a time budget running out -- nothing was found
+    # wrong. Still not `ok`: an unfinished check accepts nothing.
+    timed_out: bool = False
 
     @property
     def partial(self) -> list:
@@ -244,7 +251,7 @@ class VerifyReport:
     def degree(self) -> str:
         """How much of the claim was checked, in one word: see DEGREES."""
         if not self.ok:
-            return "invalid"
+            return "inconclusive" if self.timed_out else "invalid"
         if self.partial:
             return "partial"
         if self.assumed:
@@ -256,6 +263,7 @@ class VerifyReport:
             "ok": self.ok,
             "kind": self.kind,
             "degree": self.degree,
+            "timed_out": self.timed_out,
             "partial": self.partial,
             "assumed": self.assumed,
             "solver_free": self.solver_free,
@@ -2829,22 +2837,43 @@ def _verify_linear_system(cert, limits) -> VerifyReport:
 
     kernel = [[Fraction(v) for v in k] for k in p["kernel"]]
     zero = [Fraction(0)] * len(A)
+    # Each vector has `columns` entries: `multiply` pairs by `zip`, and a
+    # short vector was read on its prefix -- `[0, 1]` for a 3-column system.
     checks.append((t("verify.solve.kernel"),
-                   all(linsolve.multiply(A, k) == zero for k in kernel),
+                   all(len(k) == m for k in kernel)
+                   and all(linsolve.multiply(A, k) == zero for k in kernel),
                    t("verify.solve.kernel_size", n=len(kernel))))
 
     # The rank is DERIVED, not read: a payload claiming a smaller rank would
     # be claiming a bigger solution set than the system has.
     rank = _rational_rank(A)
-    ok_rank = rank == p["rank"]
-    if p["domain"] == "rational":
-        ok_rank = ok_rank and len(kernel) == m - rank
-    checks.append((t("verify.solve.rank"), ok_rank,
+    checks.append((t("verify.solve.rank"), rank == p["rank"],
                    t("verify.solve.rank_is", r=rank, cols=m)))
+    # The kernel is a BASIS: as many vectors as the nullity, and independent.
+    # Counting them was the whole check, so `[[0,1,0],[0,1,0]]` -- two
+    # vectors, one direction -- passed for a nullity of two and the solution
+    # set it described was a line where the system has a plane. Over Z it
+    # must also be integral and SATURATED: `[[0, 2]]` spans only the even
+    # values, and the parametrisation missed every odd one. A full-rank
+    # integer sublattice of the kernel lattice is all of it exactly when its
+    # Smith invariants are all 1.
+    basis_ok = (all(len(k) == m for k in kernel)
+                and len(kernel) == m - rank
+                and (not kernel or _rational_rank(kernel) == len(kernel)))
+    if basis_ok and p["domain"] == "integer" and kernel:
+        from .lattice import smith
+
+        basis_ok = (all(v.denominator == 1 for k in kernel for v in k)
+                    and all(d == 1 for d in smith(
+                        [[int(v) for v in k] for k in kernel])["invariants"]))
+    checks.append((t("verify.solve.basis"), basis_ok,
+                   t("verify.solve.basis_detail", n=len(kernel),
+                     nullity=m - rank)))
     # The words a reader quotes, from what was derived: `unique` exactly when
-    # nothing is left free, and a domain the checks above know -- an unknown
-    # one skipped the integrality check while the payload said integer.
-    free = (len(kernel) > 0) if p["domain"] == "integer" else rank < m
+    # the rank is full -- over Z too, where it was read off the length of the
+    # kernel list, so an empty list made any system "unique" -- and a domain
+    # the checks above know.
+    free = rank < m
     checks.append((t("verify.solve.status"),
                    p["domain"] in ("rational", "integer")
                    and p["status"] == (linsolve.MANY if free else linsolve.UNIQUE),
@@ -6092,8 +6121,13 @@ def _verify_drat(cert, limits) -> VerifyReport:
         checks.append((t("verify.drat.external"), ext.ok, ext.detail))
 
     ok = all(c[1] for c in checks)
+    # Only the clock stopped it when the formula read and a checker ran out
+    # of time rather than refusing a step.
+    ext_stopped = drup.drat_trim_available() and getattr(ext, "timed_out", False)
+    stopped = (not ok and checks[0][1] and (rep.timed_out or ext_stopped)
+               and (rep.ok or rep.timed_out))
     return VerifyReport(
-        ok, "drat", True, checks=checks,
+        ok, "drat", True, checks=checks, timed_out=stopped,
         detail=t("verify.drat.detail", steps=rep.steps, rup=rep.rup_steps,
                  rat=rep.rat_steps, **{"del": rep.deletions},
                  ms=rep.elapsed_ms),

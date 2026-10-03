@@ -553,17 +553,58 @@ def _guard(fn):
         before = os.environ.get("CERTO_SPEC_ROOT")
         os.environ["CERTO_SPEC_ROOT"] = str(_workspace())
         try:
-            return await fn(*a, **kw)
+            out = await fn(*a, **kw)
         except Exception as e:  # noqa: BLE001
-            return {"ok": False, "error_type": type(e).__name__,
-                    "error": str(e), "hint": _hint(e)}
+            out = {"ok": False, "error_type": type(e).__name__,
+                   "error": str(e), "hint": _hint(e)}
         finally:
             if before is None:
                 os.environ.pop("CERTO_SPEC_ROOT", None)
             else:
                 os.environ["CERTO_SPEC_ROOT"] = before
+        # A server older than what is installed answers every call, so every
+        # answer says so -- FIRST, where it is read. After a `pip install` the
+        # running process keeps the old code until the client restarts it.
+        stale = _stale_warning()
+        if stale and isinstance(out, dict):
+            out = {"WARNING": stale, **out}
+        return out
 
     return wrapper
+
+
+def _stale_warning(running_file=None, running=None, installed=None):
+    """The warning, when the code this process runs is not the version
+    installed on disk; None otherwise. Read every call: the install can
+    change under a long-running server at any time. The arguments exist for
+    the tests; a server passes none."""
+    running = running or __version__
+    try:
+        from importlib.metadata import distribution
+        from pathlib import Path
+
+        if running_file is None:
+            from . import __file__ as running_file
+
+        # Only when THIS process imported an INSTALLED package: code run
+        # from a checkout is not a stale server, and a checkout can carry
+        # metadata of its own naming some old version (this one says 0.12.1).
+        here = Path(running_file).resolve().parts
+        if not any(part.lower() in ("site-packages", "dist-packages")
+                   for part in here):
+            return None
+        installed = installed or distribution("certo-math").version
+    except Exception:  # noqa: BLE001 -- not installed, or no metadata
+        return None
+    if installed == running:
+        return None
+    return _t_stale(running=running, installed=installed)
+
+
+def _t_stale(**kw):
+    from .i18n import t as _t
+
+    return _t("mcp.stale_server", **kw)
 
 
 async def _off(fn, *a, **kw):
@@ -849,10 +890,30 @@ async def cover(spec_path: str | None = None, spec_source: str | None = None,
         bounds = await _off(algebra.cover_bounds, spec, _limits(timeout_ms),
                             prove_optimal=prove_optimal, max_nodes=max_nodes,
                             wall_ms=wall_timeout_ms)
-        out["bounds"] = {"parts": res.meta.get("parts"),
-                         "relaxation": bounds.get("relaxation"),
-                         "optimum": bounds.get("optimum"),
-                         "stopped": bounds.get("stopped")}
+        # Three numbers, each with WHAT it is and what proves it. `optimum`
+        # sat beside an `exact_cover` certificate that proves validity and
+        # size only, and was read as that certificate's claim; it is proved
+        # by branch and bound, whose certificate is now saved and named.
+        opt_path = None
+        if bounds.get("optimum_cert") is not None:
+            c = bounds["optimum_cert"]
+            pth = _workspace() / "certs" / "cover-optimum-{}.json".format(c.digest())
+            pth.write_text(c.to_json(), encoding="utf-8")
+            opt_path = str(pth.relative_to(_workspace())).replace("\\", "/")
+        out["bounds"] = {
+            "parts": {"value": res.meta.get("parts"),
+                      "is": "an UPPER bound: the cover you have, valid -- "
+                            "the exact_cover certificate proves this and its "
+                            "size, not that it is minimum"},
+            "relaxation": {"value": bounds.get("relaxation"),
+                           "is": "a LOWER bound: the exact LP dual, fractional"},
+            "optimum": {"value": bounds.get("optimum"),
+                        "is": ("the integer optimum, PROVED by branch and "
+                               "bound -- see its own certificate")
+                        if bounds.get("optimum") is not None else
+                        "not proved (prove_optimal off, or stopped)",
+                        "certificate": opt_path},
+            "stopped": bounds.get("stopped")}
     return out
 
 

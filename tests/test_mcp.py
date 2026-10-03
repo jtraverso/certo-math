@@ -832,6 +832,34 @@ def test_opt_gap_and_mixed_on_a_packing_over_mcp():
     assert out["verdict"] in ("proved", "inconclusive"), out
 
 
+def test_a_stale_server_says_so_first_in_every_answer():
+    """After a `pip install` a running server keeps the code it started
+    with. When the code it runs is the INSTALLED package and the installed
+    version differs, every answer opens with a WARNING; code run from a
+    checkout is not a stale server."""
+    from certo import mcp_server as m
+
+    site = "C:/py/Lib/site-packages/certo/__init__.py"
+    assert "0.25.1" in m._stale_warning(site, running="0.24.0", installed="0.25.1")
+    assert m._stale_warning(site, running="0.25.1", installed="0.25.1") is None
+    assert m._stale_warning("C:/src/certo/__init__.py", running="0.24.0",
+                            installed="0.25.1") is None
+    real = m._stale_warning
+    m._stale_warning = lambda: "STALE"
+    try:
+        out = run(call("find", {"query": "nonneg", "n": 1}))
+    finally:
+        m._stale_warning = real
+    assert next(iter(out)) == "WARNING" and out["WARNING"] == "STALE"
+    assert "runtime" in run(call("opt", {"spec_source": "\n".join([
+        "from certo import LPSpec",
+        "def spec():",
+        "    m = LPSpec(sense='max')",
+        "    m.variable('a', 0, 1)",
+        "    m.objective({'a': 1})",
+        "    return m"])}))
+
+
 def test_the_compact_server_keeps_four_tools():
     """Fifty-odd tools is a long list to read before knowing what you need;
     `certo-mcp --compact` keeps find, run, verify and the guide."""

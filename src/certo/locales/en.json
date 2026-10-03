@@ -1993,5 +1993,10 @@
   "verify.cnf.header": "the file holds the clauses its `p cnf` header declares",
   "verify.cnf.header_detail": "declared {declared}, read {read}",
   "poly.divide_by_poly": "a polynomial divided by a polynomial is not a polynomial; multiply through by the denominator instead",
-  "poly.divide_by_zero": "division of a polynomial by zero"
+  "poly.divide_by_zero": "division of a polynomial by zero",
+  "verify.solve.basis": "the kernel is a BASIS of the solution directions: as many independent vectors as the nullity, and over Z integral and saturated (it spans every integer direction)",
+  "verify.solve.basis_detail": "{n} vector(s) for a nullity of {nullity}",
+  "drup.timeout": "the checker ran out of time at step {k} of {n}: not refuted, not checked -- raise the time limit",
+  "verify.degree.inconclusive": "INCONCLUSIVE: the check ran out of its time budget before finishing. Nothing was found wrong and nothing is accepted -- re-run with a larger --timeout-ms",
+  "mcp.stale_server": "this certo-mcp server runs {running}, but {installed} is installed: it keeps the code it started with. Restart the MCP server (reconnect the client) to use {installed}; `certo mcp` lists the stale ones"
 }

@@ -60,6 +60,13 @@ def _run(label, cmd, cwd, env) -> bool:
     if not ok:
         for line in [l for l in tail if "[XX]" in l][:12]:
             print("       " + line)
+        if not any("[XX]" in l for l in tail):
+            # Failed with no summary line: it crashed or was killed. Its last
+            # words are the only clue, and they used to be thrown away.
+            last = (p.stdout + p.stderr).strip().splitlines()[-15:]
+            print("       exit code {}; last output:".format(p.returncode))
+            for line in last:
+                print("       | " + line[:200])
     return ok
 
 

@@ -110,6 +110,11 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P2** | MCP robustness over a long life: each tool call under a WALL-CLOCK and memory watchdog in a worker process, cancelled cleanly without taking the server down or freezing the client, and a circuit breaker after repeated timeouts | **M** | med | med | external suggestion. Today: `timeout_ms` and `--deadline` per call, errors returned as data by `_guard`; a runaway search inside an engine (or a `geng`/`cbc` child) can still hold the process. Joins the `--deadline` children row |
+| **P3** | Signed certificates (Ed25519 / JWS, detached, over the digest): WHO produced a certificate, for a chain of custody | **M** | med | low | external suggestion. A signature attests provenance, never correctness: `verify` re-derives the mathematics whoever signed, and an edited certificate already fails it unless the edit is itself a valid certificate. Keys are the user's; optional, and never a substitute for `verify` |
+| **P2** | MCP PROMPTS: ready instructions the server offers the model -- certify an LP, prove a polynomial >= 0 on a box, write a first spec -- derived from the discovery index so they cannot drift | **S** | high | low | external suggestion; lowers first-use errors, alongside `find` and `dsl_guide` |
+| **P3** | `pip install certo-math` / `import certo`: say it where an IDE or a model looks first (README top, `find`, `dsl_guide`), and check the packaging declares the import name plainly | **S** | high | low | external suggestion: the two names confuse autocompletion |
+| **P2** | No code from a spec is evaluated where a model wrote it -- an AST-checked or declarative notation instead of `exec` | **(the declarative notation row)** | | | external suggestion, merged into the declarative spec notation row above. Today: specs are Python by design and run on load; `CERTO_NO_EXEC=1` and the ten JSON spec types run nothing, and the MCP confines paths -- not a sandbox, and `SECURITY.md` says so |
 | **P1** | `AssignmentSpec`: items, the receivers each may go to, capacities, a target -- an integral assignment, or a Hall witness `U` with value `cap(U) + |items not confined to U|`, both inequalities counted by the verifier, no solver | **M** | high | med | user feedback with acceptance criteria: the assignment matrix was rebuilt and checked outside certo, and an exact optimum of the WRONG matrix is still exact |
 | **P2** | `opt` with exactness REQUIRED: no floating-point certificate when the reconstruction fails, the step that failed named, and a rational primal supplied by the user certified directly | **S-M** | high | med | user feedback, reproduced over five sessions: `use_exact=True` returned a `partial` float certificate on a 15-row LP with a tiny centre |
 | **P2** | Case splits in `compose`, made visible: `p.case(name, when=H, proves=...)`, the exhaustiveness of the `H`s checked in the final step (it already is, implicitly) | **S-M** | med | med | user feedback in three sessions: the branches were certified and their coverage audited by hand |
@@ -360,6 +365,8 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| A stale MCP server says so FIRST in every answer, and every answer names the interpreter and package | `WARNING`, `runtime`, **0.25.1** |
+| A verification stopped by its clock is `inconclusive`, not `invalid` | `VerifyReport.timed_out`, **0.25.1** |
 | An `ideal` certificate to Lean as a `linear_combination`, the ring in the statement, measured and size-limited | `export --lean`, **0.25.0** |
 | A change of a received partition, certified as a change | `CoverSpec(repair=...)`, **0.25.0** |
 | `compose` reading what a `polynomial_nonneg` (and a stored `farkas` / `unsat_core`) states | linked lemmas, **0.25.0** |

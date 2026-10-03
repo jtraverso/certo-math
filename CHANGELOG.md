@@ -8,8 +8,9 @@ payload — each such change says so and what still reads the old shape.
 
 ## [0.25.1] — 2026-10-03
 
-**A soundness fix in the DIMACS reader, from a user's report.** No new
-commands (58) or kinds (55); the schema stays 5.
+**Soundness fixes in the DIMACS reader and in `linear_system`, from two
+users' reports and a QA campaign over MCP.** No new commands (58) or kinds
+(55); the schema stays 5.
 
 ### Soundness
 
@@ -25,6 +26,17 @@ commands (58) or kinds (55); the schema stays 5.
   inside is malformed rather than a lemma. No certificate produced by certo's
   own engines carries an empty clause it did not have, but a stored file
   could be read as another formula, and was.
+- **A kernel was counted, not checked to be a basis** (`linear_system`).
+  Over Q, two copies of one vector, two zero vectors, or vectors shorter than
+  the system passed for a nullity of two; over Z, an empty kernel made any
+  system `unique`, and `[[0, 2]]` -- the even values only -- passed for the
+  kernel of `x = 0` in Z^2. The kernel must now have the nullity's number of
+  independent vectors of the right length, and over Z be integral and
+  SATURATED (its Smith invariants all 1); `unique` is read off the rank.
+- **A verification stopped by its clock said `invalid`.** A DRAT re-check
+  that ran out of time reported the degree a false certificate gets. It is
+  `inconclusive` now (`timed_out` in the report): not accepted, not shown
+  wrong -- raise the time limit.
 
 ### Fixed
 
@@ -34,6 +46,16 @@ commands (58) or kinds (55); the schema stays 5.
 - The routing table adds `rechecks_without_a_solver` -- `yes`, `depends`,
   `no` -- beside the boolean, which means ALWAYS: `opt` read `false` beside an
   `lp_dual` that re-checks by rational arithmetic.
+- **A stale MCP server says so first in every answer**: when the server
+  runs the installed package and the installed version is another, every
+  response opens with a `WARNING` to restart it.
+- `verify --tamper` calls a field `excused` only when its mutation SURVIVES:
+  the excuse lists are by field name across kinds, and `objective` was
+  excused (a restatement in `parametric`) while `verify` rejects it in
+  `lp_dual` -- read as "not checked".
+- `cover` over MCP labels its three numbers -- the cover you have, the
+  relaxation's bound, the integer optimum -- and saves the branch-and-bound
+  certificate that proves the optimum, which the `exact_cover` one does not.
 - Every MCP response carries `runtime`: the interpreter and the certo
   package that answered. A user's PATH and MCP ran 0.24.0 while PyPI had
   0.25.0; the version alone did not say where the code came from.

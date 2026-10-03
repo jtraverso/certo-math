@@ -31,6 +31,8 @@ class DratReport:
     derived_empty: bool = False
     detail: str = ""
     elapsed_ms: float = 0.0
+    # Stopped by the clock, not refuted: a step not reached is not a bad step.
+    timed_out: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -192,8 +194,8 @@ def check(clauses, proof_lines, timeout_s: float = 60.0) -> DratReport:
         if time.perf_counter() - t0 > timeout_s:
             return DratReport(
                 False, "drup-python", k, rup, rat, dels, derived_empty,
-                "se agoto el tiempo del verificador en el paso {}/{}".format(k, len(ops)),
-                (time.perf_counter() - t0) * 1000,
+                _t("drup.timeout", k=k, n=len(ops)),
+                (time.perf_counter() - t0) * 1000, timed_out=True,
             )
         if kind == "d":
             F.delete(lits)
@@ -248,7 +250,8 @@ def check_with_drat_trim(dimacs: str, proof_lines, timeout_s: float = 60.0) -> D
             r = subprocess.run([exe, str(cnf_p), str(prf_p)], capture_output=True,
                                text=True, timeout=timeout_s)
         except subprocess.TimeoutExpired:
-            return DratReport(False, "drat-trim", detail="drat-trim se paso del tiempo")
+            return DratReport(False, "drat-trim", detail="drat-trim se paso del tiempo",
+                              timed_out=True)
     ok = "s VERIFIED" in r.stdout
     return DratReport(ok, "drat-trim", detail=r.stdout.strip().splitlines()[-1] if r.stdout else "",
                       derived_empty=ok, elapsed_ms=(time.perf_counter() - t0) * 1000)

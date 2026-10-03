@@ -7472,6 +7472,74 @@ def test_an_empty_dimacs_clause_is_kept_and_no_model_satisfies_it():
     assert not verify(forged).ok
 
 
+def test_a_kernel_is_a_basis_and_over_z_a_saturated_one():
+    """SOUNDNESS, from a user's QA campaign on 0.25.0 (QA02, QA03): the
+    `linear_system` verifier counted the kernel vectors and checked A k = 0,
+    nothing more. Dependent vectors, zero vectors and short vectors passed
+    over Q; over Z an empty kernel made any system `unique`, and `[[0, 2]]`
+    -- the even values only -- passed for the kernel of `x = 0` in Z^2."""
+    import copy
+
+    from certo.certificate import Certificate, verify
+    from certo.engines import algebra
+    from certo.spec import LinearSystemSpec
+
+    def mk(A, b, domain):
+        return algebra.linear_system(LinearSystemSpec(matrix=A, rhs=b,
+                                                      domain=domain), LIM).certificate
+
+    def edited(c, **payload):
+        d = copy.deepcopy(c.to_dict())
+        d["payload"].update(payload)
+        return verify(Certificate.from_dict(d)).ok
+
+    q = mk([[1, 0, 0]], [0], "rational")
+    assert verify(q).ok
+    for k in ([[0, 1, 0], [0, 1, 0]], [[0, 0, 0], [0, 0, 0]], [[0, 1], [0, 0]]):
+        assert not edited(q, kernel=k), k
+    z = mk([[1, 0]], [0], "integer")
+    assert verify(z).ok
+    assert not edited(z, kernel=[], status="unique")
+    assert not edited(z, kernel=[[0, 0]])
+    assert not edited(z, kernel=[[0, 2]])
+    assert edited(z, kernel=[[0, -1]])          # another basis: still right
+
+
+def test_a_check_stopped_by_its_clock_is_inconclusive_not_invalid():
+    """A user's DRAT re-check ran out of 10 s, then of 180 s at step 2293 of
+    2547, and the report said `invalid` -- read as a false proof. A stopped
+    check is `inconclusive`: not accepted, and not shown wrong."""
+    from certo import drup
+    from certo.certificate import drat_certificate, verify
+
+    cert = drat_certificate("p cnf 1 2\n1 0\n-1 0\n", ["0"], 1, 2)
+    assert verify(cert).degree == "complete"
+    real = drup.check
+    drup.check = lambda *a, **k: drup.DratReport(
+        False, "drup-python", 5, detail="clock", timed_out=True)
+    try:
+        rep = verify(cert)
+    finally:
+        drup.check = real
+    assert not rep.ok and rep.degree == "inconclusive" and rep.timed_out
+
+
+def test_tamper_calls_a_field_excused_only_when_its_mutation_survives():
+    """`objective` was `excused` by name -- a restatement in `parametric` --
+    while `verify` rejects its mutation in `lp_dual`; a user read excused as
+    unchecked. Excused fields are mutated now, and a caught one is caught."""
+    from certo import LPSpec, tamper
+    from certo.engines import lp
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.objective({"a": 1})
+    m.constraint({"a": 1}, "<=", 2, name="cap")
+    rep = tamper.probe(lp.opt(m, LIM).certificate)
+    assert "objective" in rep["caught"] and "objective" not in rep["excused"]
+    assert not rep["uncaught"]
+
+
 def test_three_papercuts_from_the_0_25_reports():
     """`T*T/1` in a spec died on an unsupported operand; `api.options` on a
     spec's name listed the commands without saying which one; the catalogue

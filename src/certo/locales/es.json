@@ -1993,5 +1993,10 @@
   "verify.cnf.header": "el archivo contiene las cláusulas que declara su encabezado `p cnf`",
   "verify.cnf.header_detail": "declaradas {declared}, leídas {read}",
   "poly.divide_by_poly": "un polinomio dividido por un polinomio no es un polinomio; multiplica por el denominador en su lugar",
-  "poly.divide_by_zero": "división de un polinomio por cero"
+  "poly.divide_by_zero": "división de un polinomio por cero",
+  "verify.solve.basis": "el núcleo es una BASE de las direcciones de solución: tantos vectores independientes como la nulidad, y sobre Z enteros y saturados (genera toda dirección entera)",
+  "verify.solve.basis_detail": "{n} vector(es) para una nulidad de {nullity}",
+  "drup.timeout": "el verificador agotó el tiempo en el paso {k} de {n}: no está refutado ni comprobado -- sube el límite de tiempo",
+  "verify.degree.inconclusive": "INCONCLUSO: la comprobación agotó su presupuesto de tiempo antes de terminar. No se encontró nada incorrecto y no se acepta nada -- vuelve a correrla con un --timeout-ms mayor",
+  "mcp.stale_server": "este servidor certo-mcp corre {running}, pero está instalada {installed}: conserva el código con que arrancó. Reinicia el servidor MCP (reconecta el cliente) para usar {installed}; `certo mcp` lista los desactualizados"
 }
