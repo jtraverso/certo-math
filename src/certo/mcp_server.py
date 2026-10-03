@@ -619,6 +619,108 @@ async def _off(fn, *a, **kw):
 mcp = MCPServer(name="certo", version=__version__, instructions=INSTRUCTIONS)
 
 
+# --- prompts: ready instructions the client offers the model -----------------
+#
+# A model using certo for the first time writes the spec wrong more often
+# than the mathematics. Each prompt is a short route -- find, guide, lint,
+# run, verify -- and its spec's fields are read from the discovery index, so
+# the prompt cannot drift from the code the way a hand-written guide did.
+
+
+#: Specs built by calling methods rather than by setting fields.
+_BUILDERS = ("variable", "objective", "constraint", "assume", "claim", "conclude")
+
+
+def _fields_of(spec_name: str) -> str:
+    import inspect
+
+    import certo
+
+    from . import discovery
+
+    cls = getattr(certo, spec_name, None)
+    methods = [n for n in _BUILDERS if cls is not None and callable(getattr(cls, n, None))]
+    if methods:
+        # A builder: its METHODS are the interface; its fields are state.
+        rows = []
+        for n in methods:
+            fn = getattr(cls, n)
+            sig = str(inspect.signature(fn)).replace("(self, ", "(").replace("(self)", "()")
+            doc = (inspect.getdoc(fn) or "").split("\n")[0][:100]
+            rows.append("  .{}{}{}".format(n, sig, "  -- " + doc if doc else ""))
+        return "\n".join(rows)
+    c = discovery.contract(spec_name) or {}
+    rows = ["  {}{}: {}".format(f["field"],
+                                "" if f.get("default") is None
+                                else " = " + str(f["default"]),
+                                (f.get("summary") or "")[:110])
+            for f in c.get("fields") or []
+            if f["field"] not in ("title",)]
+    return "\n".join(rows)
+
+
+def _route(command: str, spec_name: str, goal: str, task: str, extra: str = "") -> str:
+    return "\n".join([
+        "Use certo to {} -- with a certificate, not an estimate.".format(goal),
+        "",
+        "The problem: {}".format(task or "(describe it, then follow the steps)"),
+        "",
+        "1. Write a spec file in the workspace defining `def spec():` that "
+        "returns a {}, written with:".format(spec_name),
+        _fields_of(spec_name),
+        "2. Call `lint` on it and fix every error before running anything.",
+        "3. Call `{}` (or `run` with command='{}') on it.".format(command, command),
+        "4. Call `verify` on the certificate path it returns. Read `degree`: "
+        "`complete` is checked by exact arithmetic; anything else says what "
+        "was not. Read `scope`: what the claim is restricted to.",
+        "5. Report the verdict, the scope and the certificate path. Do not "
+        "report an `unknown`, `timeout` or `inconclusive` as a negative.",
+    ] + ([extra] if extra else []))
+
+
+@mcp.prompt(name="first-spec", description=(
+    "Start here: find what certo does for a problem, then write, lint, run "
+    "and verify the spec."))
+def prompt_first_spec(problem: str = "") -> str:
+    return "\n".join([
+        "Use certo for this problem, with a certificate: {}".format(problem or "(state it)"),
+        "",
+        "1. Call `find` with what you need in plain words; read the top "
+        "results and `find(exact=...)` the one that fits.",
+        "2. Call `dsl_guide` for how that spec is written.",
+        "3. Write the spec, `lint` it, run its command, `verify` the certificate.",
+        "4. Report the verdict, its `scope` and `degree`, and the certificate path.",
+    ])
+
+
+@mcp.prompt(name="certify-lp", description=(
+    "Optimise a linear program and certify the optimum exactly (primal and "
+    "dual in rationals), refusing a floating-point answer."))
+def prompt_certify_lp(problem: str = "") -> str:
+    return _route("opt", "LPSpec", "optimise a linear program exactly", problem,
+                  "Pass exact_required=true to `opt`: a floating-point fallback "
+                  "is then refused instead of returned. If you already know the "
+                  "optimum in rationals, pass primal={var: 'p/q'} to certify it.")
+
+
+@mcp.prompt(name="prove-polynomial-nonneg", description=(
+    "Show a polynomial is >= 0 on a box, a ray, or the part a region cuts -- "
+    "or find the point where it fails."))
+def prompt_nonneg(problem: str = "") -> str:
+    return _route("nonneg", "NonnegSpec", "show a polynomial is non-negative", problem,
+                  "A box entry (lo, None) is a ray; an algebraic endpoint is a "
+                  "region condition g >= 0, written exactly, not a rational cut.")
+
+
+@mcp.prompt(name="assign-with-hall", description=(
+    "Assign items to receivers under capacities, with a Hall set proving no "
+    "larger assignment exists."))
+def prompt_assign(problem: str = "") -> str:
+    return _route("assign", "AssignmentSpec",
+                  "place items on the receivers they are allowed, as many as possible",
+                  problem)
+
+
 @mcp.resource("certo://dsl", mime_type="text/markdown",
               description="certo DSL reference")
 def dsl_resource() -> str:
@@ -1192,14 +1294,18 @@ async def synth(spec_path: str | None = None, spec_source: str | None = None,
     "between them; `round=true` certifies integer optimum <= floor(LP). "
     "`target` is the value to reach; `no_exact` skips the exact "
     "reconstruction (faster, NOT citable); `dual_direction` ({row: weight}, "
-    "or 'row=w,...') picks among optimal duals."))
+    "or 'row=w,...') picks among optimal duals. `exact_required=true`: no "
+    "floating-point fallback -- INCONCLUSIVE with the failed exact check "
+    "named. `primal={var: 'p/q'}`: certify an exact optimum you already have."))
 @_guard
 async def opt(spec_path: str | None = None, spec_source: str | None = None,
               timeout_ms: int = 10_000, by_type: bool = False,
               explore: bool = False, round: bool = False,
               cuts: str | None = None, gap: bool = False,
               target: str | None = None, no_exact: bool = False,
-              dual_direction: dict | str | None = None) -> dict:
+              dual_direction: dict | str | None = None,
+              exact_required: bool = False,
+              primal: dict | None = None) -> dict:
     from .engines import lp
     from .packing import PackingSpec
     from .spec import LPSpec, load_spec
@@ -1233,7 +1339,8 @@ async def opt(spec_path: str | None = None, spec_source: str | None = None,
                                 target=target), spec_file=f)
     res = await _off(lp.opt, sp, _limits(timeout_ms), use_exact=not no_exact,
                      target=target, round=round, cuts=cuts,
-                     dual_direction=lp.direction_from(dual_direction))
+                     dual_direction=lp.direction_from(dual_direction),
+                     exact_required=exact_required, primal=primal)
     out = _emit(res, spec_file=f)
     if packing is not None:
         from .packing import loads_from_dual
@@ -2037,6 +2144,29 @@ async def batch(command: str, directory: str, pattern: str = "*.py",
                     pass
     return {"command": command, "summary": B.summary(rows),
             "rows": rows[:_CAP], "rows_total": len(rows)}
+
+
+@mcp.tool(description=(
+    "ASSIGN: items to receivers under capacities (pages to the hosts each "
+    "may use, jobs to machines...). Returns the LARGEST integral assignment "
+    "and a Hall set U of receivers with cap(U) + |items not confined to U| "
+    "equal to its size -- so it is maximum, checked by counting, no LP. With "
+    "a target out of reach, REFUTED and U is the bottleneck, named: too few "
+    "items, too little capacity, or a set of receivers the items are stuck on."))
+@_guard
+async def assign(spec_path: str | None = None, spec_source: str | None = None,
+                 timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import AssignmentSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), AssignmentSpec)
+    res = await _off(algebra.assign, spec, _limits(timeout_ms), str(f))
+    out = _emit(res, spec_file=f)
+    if res.certificate is not None:
+        out["assignment"] = dict(list(res.certificate.payload["assignment"].items())[:_CAP])
+        out["hall"] = res.certificate.payload["hall"]
+    return out
 
 
 @mcp.tool(description=(

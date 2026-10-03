@@ -1,4 +1,4 @@
-# Los cincuenta y ocho comandos
+# Los cincuenta y nueve comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -547,6 +547,14 @@ VÁLIDO  certificado lp_dual (verificado sin solver)
 En un programa entero la salida rotula aparte sus dos números -- el punto
 entero hallado y la cota de la relajación que certifica el dual -- y
 `--top 0` imprime el punto entero completo.
+
+`--exact-required` rechaza la vuelta a punto flotante: cuando la
+reconstrucción racional falla, la respuesta es INCONCLUSA con la comprobación
+exacta que falló nombrada, y no se escribe certificado. `--primal a=2/3,b=7/9`
+(o un archivo JSON) certifica un óptimo que ya tienes en forma exacta: su dual
+se encuentra por holgura complementaria o por el símplex exacto y se
+comprueba. Junto a `SATISFIABLE`, `optimality_certified` dice si el óptimo está
+demostrado.
 
 `--no-exact` salta la reconstrucción; el certificado queda en punto flotante y
 `verify` lo marca como **no citable**.
@@ -1431,6 +1439,33 @@ Rayos y lados acotados se mezclan en una misma caja, y se usan los techos:
 `meta["method"]` dice qué test corrió -- `bernstein` o `shift` -- para un
 cliente que no debería sacarlo del texto del detalle.
 
+### `certo assign`
+
+**Pregunta** — Ítems a receptores con capacidades: ¿cuántos caben, y por qué
+no más?
+**Spec** — `AssignmentSpec`
+**Responde** — la asignación entera más grande, y un conjunto de Hall `U` de
+receptores con `cap(U) + |ítems no confinados a U|` igual a su tamaño; con un
+`target` fuera de alcance, REFUTADO y `U` nombra el cuello de botella
+**Certificado** — `assignment`, **sin solver**: cada asignación comprobada
+contra lo permitido al ítem, cada carga contra su capacidad, y la cota de
+Hall recontada desde los datos
+**No establece** — que los datos sean tu problema: los ítems, los receptores
+permitidos y las capacidades son la entrada de la afirmación, y no escribir
+una matriz es justamente la idea -- un óptimo exacto de un LP equivocado sigue
+siendo exacto.
+
+    AssignmentSpec(items=PAGINAS, allowed={pagina: [hosts que puede usar]},
+                   capacities={host: k}, target=len(PAGINAS))
+
+Todo ítem asignado cae en `U` (a lo más `cap(U)` de ellos) o tiene permitido
+algún receptor fuera (a lo más los ítems no confinados a `U`), así que
+ninguna asignación supera ese número, y una que lo alcanza es máxima.
+`U = {}` dice que no hay suficientes ítems; `U` = todo receptor, que no hay
+suficiente capacidad; lo intermedio es un cuello de botella, y el detalle lo
+nombra. `examples/assignment_hall.py`: seis páginas, caben cinco, y `{a, b}`
+es la razón.
+
 ### `certo pin`
 
 **Pregunta** — Un cubrimiento da `cp(G) <= X` y un LP da `cp(G) >= X`: ¿pueden
@@ -2009,6 +2044,12 @@ lema que enlaza es DERIVADO. Para `polynomial_nonneg` lo que afirma es la caja
 `[0, 1]` enlaza con un lema sobre `[0, 1]`, no con uno sobre `x >= 0`, ni con
 otro polinomio. `lemma(..., proves=NonnegSpec(...))` lo descarga en el lugar.
 Lo que no enlaza sigue siendo un puente, como antes.
+
+**Una prueba por casos** nombra sus casos: `p.case("pequeno", when=n <= 10,
+proves=...)`, uno por rama. `compose` demuestra que los casos AGOTAN las
+hipótesis -- `hipótesis -> when_1 o ... o when_k` -- con un certificado propio,
+y `verify` comprueba que trate de estos casos y estas hipótesis. Un hueco
+entre los casos rechaza la prueba con la instancia que cae en él.
 
 ### `certo verify`
 

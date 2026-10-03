@@ -836,6 +836,27 @@ class ProofSpec:
     # What the THEOREM is about, as (kind, id). A lemma whose subject differs
     # from this one has crossed a level, and must say by which map.
     subject: object = None
+    # A proof BY CASES: (case name, condition). Their exhaustiveness under the
+    # hypotheses is proved on its own and travels as a certificate.
+    cases: list = field(default_factory=list)
+
+    def case(self, name, when, proves=None, via="prove", certificate="",
+             states=None, bridge=""):
+        """One branch of a proof by cases: a lemma that holds where `when`
+        does, and `when` recorded as one of the cases. `compose` proves the
+        cases EXHAUST the hypotheses -- `hypotheses -> when_1 or ... or
+        when_k` -- as a certificate of its own, so the coverage is a checked
+        obligation with a name, not something the final step implies quietly.
+
+            p.case("small", when=n <= 10, proves=small_spec)
+            p.case("large", when=n > 10, proves=large_spec)
+        """
+        if any(c == name for c, _ in self.cases):
+            raise ValueError(t("spec.duplicate_lemma", name=name))
+        self.lemma(name, proves=proves, via=via, certificate=certificate,
+                   states=states, bridge=bridge)
+        self.cases.append((name, when))
+        return self
 
     def lemma(self, name, proves=None, via="prove", certificate="",
               states=None, bridge="", subject=None, transport=""):
@@ -1398,6 +1419,29 @@ class CliqueLPSpec:
     title: str = ""
     # The family bounded from above too -- only edges and triangles, say.
     max_size: object = None
+
+
+@dataclass
+class AssignmentSpec:
+    """Items to receivers under capacities: how many can be placed, and why
+    no more.
+
+        AssignmentSpec(items=["p1", "p2", "p3"],
+                       allowed={"p1": ["a"], "p2": ["a", "b"], "p3": ["a"]},
+                       capacities={"a": 1, "b": 2},
+                       target=3)
+
+    PROVED / SATISFIABLE carry an integral assignment and a Hall set `U` of
+    receivers with `cap(U) + |items not confined to U|` equal to its size --
+    so it is maximum, by counting. With a `target` above that, REFUTED: `U`
+    is the bottleneck, named. No LP and no matrix: the data is the problem.
+    """
+
+    items: list                      # the item ids
+    allowed: dict                    # item -> the receivers it may go to
+    capacities: dict                 # receiver -> a non-negative integer
+    target: object = None            # how many must be placed, if asked
+    title: str = ""
 
 
 @dataclass

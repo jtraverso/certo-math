@@ -38,14 +38,14 @@ SPEC_OF = {
     "audit": "*", "reduce": "SymmetrySpec", "matrix": "MatrixSpec", "solve": "LinearSystemSpec",
     "quotient": "EquitableQuotientSpec", "cone": "ConeSpec",
     "semigroup": "SemigroupSpec", "profile": "ProfileSpec",
-    "columns": "CliqueLPSpec", "atlas": "AtlasSpec", "nonneg": "NonnegSpec", "pin": "PinSpec",
+    "columns": "CliqueLPSpec", "atlas": "AtlasSpec", "nonneg": "NonnegSpec", "pin": "PinSpec", "assign": "AssignmentSpec",
     "range": "Spec", "cycle": "CycleSpec",
     "bind": "BindSpec",
 }
 
 #: Which commands leave a certificate that re-checks with NO solver.
 SOLVER_FREE = {
-    "cone", "semigroup", "columns", "atlas", "nonneg", "pin", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
+    "cone", "semigroup", "columns", "atlas", "nonneg", "pin", "assign", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
     "cover", "ideal", "eliminate", "sos", "number", "order", "bounds",
     "cases",
 }
@@ -81,6 +81,7 @@ BY_QUESTION = (
         ("commands.q.atlas", "atlas"),
         ("commands.q.nonneg", "nonneg"),
         ("commands.q.pin", "pin"),
+        ("commands.q.assign", "assign"),
         ("commands.q.range", "range --var X"),
         ("commands.q.cycle", "cycle"),
         ("commands.q.solve", "solve"),
@@ -221,7 +222,7 @@ TIER = {
     "mixed": YES, "farkas": YES, "ratio": YES, "parametric": YES,
     "peak": YES, "entry": YES, "moment": YES, "cover": YES, "exists": YES,
     "cases": YES, "number": YES, "sos": YES, "ideal": YES, "eliminate": YES,
-    "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "columns": YES, "atlas": YES, "nonneg": YES, "pin": YES, "reduce": YES,
+    "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "columns": YES, "atlas": YES, "nonneg": YES, "pin": YES, "assign": YES, "reduce": YES,
     "order": YES, "bounds": YES, "check": YES, "enum": YES, "shrink": YES,
     "range": YES, "cycle": YES,
 
@@ -276,7 +277,7 @@ KIND_OF = {
     "solve": "linear_system", "quotient": "equitable_quotient",
     "cone": "toric_cone", "semigroup": "affine_semigroup", "profile": "capacity_profile",
     "columns": "clique_lp", "atlas": "parametric_atlas",
-    "nonneg": "polynomial_nonneg", "pin": "pinned_value",
+    "nonneg": "polynomial_nonneg", "pin": "pinned_value", "assign": "assignment",
     "range": "variable_range",
     "cycle": "dependency_cycle", "bind": "lean_binding",
     "family": "family_extremum", "ratio": "ratio_bound",
@@ -324,6 +325,7 @@ RUNNERS = {
     "atlas": ("certo.engines.algebra", "atlas"),
     "nonneg": ("certo.engines.algebra", "nonneg"),
     "pin": ("certo.engines.algebra", "pin"),
+    "assign": ("certo.engines.algebra", "assign"),
     # `range` stays out on purpose: it needs `--var`, which is a decision
     # `ask` cannot make. `cycle` and `bind` need nothing, so routing them
     # is the whole point of having one entry point.

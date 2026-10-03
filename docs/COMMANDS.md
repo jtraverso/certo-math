@@ -1,4 +1,4 @@
-# The fifty-eight commands
+# The fifty-nine commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -535,6 +535,13 @@ VALID  lp_dual certificate (verified without a solver)
 On an integer program the output labels its two numbers apart -- the
 integral point found and the relaxation bound the dual certifies -- and
 `--top 0` prints the whole integral point.
+
+`--exact-required` refuses the floating-point fallback: when the rational
+reconstruction fails, the answer is INCONCLUSIVE with the exact check that
+failed named, and no certificate is written. `--primal a=2/3,b=7/9` (or a JSON
+file) certifies an optimum you already have exactly: its dual is found by
+complementary slackness or the exact simplex and checked. Beside
+`SATISFIABLE`, `optimality_certified` says whether the optimum is proved.
 
 `--no-exact` skips the reconstruction; the certificate stays in floating point
 and `verify` flags it as **not citable**.
@@ -1405,6 +1412,31 @@ Rays and bounded sides mix in one box, and the ceilings are used:
 `meta["method"]` says which test ran -- `bernstein` or `shift` -- for a
 client that should not parse it out of the detail.
 
+### `certo assign`
+
+**Question** — Items to receivers under capacities: how many can be placed,
+and why no more?
+**Spec** — `AssignmentSpec`
+**Answers** — the largest integral assignment, and a Hall set `U` of
+receivers with `cap(U) + |items not confined to U|` equal to its size; with a
+`target` out of reach, REFUTED and `U` names the bottleneck
+**Certificate** — `assignment`, **solver-free**: each placement checked
+against what the item is allowed, each load against its capacity, and the
+Hall bound recounted from the data
+**Not established** — that the data is your problem: the items, the allowed
+receivers and the capacities are the claim's input, and a matrix nobody
+wrote is the point -- an exact optimum of a wrong LP is still exact.
+
+    AssignmentSpec(items=PAGES, allowed={page: [hosts it may use]},
+                   capacities={host: k}, target=len(PAGES))
+
+Every placed item lands in `U` (at most `cap(U)` of them) or is allowed
+somewhere outside it (at most the items not confined to `U`), so no
+assignment beats that number, and one that meets it is maximum. `U = {}`
+says there are not enough items; `U` = every receiver, not enough capacity;
+anything between is a bottleneck, and the detail names it.
+`examples/assignment_hall.py`: six pages, five fit, and `{a, b}` is why.
+
 ### `certo pin`
 
 **Question** — A cover gives `cp(G) <= X` and an LP gives `cp(G) >= X`: can the
@@ -1967,6 +1999,13 @@ open end), the region and `poly >= 0`: a certificate on `[0, 1]` links to a
 lemma about `[0, 1]`, not to one about `x >= 0`, and not to another
 polynomial. `lemma(..., proves=NonnegSpec(...))` discharges it in place.
 What does not link stays a bridge, as before.
+
+**A proof by cases** names its cases: `p.case("small", when=n <= 10,
+proves=...)`, one per branch. `compose` proves the cases EXHAUST the
+hypotheses -- `hypotheses -> when_1 or ... or when_k` -- as a certificate of
+its own, and `verify` checks that it is about these cases and these
+hypotheses. A gap between the cases refuses the proof with the instance that
+falls in it.
 
 ### `certo verify`
 

@@ -90,7 +90,9 @@ def _range(p):
 def _cover(p):
     out = [t("scope.cover_not_minimum")]
     if p.get("repair"):
-        out.append(t("scope.cover_repair", n=len(p["repair"].get("withdraw") or [])))
+        steps = p["repair"] if isinstance(p["repair"], list) else [p["repair"]]
+        out.append(t("scope.cover_repair",
+                     n=sum(len(s.get("withdraw") or []) for s in steps)))
     return out
 
 

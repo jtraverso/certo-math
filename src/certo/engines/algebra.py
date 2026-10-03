@@ -75,7 +75,7 @@ def _poly(expr, variables):
 
 def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """Is this an exact cover, and how many parts does it use?"""
-    from ..cover import NotACover, check, check_repair, clique_parts, repair_text
+    from ..cover import NotACover, check, check_repairs, clique_parts, repair_text
 
     t0 = time.perf_counter()
     universe = [u for u in spec.universe]
@@ -83,13 +83,15 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     repair = getattr(spec, "repair", None)
     given = list(spec.parts or [])
     if repair is not None:
-        rep = check_repair(repair, universe, cliques=spec.cliques)
+        rep = check_repairs(repair, universe, cliques=spec.cliques)
         if not rep["ok"]:
             # The change is not admissible, whatever the final cover is.
+            why = repair_text(rep["problems"])
+            if rep.get("step") is not None:
+                why = t("engine.cover.repair_step", k=rep["step"] + 1) + why
             return Result("cover", Status.SAT, Verdict.REFUTED, ENGINE_COVER,
                           (time.perf_counter() - t0) * 1000, None,
-                          detail=t("engine.cover.repair_refused",
-                                   why=repair_text(rep["problems"])),
+                          detail=t("engine.cover.repair_refused", why=why),
                           meta={"repair_problems": [k for k, _v in rep["problems"]]})
         given = [rep["final"][o] for o in rep["order"]]
     try:
@@ -133,11 +135,16 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                else "engine.cover.proved_atleast",
                parts=out["parts"], n=out["universe"])
     if repair is not None:
-        cert.payload["repair"] = _serial_repair(repair)
+        steps = [repair] if isinstance(repair, dict) else list(repair)
+        cert.payload["repair"] = (_serial_repair(repair) if isinstance(repair, dict)
+                                  else [_serial_repair(s) for s in steps])
         detail += " " + t("engine.cover.repair_ok",
-                          out=len(repair.get("withdraw") or []),
-                          into=len(repair.get("insert") or {}),
-                          frozen=len(repair.get("frozen") or []))
+                          out=sum(len(s.get("withdraw") or []) for s in steps),
+                          into=sum(len(s.get("insert") or {}) for s in steps),
+                          frozen=len({str(o) for s in steps
+                                      for o in s.get("frozen") or []}))
+        if len(steps) > 1:
+            detail += " " + t("engine.cover.repair_steps", n=len(steps))
     return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms,
                   cert, detail=detail, meta=meta)
 
@@ -147,12 +154,15 @@ def _serial_repair(repair) -> dict:
     def part(p):
         return [list(e) if isinstance(e, (tuple, list)) else e for e in p]
 
-    return {"before": {str(k): part(v) for k, v in (repair.get("before") or {}).items()},
+    out = {"before": {str(k): part(v) for k, v in (repair.get("before") or {}).items()},
             "withdraw": [str(o) for o in repair.get("withdraw") or []],
             "insert": {str(k): part(v) for k, v in (repair.get("insert") or {}).items()},
             "frozen": [str(o) for o in repair.get("frozen") or []],
             "new": part(repair.get("new") or []),
             "balance": repair.get("balance")}
+    if "before" not in repair:
+        out.pop("before")          # a later step: its start is the previous end
+    return out
 
 
 def cover_bounds(spec, limits=None, prove_optimal=False, max_nodes=5_000,
@@ -516,6 +526,52 @@ def pin(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     return Result("pin", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, ENGINE_PIN,
                   ms(), cert, detail=t("pin.range", r=r, lower=L, upper=X),
                   meta={"value": None, "lower": L, "upper": X})
+
+
+def assign(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """The largest assignment of items to receivers, and the Hall set that
+    proves no larger one exists; against a target, met or refuted."""
+    from .. import assignment as A
+    from ..certificate import assignment_certificate
+
+    t0 = time.perf_counter()
+    try:
+        items, allow, caps = A.normalise(spec.items, spec.allowed, spec.capacities)
+    except A.NotAnAssignment as e:
+        return Result("assign", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, (time.perf_counter() - t0) * 1000, None,
+                      detail=str(e))
+    got, U = A.solve(items, allow, caps)
+    b = A.bound(items, allow, caps, U)
+    target = None if spec.target is None else int(spec.target)
+    reached = None if target is None else len(got) >= target
+    payload = {"items": items, "allowed": allow, "capacities": caps,
+               "assignment": dict(sorted(got.items())), "size": len(got),
+               "hall": {"U": U, "capacity": b["capacity"],
+                        "not_confined": b["not_confined"], "value": b["value"]},
+               "target": target, "reached": reached, "title": spec.title}
+    cert = assignment_certificate(payload).stamp(spec_path or None)
+    ms = (time.perf_counter() - t0) * 1000
+    why = ("items" if not U else "capacity" if set(U) == set(caps)
+           else "bottleneck")
+    detail = t("engine.assign.max", n=len(got), items=len(items),
+               cap=b["capacity"], free=b["not_confined"],
+               U=", ".join(U[:6]) + (" ..." if len(U) > 6 else "") or "-",
+               why=t({"items": "engine.assign.why_items",
+                      "capacity": "engine.assign.why_capacity",
+                      "bottleneck": "engine.assign.why_bottleneck"}[why]))
+    meta = {"size": len(got), "items": len(items), "U": U, "bound": b["value"],
+            "limited_by": why, "optimality_certified": True}
+    if target is None:
+        return Result("assign", Status.SAT, Verdict.SATISFIABLE, ENGINE_COVER,
+                      ms, cert, detail=detail, meta=meta)
+    if reached:
+        return Result("assign", Status.SAT, Verdict.PROVED, ENGINE_COVER, ms,
+                      cert, detail=t("engine.assign.reached", n=len(got),
+                                     target=target) + " " + detail, meta=meta)
+    return Result("assign", Status.UNSAT, Verdict.REFUTED, ENGINE_COVER, ms,
+                  cert, detail=t("engine.assign.short", target=target,
+                                 n=b["value"]) + " " + detail, meta=meta)
 
 
 def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
@@ -1831,8 +1887,22 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         # Conclusive, not a failure to find: Groebner decides membership.
         detail = (t("engine.ideal.consistent") if claim is None
                   else t("engine.ideal.not_member"))
+        meta = {}
+        if claim is not None:
+            # What is left of the claim once the equations are used: the
+            # factor a user had dropped, in their report, and they computed
+            # it by hand.
+            from ..polynomials import normal_form
+
+            try:
+                residue = normal_form(claim, gs, max_pairs=spec.max_pairs)
+                meta["residue"] = str(residue)
+                detail = detail.rstrip(". ") + ". " + t(
+                    "engine.ideal.residue", residue=str(residue)[:300])
+            except Budget:
+                pass
         return Result("ideal", Status.SAT, Verdict.REFUTED, ENGINE_IDEAL, ms,
-                      None, detail=detail)
+                      None, detail=detail, meta=meta)
 
     cert = ideal_certificate(
         variables=variables,

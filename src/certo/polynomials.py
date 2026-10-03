@@ -376,6 +376,17 @@ def cofactors(f: Poly, gens, **budget):
     return coeffs, True
 
 
+def normal_form(f: Poly, gens, **budget) -> Poly:
+    """`f` reduced modulo the ideal of `gens`: its remainder on division by
+    a Groebner basis, zero exactly when `f` is in the ideal. What is LEFT of
+    a claim that does not follow -- the factor a user dropped, usually."""
+    basis, track = groebner(list(gens), **budget)
+    if not basis:
+        return f
+    _, rem, _coeffs = divide(f, basis, track)
+    return rem
+
+
 def combination(hs, gs, variables=None) -> Poly:
     """sum h_i g_i. The check, in one line of arithmetic. With no equations
     it is the zero polynomial of `variables` -- an empty ideal, not an

@@ -547,3 +547,40 @@ def stats(values):
     total = sum(fs, Fraction(0))
     return {"count": len(fs), "min": min(fs), "max": max(fs),
             "mean": total / len(fs), "sum": total}
+
+
+def certify_primal(A, b, c, x):
+    """An EXACT primal supplied by the caller, and the dual that proves it
+    optimal -- or `(None, report)` saying which check failed.
+
+    For the user who has the rational optimum already (a construction, a
+    closed form) and wants it certified rather than re-found through floating
+    point: the duals complementary slackness allows are tried first, then the
+    exact simplex; `check_lp` decides, as it does for every other route.
+    """
+    P = A if isinstance(A, Prepared) else Prepared(A, b, c)
+    x = [to_fraction(v) for v in x]
+    last = check_lp(P, P.b, P.c, x, [Fraction(0)] * len(P.rows))
+    if not (last["primal_nonneg"] and last["primal_feasible"]):
+        return None, last
+    for y in dual_candidates(P, P.b, P.c, x):
+        rep = check_lp(P, P.b, P.c, x, y)
+        if rep["ok"]:
+            return y, rep
+        last = rep
+    from .simplex import SimplexLimit, minimise
+
+    try:
+        y = minimise(P.dense(), P.b, P.c)
+    except (SimplexLimit, ZeroDivisionError):
+        return None, last
+    rep = check_lp(P, P.b, P.c, x, y)
+    return (y if rep["ok"] else None), rep
+
+
+def failed_checks(rep) -> list:
+    """The names of the four exact checks a `check_lp` report failed."""
+    if not rep:
+        return ["no candidate"]
+    return [k for k in ("primal_nonneg", "primal_feasible", "dual_nonneg",
+                        "dual_feasible", "strong_duality") if not rep.get(k)]

@@ -6,7 +6,7 @@ the claims that are false, measure what survives, reduce it to what it really
 is, and assemble the rest — and every step comes back with a **certificate
 anyone can re-check without trusting certo.**
 
-CLI and MCP. Fifty-eight commands. Runs in milliseconds where a formalisation
+CLI and MCP. Fifty-nine commands. Runs in milliseconds where a formalisation
 costs hours.
 
 *Español: [README.es.md](README.es.md) · run any command with `--lang es`.*
@@ -14,7 +14,7 @@ costs hours.
 | | |
 |---|---|
 | **[Project page →](https://jtraverso.github.io/certo-math/)** | the didactic introduction: what certo is for, in one page, in both languages |
-| **[Commands](docs/COMMANDS.md)** | all fifty-eight, one entry each: the question, the spec, the certificate, and what it does not establish |
+| **[Commands](docs/COMMANDS.md)** | all fifty-nine, one entry each: the question, the spec, the certificate, and what it does not establish |
 | **[Specs](docs/SPECS.md)** | the DSL: every spec type with a minimal working example, shared options, exit codes |
 | **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the fifty-three kinds, which re-check without a solver |
 | **[Worked cases](docs/CASES.md)** | real problems end to end: symmetry, sweeps, parametric bounds, packings, toric data |
@@ -57,6 +57,10 @@ Requires Python 3.11+.
 ```bash
 pip install "certo-math[mcp,numerics]"
 ```
+
+The distribution is `certo-math` (the name `certo` was taken on PyPI); the
+package you import, the command and the MCP server are `certo`:
+`import certo`, `certo find ...`, `certo-mcp`.
 
 The import package and the commands are `certo`, not `certo-math`:
 `from certo import Spec`, `certo prove spec.py`. Only the distribution
@@ -145,7 +149,7 @@ your terminal, in your language.
    dominates, and a fallback written to avoid it is a fallback in floating
    point.
 
-## The fifty-eight commands
+## The fifty-nine commands
 
 Grouped as [`certo commands`](docs/COMMANDS.md) groups them. Full entries,
 with what each one does **not** establish, in
@@ -177,6 +181,7 @@ with what each one does **not** establish, in
 | `columns` | An LP over every clique of a graph, without listing the cliques: column generation with a pricing search the verifier reruns | exact rational arithmetic | solver-free |
 | `atlas` | A parameter domain covered by boxes, each certified by `parametric`, and ONE statement for the whole | every piece re-verified, the covering recomputed cell by cell | **names the uncovered sliver**, solver-free |
 | `nonneg` | A polynomial >= 0 on a box, or on the part a region `g >= 0` cuts -- an algebraic endpoint written exactly; `(lo, None)` is a ray | Bernstein coefficients on a subdivision, region multipliers | **the point where it fails**, solver-free |
+| `assign` | Items to receivers under capacities: the largest assignment, and a Hall set showing no larger one | augmenting paths; the Hall bound recounted | **the assignment and the bottleneck U**, solver-free |
 | `pin` | `cp(G) = X` from both sides: a cover by cliques above, a clique LP rounded up below | both halves re-verified and tied to ONE edge list | the range when they do not meet, solver-free |
 | `semigroup` | Affine semigroups as a checker: pointedness, minimality, and membership of the cone, the group and the semigroup | exact integer and rational arithmetic | **refutes normality with a witness, never asserts it**, solver-free |
 | `profile` | How an optimum responds to ONE capacity across an interval: a piecewise-affine function, not a value | exact rational arithmetic | **decides `f` on its domain** — bound, attainment and coverage — solver-free |
@@ -300,6 +305,10 @@ returns one contract. Sixty-one tools is a lot of context for a model to carry:
 `certo-mcp --compact` (or `CERTO_MCP_COMPACT=1`) serves four -- `find`, `run`
 (any command that takes a spec, by name), `verify` and `dsl_guide` -- and
 loses nothing, since `run` reaches every command `find` names.
+
+The server also offers PROMPTS -- `first-spec`, `certify-lp`,
+`prove-polynomial-nonneg`, `assign-with-hall` -- short routes (find, guide,
+lint, run, verify) whose spec interfaces are read from the code.
 
 > **Specs are Python code and they get executed when loaded.** That is
 > inherent to the DSL and it is the same level of trust an agent with file

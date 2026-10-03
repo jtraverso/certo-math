@@ -275,3 +275,36 @@ def repair_text(problems) -> str:
                 for k, v in values.items()}
         out.append(_t(key, **flat))
     return "; ".join(out)
+
+
+def check_repairs(repair, universe, cliques=False):
+    """One repair, or a SEQUENCE of them: each step checked against the
+    partition the previous one left, with an owner frozen at any step frozen
+    for every later one, and the last step's universe the declared one.
+    Returns `check_repair`'s shape, `step` naming the first step that fails."""
+    if isinstance(repair, dict):
+        return dict(check_repair(repair, universe, cliques), step=None)
+    steps = list(repair or [])
+    if not steps or "before" not in steps[0]:
+        return {"ok": False, "problems": [("cover.repair.no_start", {})],
+                "final": {}, "order": [], "step": 0}
+    current = dict(steps[0]["before"])
+    frozen = set()
+
+    def resources(part):
+        return [_key(e) for e in (edges_of(part) if cliques else part)]
+
+    rep = None
+    for k, step in enumerate(steps):
+        frozen |= {str(o) for o in step.get("frozen") or []}
+        here = set()
+        for part in current.values():
+            here.update(resources(part))
+        here.update(_key(e) for e in step.get("new") or [])
+        last = k == len(steps) - 1
+        rep = check_repair(dict(step, before=current, frozen=sorted(frozen)),
+                           universe if last else sorted(here), cliques)
+        if not rep["ok"]:
+            return dict(rep, step=k)
+        current = {o: rep["final"][o] for o in rep["order"]}
+    return dict(rep, step=None)

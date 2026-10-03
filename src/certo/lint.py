@@ -924,9 +924,9 @@ def _check_cover(spec, limits):
     if repair is not None:
         # The parts are DERIVED from the change; what lint can say is whether
         # the change is admissible, which is cheap.
-        from .cover import check_repair, repair_text
+        from .cover import check_repairs, repair_text
 
-        rep = check_repair(repair, universe, cliques=getattr(spec, "cliques", False))
+        rep = check_repairs(repair, universe, cliques=getattr(spec, "cliques", False))
         if not rep["ok"]:
             yield _f(ERROR, "cover.repair", why=repair_text(rep["problems"]))
         return

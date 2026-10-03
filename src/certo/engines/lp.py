@@ -558,13 +558,23 @@ def _progress(on, t0, key, **kw):
 
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         target=None, dual_direction=None, _vectors_only: bool = False,
-        round: bool = False, cuts=None, _ray: bool = True) -> Result:
+        round: bool = False, cuts=None, _ray: bool = True,
+        exact_required: bool = False, primal=None) -> Result:
     """`_vectors_only=True` is for callers that keep only the dual and the
     primal -- branch and bound, which derives every node's program from the
     root. Serialising the whole matrix into a certificate at every node was
     most of a node's cost on 1048 columns: 97 million `serialize` calls in 71
     nodes, for a certificate the tree then discarded. The exact check is the
-    same one; only the artefact is smaller."""
+    same one; only the artefact is smaller.
+
+    `exact_required=True`: when the rational reconstruction fails, no
+    floating-point certificate comes back -- INCONCLUSIVE, with the exact
+    check that failed named. A user's 15-row LP returned a `partial` float
+    certificate under `use_exact=True` five sessions running.
+
+    `primal={var: value}`: an exact optimum the caller already has, certified
+    directly -- its dual found by complementary slackness or the exact
+    simplex, and `check_lp` deciding. Continuous programs only."""
     lim = limits or Limits()
     t0 = time.perf_counter()
 
@@ -604,6 +614,8 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         return _opt_vectors(spec, lim, t0)
 
     A, b, c, cons_names = spec.as_leq_system()
+    if primal is not None:
+        return _opt_from_primal(spec, A, b, c, cons_names, primal, t0, target)
     import os
 
     loud = (not _vectors_only and len(spec.var_names) > PROGRESS_FROM
@@ -713,6 +725,19 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         exact_ok = x_ex is not None
         _progress(loud, t0, "engine.opt.progress.exact_done" if exact_ok
                   else "engine.opt.progress.exact_failed")
+
+    if use_exact and exact_required and not exact_ok and not _vectors_only:
+        # REQUIRED means no fallback: the float route below would hand back a
+        # certificate that verifies only as `partial`, and a pipeline reading
+        # `satisfiable` and `ok` took it for exact.
+        failed = exact.failed_checks(rep)
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      engine(), ms(), None,
+                      detail=t("engine.opt.exact_required", checks=", ".join(failed),
+                               value=repr(float(pulp.value(prob.objective) or 0))),
+                      meta={"exact": False, "failed_checks": failed,
+                            "lp_solver": engine(),
+                            "hint": t("engine.opt.exact_required_hint")})
 
     selection = None
     if exact_ok and dual_direction and not _vectors_only:
@@ -867,6 +892,15 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                   (-1 if spec.sense == "min" else 1) * rep["objective"])
                   if exact_ok and discrete else None),
               "exact": exact_ok, "solution": meta_sol,
+              # Beside SATISFIABLE, which a generic reader took for "merely
+              # feasible": the optimum is CERTIFIED when the exact dual closes
+              # it -- a continuous program, or an integral point that meets
+              # the bound (or the rounded bound).
+              "optimality_certified": bool(exact_ok and (
+                  not discrete or (integral is not None and (
+                      integral[1] == rep["objective"]
+                      or (rounded is not None and exact.to_fraction(meta_obj)
+                          == exact.to_fraction(rounded)))))),
               "integer": discrete, "denominator": denom,
               # `None`, not 0.0, when there is no dual: the smallest entry of
               # a vector nobody produced is not zero, it is nothing.
@@ -885,6 +919,54 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                                exact.to_fraction(meta_obj)
                                >= exact.to_fraction(target))},
     )
+
+
+def _opt_from_primal(spec, A, b, c, cons_names, primal, t0, target):
+    """`opt(..., primal=...)`: certify a supplied exact primal."""
+    from ..certificate import lp_dual_certificate
+
+    if getattr(spec, "discrete", None) or getattr(spec, "integer", False):
+        return Result("opt", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      "certo/exact", ms_now(t0), None,
+                      detail=t("engine.opt.primal_continuous"))
+    missing = [v for v in spec.var_names if v not in primal]
+    unknown = [v for v in primal if v not in set(spec.var_names)]
+    if missing or unknown:
+        return Result("opt", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      "certo/exact", ms_now(t0), None,
+                      detail=t("engine.opt.primal_names",
+                               missing=", ".join(missing[:4]) or "-",
+                               unknown=", ".join(map(str, unknown[:4])) or "-"))
+    x = [exact.to_fraction(primal[v]) for v in spec.var_names]
+    y, rep = exact.certify_primal(A, b, c, x)
+    if y is None:
+        failed = exact.failed_checks(rep)
+        infeasible = "primal_nonneg" in failed or "primal_feasible" in failed
+        if infeasible:
+            failed = [k for k in failed if k.startswith("primal")]
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      "certo/exact", ms_now(t0), None,
+                      detail=t("engine.opt.primal_infeasible" if infeasible
+                               else "engine.opt.primal_not_optimal",
+                               checks=", ".join(failed)),
+                      meta={"exact": False, "failed_checks": failed})
+    objective = rep["objective"] if spec.sense != "min" else -rep["objective"]
+    cert = lp_dual_certificate(
+        sense=spec.sense, objective=exact.serialize(rep["objective"]),
+        dual=exact.serialize_all(y), primal=exact.serialize_all(x),
+        A=[exact.serialize_all(r) for r in A], b=exact.serialize_all(b),
+        c=exact.serialize_all(c), names=cons_names,
+        var_names=list(spec.var_names), is_exact=True, integer=False,
+        kinds={v: "continuous" for v in spec.var_names},
+        target=None if target is None else exact.serialize(exact.to_fraction(target)),
+        backend="certo/exact (primal supplied)")
+    return Result(
+        "opt", Status.SAT, Verdict.SATISFIABLE, "certo/exact", ms_now(t0), cert,
+        detail=t("engine.opt.primal_certified", value=exact.serialize(objective)),
+        meta={"objective": exact.serialize(objective), "exact": True,
+              "optimality_certified": True, "primal": "supplied",
+              "solution": {v: exact.serialize(x[j])
+                           for j, v in enumerate(spec.var_names)}})
 
 
 def infeasible_certificate(spec, limits=None):

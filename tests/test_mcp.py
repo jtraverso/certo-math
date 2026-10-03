@@ -745,6 +745,7 @@ CLI_ONLY = {
     "bisect": {"trace"}, "synth": {"trace"},   # terminal presentation
     "cases": {"no_check", "proof", "solver_binary"},  # local files, binaries
     "columns": {"top"}, "opt": {"top"},        # rows printed to a terminal
+    "assign": {"top"},
     "commands": {"markdown", "table"}, "lint": {"quiet"},
     "doctor": {"apply", "launcher", "mcp_path", "mcp_venv", "register_mcp",
                "repair"},                      # changes this machine
@@ -858,6 +859,27 @@ def test_a_stale_server_says_so_first_in_every_answer():
         "    m.variable('a', 0, 1)",
         "    m.objective({'a': 1})",
         "    return m"])}))
+
+
+def test_the_prompts_route_a_first_use_and_read_the_code():
+    """Ready instructions for a first use: find, guide, lint, run, verify.
+    A spec's interface in them is read from the code -- an LPSpec's builder
+    methods, an AssignmentSpec's fields -- so they cannot drift."""
+    import anyio
+
+    from certo import mcp_server as m
+
+    async def go():
+        names = [p.name for p in await m.mcp.list_prompts()]
+        lp = await m.mcp.get_prompt("certify-lp", {"problem": "max x + y"})
+        asg = await m.mcp.get_prompt("assign-with-hall", {})
+        return names, lp.messages[0].content.text, asg.messages[0].content.text
+
+    names, lp, asg = anyio.run(go)
+    assert {"first-spec", "certify-lp", "prove-polynomial-nonneg",
+            "assign-with-hall"} <= set(names)
+    assert ".constraint(" in lp and "exact_required" in lp and "verify" in lp
+    assert "capacities" in asg and "allowed" in asg
 
 
 def test_the_compact_server_keeps_four_tools():

@@ -208,6 +208,30 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
 
     unused = [e["name"] for e in entries if e["name"] not in used]
     ambient = [f for _, f in spec.assumptions]
+
+    # BY CASES: the branches cover every instance of the hypotheses, proved
+    # here as its own certificate. The final step would fail without it, but
+    # silently; this names the obligation and keeps its proof.
+    cases_payload = None
+    if getattr(spec, "cases", None):
+        from . import smt
+
+        cover = Spec(title=(spec.title or "") + " -- the cases are exhaustive")
+        for name, f in spec.assumptions:
+            cover.assume(name, f)
+        whens = [w for _n, w in spec.cases]
+        cover.claim(z3.Or(*whens) if len(whens) > 1 else whens[0])
+        got = smt.prove(cover, lim)
+        if got.verdict is not Verdict.PROVED or got.certificate is None:
+            return _fail(t("engine.compose.cases_not_exhaustive",
+                           names=", ".join(n for n, _ in spec.cases),
+                           detail=got.detail), t0,
+                         meta={"cases": [n for n, _ in spec.cases],
+                               "counterexample": got.meta.get("counterexample")})
+        cases_payload = {"names": [n for n, _ in spec.cases],
+                         "when_smt2": [z3util.smt2(w) for w in whens],
+                         "exhaustive": got.certificate.to_dict()}
+
     cert = proof_certificate(
         theorem_smt2=z3util.smt2(spec.goal),
         assumptions=spec.names,
@@ -217,6 +241,8 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
         vacuous=bool(step.meta.get("vacuous")), title=spec.title,
         subject=theorem_subject, crossings=crossings,
     ).stamp(spec_path or None)
+    if cases_payload is not None:
+        cert.payload["cases"] = cases_payload
 
     bridges = [e["name"] for e in entries
                if not e["derived"] and not e.get("cited")]

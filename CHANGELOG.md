@@ -6,6 +6,46 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-03
+
+**What this week's users asked for.** One new command (59) and one new kind
+(56); the schema stays 5, with optional fields (`cases` on `proof`, a
+sequence in `repair`).
+
+### New
+
+- **`certo assign` / `AssignmentSpec`**: items to receivers under
+  capacities -- pages to the hosts each may use. The largest integral
+  assignment, and a Hall set `U` with `cap(U) + |items not confined to U|`
+  equal to its size, so it is maximum by counting: no LP, no matrix. With a
+  target out of reach, REFUTED and `U` names the bottleneck -- too few items,
+  too little capacity, or a set of receivers the items are stuck on. Kind
+  `assignment`; checked against 300 random instances by brute force. The
+  user who asked had been rebuilding the assignment matrix by hand, and an
+  exact optimum of a wrong matrix is still exact.
+- **Proofs by cases**: `ProofSpec.case(name, when=..., proves=...)`.
+  `compose` proves the cases exhaust the hypotheses as a certificate of its
+  own, and `verify` links it; a gap is refused with the instance in it.
+  Asked for in three sessions, where the coverage was audited by hand.
+- **`opt --exact-required`** (MCP `exact_required`): no floating-point
+  fallback -- INCONCLUSIVE with the failed exact check named. Reported over
+  five sessions: `use_exact=True` returned a `partial` float certificate.
+- **`opt --primal`** (MCP `primal`): certify an exact optimum you already
+  have, its dual found by complementary slackness or the exact simplex.
+- **MCP prompts**: `first-spec`, `certify-lp`, `prove-polynomial-nonneg`,
+  `assign-with-hall` -- short routes whose spec interfaces are read from the
+  code.
+
+### Changed
+
+- `opt` and `assign` report `optimality_certified` beside `SATISFIABLE`.
+- `ideal` refusing says what is LEFT of the claim: its normal form modulo
+  the equations (the factor a user had dropped).
+- Self-check time is reported apart from the engine's (`self_check_ms`).
+- `cover` takes a SEQUENCE of repairs, each step checked against the
+  partition the previous one left; an owner frozen at any step stays frozen.
+- The README says it plainly: `pip install certo-math`, `import certo`.
+
 ## [0.25.1] — 2026-10-03
 
 **Soundness fixes in the DIMACS reader and in `linear_system`, from two

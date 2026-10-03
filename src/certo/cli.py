@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
@@ -56,7 +57,7 @@ def scope_note(res: Result):
 # ---------------------------------------------------------------------------
 
 
-_HIDDEN_META = ("self_check", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
+_HIDDEN_META = ("self_check", "self_check_ms", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
                 "counterexample", "hint", "lemmas", "used", "unused", "bridges", "lo", "hi",
@@ -303,7 +304,9 @@ def _self_check(res, args):
     if want is None and not cert.solver_free:
         return None
 
+    t0 = time.perf_counter()
     rep = verify_cert(cert, limits_from(args))
+    res.meta["self_check_ms"] = round((time.perf_counter() - t0) * 1000, 2)
     res.meta["self_check"] = "ok" if rep.ok else "FAILED"
     if rep.ok:
         return True
@@ -520,6 +523,23 @@ def cmd_report(args):
         print("  " + t("cli.report.file_it", link=info["link"]))
     print("  " + t("cli.report.nothing_sent"))
     return 0
+
+
+def cmd_assign(args):
+    from .engines import algebra
+    from .spec import AssignmentSpec, load_spec
+
+    spec = load_spec(args.spec, AssignmentSpec)
+    res = algebra.assign(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.certificate is not None:
+        got = res.certificate.payload["assignment"]
+        top = len(got) if args.top <= 0 else args.top
+        for item, r in list(got.items())[:top]:
+            print("    {} -> {}".format(item, r))
+        if len(got) > top:
+            print("    " + t("cli.solution.more.top", n=len(got) - top))
+    return rc
 
 
 def cmd_pin(args):
@@ -1719,10 +1739,15 @@ def cmd_opt(args):
         return _explored(args, explore.lp("opt", spec, limits_from(args),
                                           target=args.target))
     direction = lp.direction_from(getattr(args, "dual_direction", None))
+    primal = None
+    if getattr(args, "primal", None):
+        primal = _primal_from(args.primal)
     res = lp.opt(spec, limits_from(args), use_exact=not args.no_exact,
                  target=args.target, dual_direction=direction,
                  round=getattr(args, "round", False),
-                 cuts=getattr(args, "cuts", None))
+                 cuts=getattr(args, "cuts", None),
+                 exact_required=getattr(args, "exact_required", False),
+                 primal=primal)
     rc = emit(res, args)
     if not args.json:
         sol = res.meta.get("solution") or {}
@@ -1755,6 +1780,18 @@ def cmd_opt(args):
                            target=res.meta["target"]))
         print_loads(res.certificate)
     return rc
+
+
+def _primal_from(text):
+    """`--primal`: `a=2/3,b=7/9`, or a JSON file `{"a": "2/3", ...}`."""
+    p = Path(text)
+    if p.suffix == ".json" and p.exists():
+        return json.loads(p.read_text(encoding="utf-8"))
+    out = {}
+    for part in text.split(","):
+        name, _, value = part.partition("=")
+        out[name.strip()] = value.strip()
+    return out
 
 
 def _opt_gap(args, packing):
@@ -2800,6 +2837,15 @@ def build_parser():
                     help="on a degenerate LP, the OPTIMAL dual maximising the "
                          "weighted sum of these constraints' multipliers -- "
                          "proved maximal by a second exact LP it carries")
+    sp.add_argument("--exact-required", action="store_true",
+                    dest="exact_required",
+                    help="no floating-point fallback: when the exact "
+                         "reconstruction fails, INCONCLUSIVE with the failed "
+                         "check named, and no certificate")
+    sp.add_argument("--primal", metavar="X",
+                    help="an exact optimum you already have -- 'a=2/3,b=7/9' "
+                         "or a JSON file -- certified directly: its dual found "
+                         "exactly and checked (continuous programs)")
     sp.add_argument("--gap", action="store_true",
                     help="with a PackingSpec: the integrality gap mu* - nu as "
                          "ONE exact rational, with both sides certified and "
@@ -2948,6 +2994,13 @@ def build_parser():
     sp.add_argument("--gz", action="store_true",
                     help="write .json.gz certificates")
     sp.set_defaults(func=cmd_batch)
+    sp = add("assign", "items to receivers under capacities: the largest "
+                       "assignment, and a Hall set showing no larger one -- "
+                       "or the bottleneck when a target is out of reach")
+    sp.add_argument("spec", help=".py file returning an AssignmentSpec")
+    sp.add_argument("--top", type=int, default=20, metavar="K",
+                    help="how many placements to print (0: all)")
+    sp.set_defaults(func=cmd_assign)
     sp = add("pin", "a value pinned from both sides: cp(G) <= X by a cover, "
                     ">= X by a clique LP rounded up, both tied to ONE graph")
     sp.add_argument("spec", help=".py file returning a PinSpec")

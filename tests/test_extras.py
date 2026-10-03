@@ -7472,6 +7472,171 @@ def test_an_empty_dimacs_clause_is_kept_and_no_model_satisfies_it():
     assert not verify(forged).ok
 
 
+def test_a_proof_by_cases_carries_its_exhaustiveness():
+    """Branches were certified one by one and their coverage audited by hand.
+    `p.case(...)` records each condition; `compose` proves the cases exhaust
+    the hypotheses as a certificate of its own, and `verify` links it."""
+    import copy
+
+    import z3
+
+    from certo.certificate import Certificate, verify
+    from certo.engines import compose
+    from certo.spec import ProofSpec, Spec
+
+    x = z3.Real("x")
+
+    def branch(when, name):
+        s = Spec(title=name)
+        s.assume("w", when)
+        s.claim(x * x + 1 > 0)
+        return s
+
+    p = ProofSpec(title="cases")
+    p.assume("any", x == x)
+    p.case("neg", when=x < 0, proves=branch(x < 0, "neg"))
+    p.case("nonneg", when=x >= 0, proves=branch(x >= 0, "nonneg"))
+    p.conclude(x * x + 1 > 0)
+    res = compose.compose(p, LIM)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+    assert res.certificate.payload["cases"]["names"] == ["neg", "nonneg"]
+    d = copy.deepcopy(res.certificate.to_dict())
+    d["payload"]["cases"]["when_smt2"][1] = d["payload"]["cases"]["when_smt2"][1].replace(">=", ">")
+    assert not verify(Certificate.from_dict(d)).ok
+
+    q = ProofSpec(title="gap")
+    q.assume("any", x == x)
+    q.case("neg", when=x < 0, proves=branch(x < 0, "neg"))
+    q.case("big", when=x > 1, proves=branch(x > 1, "big"))
+    q.conclude(x * x + 1 > 0)
+    assert compose.compose(q, LIM).verdict is Verdict.INCONCLUSIVE
+
+
+def test_small_reported_wants_residue_timing_and_repair_sequences():
+    """An `ideal` refusal names what is LEFT of the claim; self-check time is
+    reported apart from the engine's; a sequence of repairs is checked step
+    by step, a frozen owner staying frozen."""
+    import z3
+
+    from certo import IdealSpec, LPSpec, api
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import CoverSpec
+
+    x, y, v = z3.Reals("x y v")
+    r = algebra.ideal(IdealSpec(variables=["x", "y", "v"], equations=[x - y * v],
+                                claim=x * v - y * v * v + v), LIM)
+    assert r.verdict is Verdict.REFUTED and r.meta["residue"] == "v"
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, 1)
+    m.objective({"a": 1})
+    res = api.run("opt", m, LIM, self_check="all")
+    assert res.meta["self_check"] == "ok" and res.meta["self_check_ms"] >= 0
+
+    K4 = [("a", "b"), ("a", "c"), ("a", "d"), ("b", "c"), ("b", "d"), ("c", "d")]
+    before = {"abc": ["a", "b", "c"], "ad": ["a", "d"], "bd": ["b", "d"],
+              "cd": ["c", "d"]}
+    s1 = {"before": before, "withdraw": ["abc", "ad", "bd"],
+          "insert": {"abd": ["a", "b", "d"], "ac": ["a", "c"], "bc": ["b", "c"]},
+          "frozen": ["cd"]}
+    s2 = {"withdraw": ["abd", "ac", "bc"],
+          "insert": {"abc2": ["a", "b", "c"], "ad2": ["a", "d"], "bd2": ["b", "d"]}}
+    ok = algebra.cover(CoverSpec(universe=K4, parts=[], cliques=True,
+                                 repair=[s1, s2]), LIM)
+    assert ok.verdict is Verdict.PROVED and verify(ok.certificate).ok
+    bad = algebra.cover(CoverSpec(universe=K4, parts=[], cliques=True, repair=[
+        s1, {"withdraw": ["cd"], "insert": {"c_d": ["c", "d"]}}]), LIM)
+    assert bad.verdict is Verdict.REFUTED and "step 2" in bad.detail
+
+
+def test_opt_can_require_exactness_and_certify_a_supplied_primal():
+    """A user's LP came back `satisfiable` with a FLOAT certificate under
+    `use_exact=True`, five sessions running. `exact_required` refuses the
+    fallback and names the exact check that failed; `primal=` certifies the
+    rational optimum the user already has; `optimality_certified` says what
+    SATISFIABLE did not."""
+    from certo import LPSpec, exact
+    from certo.certificate import verify
+    from certo.engines import lp
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1, "b": 1})
+    m.constraint({"a": 3}, "<=", 2, name="cap")
+    m.constraint({"a": 1, "b": 3}, "<=", 3, name="both")
+    assert lp.opt(m, LIM).meta["optimality_certified"] is True
+
+    good = lp.opt(m, LIM, primal={"a": "2/3", "b": "7/9"})
+    assert good.verdict is Verdict.SATISFIABLE and verify(good.certificate).ok
+    assert good.meta["objective"] == "13/9"
+    assert lp.opt(m, LIM, primal={"a": "0", "b": "1"}).verdict is Verdict.INCONCLUSIVE
+    bad = lp.opt(m, LIM, primal={"a": "1", "b": "1"})
+    assert bad.certificate is None and bad.meta["failed_checks"] == ["primal_feasible"]
+
+    real = exact.certify
+    exact.certify = lambda *a, **k: (None, None, {
+        "primal_nonneg": True, "primal_feasible": True, "dual_nonneg": True,
+        "dual_feasible": False, "strong_duality": False, "ok": False}, None)
+    try:
+        req = lp.opt(m, LIM, exact_required=True)
+        loose = lp.opt(m, LIM)
+    finally:
+        exact.certify = real
+    assert req.verdict is Verdict.INCONCLUSIVE and req.certificate is None
+    assert "dual_feasible" in req.meta["failed_checks"]
+    assert loose.meta["exact"] is False and not loose.meta["optimality_certified"]
+
+
+def test_an_assignment_is_maximum_by_a_hall_set_counted():
+    """The acceptance criteria of the report that asked for it: a page on a
+    receiver it is not allowed, an overload, a U whose bound is wrong, are
+    refused; too few items and too little capacity are told apart; and the
+    receivers keep their identity when an item's allowed list shrinks."""
+    import copy
+
+    from certo import AssignmentSpec
+    from certo.certificate import Certificate, verify
+    from certo.engines import algebra
+
+    def run(**kw):
+        return algebra.assign(AssignmentSpec(**kw), LIM)
+
+    base = dict(items=["p1", "p2", "p3", "p4", "p5", "p6"],
+                allowed={"p1": ["a"], "p2": ["a", "b"], "p3": ["b"],
+                         "p4": ["a", "b"], "p5": ["b", "c"], "p6": ["c"]},
+                capacities={"a": 2, "b": 1, "c": 2})
+    res = run(**base, target=6)
+    assert res.verdict is Verdict.REFUTED and res.meta["size"] == 5
+    assert res.meta["U"] == ["a", "b"] and res.meta["limited_by"] == "bottleneck"
+    assert verify(res.certificate).ok
+
+    def forged(**edit):
+        d = copy.deepcopy(res.certificate.to_dict())
+        for k, v in edit.items():
+            d["payload"][k] = v
+        return verify(Certificate.from_dict(d)).ok
+
+    a = dict(res.certificate.payload["assignment"])
+    assert not forged(assignment=dict(a, p1="b"))            # not allowed
+    assert not forged(assignment=dict(a, p4="a"), size=6)    # a over capacity
+    assert not forged(hall={"U": ["a"]})                     # bound != size
+    assert not forged(hall={"U": ["a", "b"], "value": 4})    # declared wrong
+    assert not forged(reached=True)                          # target lie
+
+    few = run(items=["p1"], allowed={"p1": ["a"]}, capacities={"a": 3}, target=1)
+    assert few.verdict is Verdict.PROVED and few.meta["limited_by"] == "items"
+    tight = run(items=["p1", "p2", "p3"], allowed={i: ["a"] for i in ("p1", "p2", "p3")},
+                capacities={"a": 1})
+    assert tight.meta["size"] == 1 and tight.meta["limited_by"] == "capacity"
+
+    narrow = dict(base, allowed=dict(base["allowed"], p5=["c"]))
+    res2 = run(**narrow)
+    assert set(res2.certificate.payload["capacities"]) == {"a", "b", "c"}
+    assert verify(res2.certificate).ok
+
+
 def test_a_kernel_is_a_basis_and_over_z_a_saturated_one():
     """SOUNDNESS, from a user's QA campaign on 0.25.0 (QA02, QA03): the
     `linear_system` verifier counted the kernel vectors and checked A k = 0,
@@ -9669,8 +9834,8 @@ def test_options_come_from_the_engine_signature():
     """Derived, so it cannot drift from what the engine takes."""
     from certo import api
 
-    assert api.options("opt") == ["cuts", "dual_direction", "round", "target",
-                                  "use_exact"]
+    assert api.options("opt") == ["cuts", "dual_direction", "exact_required",
+                                  "primal", "round", "target", "use_exact"]
     assert "use_geng" in api.options("sweep")
     assert api.options("range") == ["var"]
 

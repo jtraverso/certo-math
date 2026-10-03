@@ -311,6 +311,22 @@ STRUCTURAL_BENIGN = {
         'upper.used:short', 'variables:empty', 'variables:reversed',
         'variables:short',
     },
+    # The problem is IN the payload and the Hall bound is recounted from it:
+    # an `allowed` list repeated or reordered is the same problem, and one
+    # shortened is another problem whose maximum the verifier recounts --
+    # still a true statement, about the data it carries (provenance ties it
+    # to the spec it came from).
+    'assignment': {
+        'allowed.p1:dup', 'allowed.p2:dup', 'allowed.p2:reversed',
+        'allowed.p2:short', 'allowed.p3:dup', 'allowed.p4:dup',
+        'allowed.p4:reversed', 'allowed.p4:short', 'allowed.p5:dup',
+        'allowed.p5:reversed', 'allowed.p5:short', 'allowed.p6:dup',
+        # an item allowed nowhere is confined to every U: the bound is
+        # recounted with it and still holds
+        'allowed.p4:empty',
+        # U and the items are SETS: order and a repeat change nothing counted
+        'hall.U:dup', 'hall.U:reversed', 'items:reversed',
+    },
     # an edge list is a set of unordered pairs: order and repeats say nothing
     'pinned_value': {
         'edges.*:reversed', 'edges:dup', 'edges:reversed',
@@ -1425,6 +1441,7 @@ PREREQUISITES = {
 #: produces it -- so every kind the registry verifies is in the battery, and
 #: a kind added later without one fails `test_every_kind_is_in_the_battery`.
 EXAMPLE_FIXTURES = [
+    ("assignment_hall.py", "assign", ()),
     ("bisect_constant.py", "bisect", ()),
     ("synth_constant.py", "synth", ()),
     ("core_matrix.py", "core", ()),

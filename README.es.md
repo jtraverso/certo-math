@@ -6,7 +6,7 @@ romper las afirmaciones falsas, medir lo que sobrevive, reducirlo a lo que
 realmente es, y ensamblar el resto— y cada paso vuelve con un **certificado
 que cualquiera puede re-comprobar sin fiarse de certo.**
 
-CLI y MCP. Cincuenta y ocho comandos. Corre en milisegundos donde una
+CLI y MCP. Cincuenta y nueve comandos. Corre en milisegundos donde una
 formalización cuesta horas.
 
 *English: [README.md](README.md) · cualquier comando acepta `--lang en`.*
@@ -14,7 +14,7 @@ formalización cuesta horas.
 | | |
 |---|---|
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
-| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta y ocho, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
+| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta y nueve, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
 | **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cincuenta y tres tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
@@ -57,6 +57,10 @@ Requiere Python 3.11+.
 ```bash
 pip install "certo-math[mcp,numerics]"
 ```
+
+La distribución es `certo-math` (el nombre `certo` ya estaba tomado en PyPI); el
+paquete que importas, el comando y el servidor MCP son `certo`:
+`import certo`, `certo find ...`, `certo-mcp`.
 
 El paquete importable y los comandos son `certo`, no `certo-math`:
 `from certo import Spec`, `certo prove spec.py`. Solo la distribución
@@ -145,7 +149,7 @@ en tu idioma.
    un bucle sobre la CLI: manda el arranque, y un apaño escrito para evitarlo
    es un apaño en punto flotante.
 
-## Los cincuenta y ocho comandos
+## Los cincuenta y nueve comandos
 
 Agrupados como los agrupa [`certo commands`](docs/es/COMMANDS.md). Las entradas
 completas, con lo que cada uno **no** establece, en
@@ -177,6 +181,7 @@ completas, con lo que cada uno **no** establece, en
 | `columns` | Un LP sobre todas las cliques de un grafo, sin listarlas: generación de columnas con una búsqueda de precios que el verificador repite | aritmética racional exacta | sin solver |
 | `atlas` | Un dominio de parámetros cubierto por cajas, cada una certificada por `parametric`, y UN enunciado para el todo | cada pieza re-verificada, el cubrimiento recalculado celda por celda | **nombra la franja sin cubrir**, sin solver |
 | `nonneg` | Un polinomio >= 0 en una caja, o en la parte que corta una región `g >= 0` -- un extremo algebraico escrito exacto; `(lo, None)` es un rayo | coeficientes de Bernstein en una subdivisión, multiplicadores de la región | **el punto donde falla**, sin solver |
+| `assign` | Ítems a receptores con capacidades: la asignación más grande, y un conjunto de Hall que muestra que no hay una mayor | caminos aumentantes; la cota de Hall recontada | **la asignación y el cuello de botella U**, sin solver |
 | `pin` | `cp(G) = X` por ambos lados: un cubrimiento por cliques arriba, un LP de cliques redondeado abajo | ambas mitades re-verificadas y atadas a UNA lista de aristas | el rango cuando no se encuentran, sin solver |
 | `semigroup` | Semigrupos afines como comprobador: puntiagudez, minimalidad y pertenencia al cono, al grupo y al semigrupo | aritmética entera y racional exacta | **refuta la normalidad con un testigo, nunca la afirma**, sin solver |
 | `profile` | Cómo responde un óptimo a UNA capacidad en todo un intervalo: una función afín a trozos, no un valor | aritmética racional exacta | **decide `f` en su dominio** — cota, alcanzabilidad y cobertura — sin solver |
@@ -302,6 +307,10 @@ para que un modelo lo cargue: `certo-mcp --compact` (o `CERTO_MCP_COMPACT=1`)
 sirve cuatro -- `find`, `run` (cualquier comando que toma un spec, por nombre),
 `verify` y `dsl_guide` -- y no pierde nada, porque `run` llega a todo comando
 que `find` nombre.
+
+El servidor ofrece además PROMPTS -- `first-spec`, `certify-lp`,
+`prove-polynomial-nonneg`, `assign-with-hall` -- rutas cortas (find, guía,
+lint, run, verify) cuyas interfaces de spec se leen del código.
 
 > **Los specs son código Python y se ejecutan al cargarse.** Eso es inherente
 > al DSL y es el mismo nivel de confianza que ya tiene un agente con acceso a

@@ -49,6 +49,7 @@ CASES = [
     ("parametric_atlas.py", "atlas", []),
     ("nonneg_box.py", "nonneg", []),
     ("pin_fano.py", "pin", []),
+    ("assignment_hall.py", "assign", []),
     ("opt_clique_cuts.py", "opt", ["--cuts", "clique", "--round"]),
     ("interchange_matrix.py", "matrix", []),
     ("toric_cone.py", "cone", []),

@@ -112,15 +112,7 @@ the shape of the corpus LPs all changed the moment they were measured.
 |---|---|---|---|---|---|
 | **P2** | MCP robustness over a long life: each tool call under a WALL-CLOCK and memory watchdog in a worker process, cancelled cleanly without taking the server down or freezing the client, and a circuit breaker after repeated timeouts | **M** | med | med | external suggestion. Today: `timeout_ms` and `--deadline` per call, errors returned as data by `_guard`; a runaway search inside an engine (or a `geng`/`cbc` child) can still hold the process. Joins the `--deadline` children row |
 | **P3** | Signed certificates (Ed25519 / JWS, detached, over the digest): WHO produced a certificate, for a chain of custody | **M** | med | low | external suggestion. A signature attests provenance, never correctness: `verify` re-derives the mathematics whoever signed, and an edited certificate already fails it unless the edit is itself a valid certificate. Keys are the user's; optional, and never a substitute for `verify` |
-| **P2** | MCP PROMPTS: ready instructions the server offers the model -- certify an LP, prove a polynomial >= 0 on a box, write a first spec -- derived from the discovery index so they cannot drift | **S** | high | low | external suggestion; lowers first-use errors, alongside `find` and `dsl_guide` |
-| **P3** | `pip install certo-math` / `import certo`: say it where an IDE or a model looks first (README top, `find`, `dsl_guide`), and check the packaging declares the import name plainly | **S** | high | low | external suggestion: the two names confuse autocompletion |
 | **P2** | No code from a spec is evaluated where a model wrote it -- an AST-checked or declarative notation instead of `exec` | **(the declarative notation row)** | | | external suggestion, merged into the declarative spec notation row above. Today: specs are Python by design and run on load; `CERTO_NO_EXEC=1` and the ten JSON spec types run nothing, and the MCP confines paths -- not a sandbox, and `SECURITY.md` says so |
-| **P1** | `AssignmentSpec`: items, the receivers each may go to, capacities, a target -- an integral assignment, or a Hall witness `U` with value `cap(U) + |items not confined to U|`, both inequalities counted by the verifier, no solver | **M** | high | med | user feedback with acceptance criteria: the assignment matrix was rebuilt and checked outside certo, and an exact optimum of the WRONG matrix is still exact |
-| **P2** | `opt` with exactness REQUIRED: no floating-point certificate when the reconstruction fails, the step that failed named, and a rational primal supplied by the user certified directly | **S-M** | high | med | user feedback, reproduced over five sessions: `use_exact=True` returned a `partial` float certificate on a 15-row LP with a tiny centre |
-| **P2** | Case splits in `compose`, made visible: `p.case(name, when=H, proves=...)`, the exhaustiveness of the `H`s checked in the final step (it already is, implicitly) | **S-M** | med | med | user feedback in three sessions: the branches were certified and their coverage audited by hand |
-| **P2** | `ideal` refuting: the reduced residue in the answer -- it would have named the factor a user had dropped | **S** | high | low | user feedback |
-| **P2** | `opt`: `optimality_certified` beside `SATISFIABLE`; engine time and self-check time apart in the result | **S** | high | low | user feedback: a generic consumer reads SATISFIABLE as merely feasible |
-| **P2** | A SEQUENCE of repairs in `cover`: each step checked against the partition the previous one left | **S-M** | med | low | user feedback: promotions applied one after another, owners tracked through all of them |
 | **P3** | Conditional channels and moment laws with an explicit domain; Cramer by intervals; positivity of formal series; comparing algebraic roots by signs; a Bernstein tensor imported with its change of variables | **L** | **low** | med | user feedback across sessions 25-33; research-shaped, each one an engine before it is a checker |
 | **P2** | `bind` reading the ELABORATED type of the Lean declaration (and its axioms), hashed; `user_asserted` and `kernel_checked` correspondence kept apart | **M-L** | med | med | user feedback: `provides` is a transcription the user writes, and `bind` does not read the declaration |
 | **P2** | `ideal`: linear definitions eliminated first, traceably (each substitution recorded and checked), and Groebner progress -- pairs, sizes, why it stopped | **M** | med | low | user feedback: identities with many implicit relations ran out of a 60 s budget until the definitions were substituted by hand |
@@ -365,6 +357,10 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Items to receivers under capacities, maximum by a Hall set | `certo assign`, **0.26.0** |
+| Proofs by cases with their exhaustiveness certified | `ProofSpec.case`, **0.26.0** |
+| `opt` with exactness required, and a supplied exact primal certified | `--exact-required`, `--primal`, **0.26.0** |
+| `ideal`'s residue, `optimality_certified`, self-check time apart, repair sequences, MCP prompts, the two names | **0.26.0** |
 | A stale MCP server says so FIRST in every answer, and every answer names the interpreter and package | `WARNING`, `runtime`, **0.25.1** |
 | A verification stopped by its clock is `inconclusive`, not `invalid` | `VerifyReport.timed_out`, **0.25.1** |
 | An `ideal` certificate to Lean as a `linear_combination`, the ring in the statement, measured and size-limited | `export --lean`, **0.25.0** |
@@ -1074,7 +1070,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.25.1**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.26.0**, with **56 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1083,7 +1079,7 @@ field, or a command that emits no certificate. Among the optional fields added u
 lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
-`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`).
+`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`.
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

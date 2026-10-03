@@ -1103,6 +1103,12 @@ def clique_lp_certificate(out, title="") -> Certificate:
                        note_key="cert.note.clique_lp")
 
 
+def assignment_certificate(payload) -> Certificate:
+    """An integral assignment and the Hall set that shows it is maximum."""
+    return Certificate(kind="assignment", solver_free=True, payload=payload,
+                       note_key="cert.note.assignment")
+
+
 def pinned_value_certificate(payload) -> Certificate:
     """`cp_r(G)` between two certified bounds -- equal, or the range -- with
     both halves embedded and tied to one edge list."""
@@ -2127,6 +2133,26 @@ def _verify_proof(cert, limits) -> VerifyReport:
         checks.append((t("verify.proof.link", name=name), linked,
                        t("verify.proof.link_detail", n=len(obl or []))))
 
+    # BY CASES: the exhaustiveness certificate verified, and LINKED -- what it
+    # refutes must follow from the hypotheses with every case negated, so it
+    # is about these cases and these hypotheses, not some other split.
+    if p.get("cases") is not None:
+        cs = p["cases"]
+        sub_c = cs.get("exhaustive")
+        whens = [_parse_one(w) for w in cs.get("when_smt2") or []]
+        hyps = (list(z3.parse_smt2_string(p["assumptions_smt2"]))
+                if p.get("assumptions_smt2") else [])
+        ok_cases = bool(sub_c) and len(whens) == len(cs.get("names") or []) > 0
+        if ok_cases:
+            rep_c = verify(Certificate.from_dict(sub_c), limits)
+            neg = z3.And(*(hyps + [z3.Not(z3.Or(*whens) if len(whens) > 1
+                                          else whens[0])]))
+            obl = obligations_of(sub_c)
+            ok_cases = rep_c.ok and bool(obl) and entails(neg, obl, limits)
+        checks.append((t("verify.proof.cases"), ok_cases,
+                       t("verify.proof.cases_detail",
+                         names=", ".join(cs.get("names") or []))))
+
     # EVERY CROSSING, REPEATED. A lemma about a different object reached the
     # theorem by a map certo did not check and could not -- what it checked is
     # that the map was NAMED. A reader has to be told that on every
@@ -2484,14 +2510,15 @@ def _verify_exact_cover(cert, limits) -> VerifyReport:
     # A REPAIR is a claim about the change: re-derived from `before`, the
     # withdrawn and the inserted owners, and the final parts tied to it.
     if p.get("repair") is not None:
-        from .cover import _key, check_repair, edges_of, repair_text
+        from .cover import _key, check_repairs, edges_of, repair_text
 
-        rep = check_repair(p["repair"], p["universe"], cliques=p.get("cliques"))
+        steps = p["repair"] if isinstance(p["repair"], list) else [p["repair"]]
+        rep = check_repairs(p["repair"], p["universe"], cliques=p.get("cliques"))
         checks.append((t("verify.cover.repair"), rep["ok"],
                        repair_text(rep["problems"]) or t(
                            "verify.cover.repair_detail",
-                           out=len(p["repair"]["withdraw"]),
-                           into=len(p["repair"]["insert"]))))
+                           out=sum(len(s.get("withdraw") or []) for s in steps),
+                           into=sum(len(s.get("insert") or {}) for s in steps))))
         if rep["ok"]:
             def as_set(part):
                 es = edges_of(part) if p.get("cliques") else part
@@ -3217,6 +3244,36 @@ def _zero_combination(A, c) -> bool:
         return False
     return all(sum(c[j] * A[j][r] for j in range(len(A))) == 0
                for r in range(len(A[0]) if A else 0))
+
+
+def _verify_assignment(cert, limits) -> VerifyReport:
+    """Every item to an allowed receiver, no receiver over capacity, and the
+    Hall bound of `U` recounted and met. Counting only."""
+    from . import assignment
+
+    p = cert.payload
+    got = assignment.check(p)
+    b = got["bound"] or {}
+    checks = [
+        (t("verify.assign.legal"), not got["legal"],
+         "; ".join(got["legal"][:3]) or t("verify.assign.placed", n=got["size"])),
+        (t("verify.assign.hall"), not got["hall"],
+         "; ".join(got["hall"][:2]) or t(
+             "verify.assign.hall_detail", cap=b.get("capacity"),
+             free=b.get("not_confined"), value=b.get("value"))),
+    ]
+    target = p.get("target")
+    if target is not None:
+        met = got["size"] >= int(target)
+        checks.append((t("verify.assign.target"),
+                       bool(p.get("reached")) == met,
+                       t("verify.assign.target_detail", size=got["size"],
+                         target=target)))
+    ok = got["ok"] and all(c[1] for c in checks)
+    return VerifyReport(ok, "assignment", True, checks=checks,
+                        method_key="verify.assign.method",
+                        detail=t("verify.assign.detail", n=got["size"],
+                                 items=len(p.get("items") or [])))
 
 
 def _verify_pinned_value(cert, limits) -> VerifyReport:
@@ -6905,6 +6962,7 @@ def _value(z3, sort, val):
 #: catalogue that keeps the documents honest had no source for the kinds
 #: and a new kind meant editing a table nobody could see.
 VERIFIERS = {
+    "assignment": _verify_assignment,
     "model": _verify_model,
     "unsat_core": _verify_unsat_core,
     "lp_dual": _verify_lp_dual,

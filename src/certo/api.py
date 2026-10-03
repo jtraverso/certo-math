@@ -218,7 +218,13 @@ def _check(res, limits, every=False) -> None:
 
     if not res.certificate.solver_free and not every:
         return          # re-running a search on every call is a cost nobody asked for
+    import time as _time
+
+    t0 = _time.perf_counter()
     report = verify(res.certificate, limits)
+    # The engine's time stays in `elapsed_ms`; the check's is its own, so a
+    # caller timing `api.run(self_check="all")` can tell them apart.
+    res.meta["self_check_ms"] = round((_time.perf_counter() - t0) * 1000, 2)
     res.meta["self_check"] = "ok" if report.ok else "FAILED"
     if not report.ok:
         raise SelfCheckFailed(res, report)

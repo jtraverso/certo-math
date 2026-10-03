@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The fifty-three kinds
+## The fifty-six kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -68,6 +68,7 @@ answers"*. The table below is the map; the header is the territory.
 | `clique_lp` | an LP optimum over every clique of a graph, without listing them | **yes**, rational arithmetic and the pricing search rerun |
 | `parametric_atlas` | one parametric bound on a whole domain, from N certificates on N boxes | **yes**, every piece re-verified and the covering recomputed |
 | `polynomial_nonneg` | a polynomial >= 0 on a box (cut by a region), or the point where it is negative | **yes**, Bernstein coefficients recomputed, or one evaluation |
+| `assignment` | the largest assignment of items to receivers, and a Hall set showing no larger one | **yes**, placements, loads and the Hall bound counted |
 | `pinned_value` | `cp_r(G)` between two certified bounds -- equal, or the range | **yes**, both halves re-verified and tied to one edge list |
 | `symmetric_inertia` | the inertia of a symmetric rational matrix, PSD, and a vector refuting PSD | **yes**, two rational products: `S A Sᵀ = D`, `S S⁻¹ = I` |
 | `affine_semigroup` | pointedness, cone, group and semigroup membership, a refutation of normality, a proposed Hilbert basis | **yes**, the negatives by redoing the bounded search |
