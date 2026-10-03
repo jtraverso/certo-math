@@ -166,3 +166,14 @@ jobs:
           certo export out/lp.json --lean \
             --out .github/lean/CertoEmittedLp.lean \
             --lean-project .github/lean --check
+      # EVERY exporter, and the shapes that broke or could: a Farkas
+      # combination of 170 rows, the Smith form, a unimodular cone in
+      # dimension 4 and a semigroup with a generator in the cone of the rest.
+      # Two exporters had never been compiled here. A case that compiles WITH
+      # warnings counts as failing, and a missing Mathlib fails the step.
+      - name: every exporter, compiled
+        shell: bash
+        env:
+          CERTO_LEAN_PROJECT: .github/lean
+          CERTO_LEAN_REQUIRED: "1"
+        run: python tests/run_lean.py

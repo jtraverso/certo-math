@@ -6,15 +6,15 @@ failure that actually costs a user time is not a file that fails to compile --
 it is one that compiles and says nothing, which is why `hollow_count` exists.
 This runs the other half: the file has to elaborate.
 
-KEPT OUT OF THE FAST SUITE, AND NOT A RELEASE GATE. Importing Mathlib costs
-minutes per file, depends on a toolchain version, and fails in ways that say
-nothing about whether certo's mathematics is right. certo's job is the step
-BEFORE the proof assistant; wiring its release cycle to one would be adopting
-the cost of a different tool without taking on its work.
+KEPT OUT OF THE FAST SUITE. Importing Mathlib costs minutes per file, depends
+on a toolchain version, and fails in ways that say nothing about whether
+certo's mathematics is right. So it runs where a toolchain is: in CI's `lean`
+job, and before a tag with `python tests/prerelease.py --lean`. Every exporter
+must have a case here (a missing one fails), and a file that compiles with
+warnings counts as failing -- two exporters had never been compiled at all.
 
-This is for the person ADDING an exporter, run once, by hand -- and the rule
-it enforces is in `leanexport`: emit only a small self-contained artefact whose
-content is the certificate's data, and refuse rather than guess.
+The rule it enforces is in `leanexport`: emit only a small self-contained
+artefact whose content is the certificate's data, and refuse rather than guess.
 
     $ python tests/run_lean.py                     # finds a project, or says so
     $ CERTO_LEAN_PROJECT=/path/to/proj python tests/run_lean.py
@@ -56,20 +56,62 @@ def project() -> Path | None:
     return None
 
 
-#: (example, the command whose engine produces a certificate an exporter
-#: knows). Routing is by SPEC TYPE, the same way `ask` does it: hardcoding an
-#: engine per example is how this first ran `core` over a `MultiSpec`.
-#: certo emits Lean for a LINEAR Farkas certificate and nothing else, so this
-#: is short by design rather than by omission. A spec whose certificate has no
-#: exporter is skipped, not failed.
+#: The examples whose certificates have an exporter. Routing is by SPEC TYPE,
+#: the way `ask` does it.
 SPECS = (
     "farkas_linear.py",
     "affine_semigroup.py",
 )
 
 
+def _generated(limits):
+    """Cases the examples do not reach, each the shape that broke or could:
+    a Farkas combination of 170 rows (Lean's default recursion depth stopped
+    one of 169), an exact LP bound, an infeasible LP read as hypotheses
+    whose contradiction is the statement `False`, the Smith form of an integer matrix, a
+    unimodular cone in dimension 4 (all four semigroup stages) and a
+    semigroup with a generator in the cone of the others (stage 3 leaves it
+    out)."""
+    import z3
+
+    from certo import LPSpec, MatrixSpec, SemigroupSpec, Spec
+    from certo.engines import algebra, farkas, lp
+
+    out = []
+    n = 170
+    xs = z3.Reals(" ".join("x%d" % i for i in range(n)))
+    s = Spec().assume("h0", xs[0] >= 1)
+    for i in range(n - 1):
+        s.assume("h%d" % (i + 1), xs[i + 1] >= xs[i] + 1)
+    s.claim(xs[n - 1] >= n)
+    out.append(("farkas_170_rows", farkas.farkas(s, limits).certificate))
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1, "b": 1})
+    m.constraint({"a": 1}, "<=", 2, name="cap_a")
+    m.constraint({"a": 1, "b": 1}, "<=", 3, name="both")
+    out.append(("lp_dual_bound", lp.opt(m, limits).certificate))
+    m.constraint({"a": 1, "b": 1}, ">=", 4, name="too_much")
+    out.append(("farkas_infeasible_lp", farkas.farkas(m, limits).certificate))
+
+    out.append(("smith_3x3", algebra.integer_matrix(MatrixSpec(
+        matrix=[[2, 4, 4], [-6, 6, 12], [10, -4, -16]], question="smith"),
+        limits).certificate))
+
+    out.append(("semigroup_unimodular_4d", algebra.affine_semigroup(SemigroupSpec(
+        generators={"e0": (1, 0, 0, 0), "e1": (1, 1, 0, 0), "e2": (1, 1, 1, 0),
+                    "e3": (1, 1, 1, 1)}, points={"p": (4, 3, 2, 1)}),
+        limits).certificate))
+    out.append(("semigroup_partial", algebra.affine_semigroup(SemigroupSpec(
+        generators={"a": (1, 0), "b": (1, 1), "c": (1, 3)},
+        points={"q": (2, 1)}), limits).certificate))
+    return out
+
+
 def _cases(limits):
-    """One certificate per exporter that has one, from the real examples."""
+    """One certificate per exporter, from the examples and generated."""
     from certo import leanexport
     from certo.routing import prepared, runner_for
     from certo.spec import load_spec
@@ -83,6 +125,12 @@ def _cases(limits):
         cert = run(prepared(spec), limits).certificate
         if cert is not None and cert.kind in leanexport.EXPORTERS:
             out.append((name, cert))
+    out += [(n, c) for n, c in _generated(limits)
+            if c is not None and c.kind in leanexport.EXPORTERS]
+    covered = {c.kind for _n, c in out}
+    missing = sorted(set(leanexport.EXPORTERS) - covered)
+    if missing:
+        raise SystemExit("no case for exporter(s): " + ", ".join(missing))
     return out
 
 
@@ -95,7 +143,8 @@ def main() -> int:
         print("  set CERTO_LEAN_PROJECT to one, or run `lake exe cache get`")
         print("  in a project that requires mathlib.")
         print("\nNOT RUN -- which is not the same as passing.")
-        return 0
+        # Where Lean is the point of the job, its absence is a failure.
+        return 1 if os.environ.get("CERTO_LEAN_REQUIRED") else 0
 
     print("project: {}".format(where))
     limits = Limits(timeout_ms=300_000)
@@ -117,10 +166,20 @@ def main() -> int:
                 name, cert.kind, report.get("reason")))
             failures += 1
             continue
-        if report.get("ok"):
-            print("[ok] {:<20} {:<22} {} line(s), {} hollow, {} sorry".format(
+        warned = [l for l in (report.get("output") or "").splitlines()
+                  if "warning" in l]
+        if report.get("ok") and not warned:
+            print("[ok] {:<24} {:<18} {} line(s), {} hollow, {} sorry".format(
                 name, cert.kind, len(text.splitlines()), hollow,
-                text.count("sorry") - 1))
+                sum(1 for l in text.splitlines() if "sorry" in l.split("--")[0]
+                    and not l.lstrip().startswith(("/-", "-/")))))
+        elif report.get("ok"):
+            # It compiles, and Lean has something to say: a release should
+            # not ship Lean that warns, so this counts.
+            failures += 1
+            print("[!!] {:<24} {} compiles WITH warnings".format(name, cert.kind))
+            for line in warned[:8]:
+                print("       " + line)
         else:
             failures += 1
             print("[XX] {:<20} {}".format(name, cert.kind))

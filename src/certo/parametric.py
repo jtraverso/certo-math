@@ -125,6 +125,48 @@ def region_terms(region, lows):
     return out
 
 
+def ray_terms(ring, conditions, box):
+    """The side conditions of a box with an OPEN end, shifted to its floor.
+
+    The region's conditions, and `hi - v >= 0` for every variable that does
+    have a ceiling: a semi-infinite box is a ray in some directions only, and
+    the ceilings it has are worth using. Both `nonneg` and `verify` build the
+    terms here, so they cannot read the box two ways.
+    """
+    lows = {n: lo for n, (lo, _hi) in box.items()}
+    caps = [("box_hi_" + n, Poly.const(ring, hi) - Poly.var(ring, n))
+            for n, (_lo, hi) in box.items() if hi is not None]
+    return region_terms(list(conditions) + caps, lows)
+
+
+def ray_check(poly: Poly, box: dict, conditions, multipliers: dict):
+    """Re-derive a ray certificate by arithmetic: the shifted polynomial,
+    minus the named non-negative multiples, has every coefficient >= 0.
+    Returns (ok, why)."""
+    lows = {n: lo for n, (lo, _hi) in box.items()}
+    shifted = shift(poly, lows)
+    terms = ray_terms(poly.vars, conditions, box)
+    cols = {}
+    for name, g in (_monomial_multiples(terms, poly.vars, shifted.degree)
+                    if terms else []):
+        if name in cols and cols[name] != g:
+            return False, "two multiples named " + name
+        cols[name] = g
+    remainder = shifted
+    for name, value in multipliers.items():
+        value = Fraction(value)
+        if name not in cols:
+            return False, "no multiple named " + name
+        if value < 0:
+            return False, "{} has a negative multiplier".format(name)
+        remainder = remainder - cols[name].scaled(value)
+    neg = [c for c in remainder.terms.values() if c < 0]
+    if neg:
+        return False, "{} negative coefficient(s) left, the least {}".format(
+            len(neg), min(neg))
+    return True, "{} term(s) left, all >= 0".format(len(remainder.terms))
+
+
 def _monomial_multiples(terms, ring, budget):
     """`u^a * g` for every shifted monomial that fits inside `budget`.
 

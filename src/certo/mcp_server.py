@@ -559,7 +559,11 @@ def dsl_resource() -> str:
 
 @mcp.tool(description="DSL reference. Read this BEFORE writing a spec.")
 def dsl_guide() -> str:
-    return DSL_GUIDE
+    # The hand-written guide, then every spec, field and flag DERIVED from
+    # the code: the guide lagged ParametricSpec and AtlasSpec for releases.
+    from . import discovery
+
+    return DSL_GUIDE + discovery.guide_appendix()
 
 
 def _spec_tool(engine_call, expected=None):
@@ -982,19 +986,28 @@ async def compose(spec_path: str | None = None, spec_source: str | None = None,
     "products and squares of the hypotheses are added first, which is a "
     "HEURISTIC -- finding nothing does NOT mean the claim is false, and "
     "`prove` (Z3 nlsat, complete for real arithmetic) is the tool that "
-    "decides. The response carries the Lean tactic line this corresponds to."))
+    "decides. The response carries the Lean tactic line this corresponds to. "
+    "INFEASIBILITY directly: a claim of False, or an LPSpec, asks whether the "
+    "hypotheses contradict each other; a feasible system comes back REFUTED "
+    "with its point."))
 @_guard
 async def farkas(spec_path: str | None = None, spec_source: str | None = None,
                  timeout_ms: int = 20_000, nonlinear: bool = False) -> dict:
     from .engines import farkas as fk
-    from .spec import Spec, load_spec
+    from .i18n import t as _t
+    from .spec import LPSpec, Spec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    sp = await _off(load_spec, f, Spec)
+    sp = await _off(load_spec, f)
+    if not isinstance(sp, (Spec, LPSpec)) and type(sp).__name__ != "PackingSpec":
+        raise TypeError(_t("spec.wrong_type", got=type(sp).__name__,
+                           want="Spec / LPSpec"))
     res = await _off(fk.farkas, sp, _limits(timeout_ms), nonlinear, str(f))
     out = _emit(res, spec_file=f)
     out["multipliers"] = res.meta.get("multipliers")
     out["lean"] = res.meta.get("hint")
+    if res.meta.get("point"):
+        out["point"] = res.meta["point"]
     return out
 
 
@@ -1745,6 +1758,51 @@ async def atlas(spec_path: str | None = None, spec_source: str | None = None,
 
 
 @mcp.tool(description=(
+    "FIND: is it in certo, and where? Search every command, flag, spec field, "
+    "certificate kind and Python API function by WHAT YOU NEED, in English or "
+    "Spanish -- most of certo is flags and fields, not commands, and this is "
+    "how to find them. `exact='opt.round'` (or a spec, field or kind name) "
+    "returns one contract: its flags, fields with defaults, options. Start "
+    "here when unsure which tool fits."))
+@_guard
+async def find(query: str = "", exact: str | None = None, n: int = 8) -> dict:
+    from . import discovery
+
+    if exact:
+        got = discovery.contract(exact)
+        if got is None:
+            return {"ok": False, "exact": exact,
+                    "near": [e["id"] for e in discovery.find(exact.replace(".", " "), n=5)]}
+        return {"ok": True, "contract": got}
+    rows = discovery.find(query, n=n)
+    return {"ok": bool(rows), "query": query,
+            "results": [{k: v for k, v in e.items() if k != "text"} for e in rows]}
+
+
+@mcp.tool(description=(
+    "RUN: any command that takes a spec, by name -- the generic entry point the "
+    "compact server exposes instead of one tool per command. `command` as "
+    "`find` names it (opt, nonneg, pin...); `options` are the engine's keyword "
+    "options (`find(exact=command)` lists them). The certificate is written to "
+    "the workspace and its path returned; check it with `verify`."))
+@_guard
+async def run(command: str, spec_path: str | None = None,
+              spec_source: str | None = None, options: dict | None = None,
+              timeout_ms: int = 120_000) -> dict:
+    from . import api
+    from .spec import load_spec
+
+    if command not in api.runnable():
+        return {"ok": False, "error": "{} does not run a spec; these do: {}".format(
+            command, ", ".join(api.runnable()))}
+    f = _spec_file(spec_path, spec_source)
+    spec = await _off(load_spec, str(f))
+    res = await _off(api.run, command, spec, _limits(timeout_ms),
+                     spec_path=str(f), **(options or {}))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
     "BATCH: every spec file in a workspace directory through ONE command, in "
     "this server's process (or `jobs` worker processes): one certificate per "
     "spec, written beside the others and named after it, each self-checked "
@@ -2179,7 +2237,28 @@ async def export(spec_path: str | None = None, spec_source: str | None = None,
     return out
 
 
-def main() -> None:
+#: The tools a COMPACT server keeps: find what exists, run it, check what it
+#: wrote, and the guide. Fifty-odd tools is a long list for a model to read
+#: before it knows what it needs; four, and `find`, is not.
+COMPACT = ("find", "run", "verify", "dsl_guide")
+
+
+def compact() -> list:
+    """Reduce this server to `COMPACT`. Returns the tools removed."""
+    names = [tl.name for tl in mcp._tool_manager.list_tools()]
+    gone = [n for n in names if n not in COMPACT]
+    for n in gone:
+        mcp.remove_tool(n)
+    return gone
+
+
+def main(argv=None) -> None:
+    import os
+    import sys
+
+    argv = sys.argv[1:] if argv is None else argv
+    if "--compact" in argv or os.environ.get("CERTO_MCP_COMPACT"):
+        compact()
     mcp.run(transport="stdio")
 
 

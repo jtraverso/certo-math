@@ -6,7 +6,7 @@ the claims that are false, measure what survives, reduce it to what it really
 is, and assemble the rest — and every step comes back with a **certificate
 anyone can re-check without trusting certo.**
 
-CLI and MCP. Fifty-seven commands. Runs in milliseconds where a formalisation
+CLI and MCP. Fifty-eight commands. Runs in milliseconds where a formalisation
 costs hours.
 
 *Español: [README.es.md](README.es.md) · run any command with `--lang es`.*
@@ -14,7 +14,7 @@ costs hours.
 | | |
 |---|---|
 | **[Project page →](https://jtraverso.github.io/certo-math/)** | the didactic introduction: what certo is for, in one page, in both languages |
-| **[Commands](docs/COMMANDS.md)** | all fifty-seven, one entry each: the question, the spec, the certificate, and what it does not establish |
+| **[Commands](docs/COMMANDS.md)** | all fifty-eight, one entry each: the question, the spec, the certificate, and what it does not establish |
 | **[Specs](docs/SPECS.md)** | the DSL: every spec type with a minimal working example, shared options, exit codes |
 | **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the fifty-three kinds, which re-check without a solver |
 | **[Worked cases](docs/CASES.md)** | real problems end to end: symmetry, sweeps, parametric bounds, packings, toric data |
@@ -145,7 +145,7 @@ your terminal, in your language.
    dominates, and a fallback written to avoid it is a fallback in floating
    point.
 
-## The fifty-seven commands
+## The fifty-eight commands
 
 Grouped as [`certo commands`](docs/COMMANDS.md) groups them. Full entries,
 with what each one does **not** establish, in
@@ -157,7 +157,7 @@ with what each one does **not** establish, in
 | `check` | Satisfiability; `--hypotheses-only` asks if the regime is non-empty | Z3 | model, or core |
 | `core` | MUS: which hypotheses are needed | Z3 | minimal core |
 | `audit` | Does every hypothesis earn its place, or is the theorem overstated? | Z3 | **verdict per hypothesis, each with the assignment that breaks it** |
-| `farkas` | `linarith` / `nlinarith`, with the multipliers | exact LP | **Farkas certificate**, solver-free |
+| `farkas` | `linarith` / `nlinarith`, with the multipliers; with a claim of `False` or an `LPSpec`, infeasibility | exact LP | **Farkas certificate**, solver-free; a feasible system, **its point** |
 | `compose` | Assemble lemmas into one proof, checking the join | Z3 | **proof**: every lemma, its certificate, and the link |
 | `induct` | Base cases + a step, and the check that the chain joins | Z3 | **induction**: both halves, and the two numbers that matter |
 | `synth` | CEGIS: ∃obj ∀input ∃aux | CEGIS/Z3 | object + the counterexamples that forced it |
@@ -176,7 +176,7 @@ with what each one does **not** establish, in
 | `cone` | Local toric data: primitivity, multiplicity, the height functional, discrepancies | exact det and solve | **the numbers two geometric theorems consume**, solver-free |
 | `columns` | An LP over every clique of a graph, without listing the cliques: column generation with a pricing search the verifier reruns | exact rational arithmetic | solver-free |
 | `atlas` | A parameter domain covered by boxes, each certified by `parametric`, and ONE statement for the whole | every piece re-verified, the covering recomputed cell by cell | **names the uncovered sliver**, solver-free |
-| `nonneg` | A polynomial >= 0 on a box, or on the part a region `g >= 0` cuts -- an algebraic endpoint written exactly | Bernstein coefficients on a subdivision, region multipliers | **the point where it fails**, solver-free |
+| `nonneg` | A polynomial >= 0 on a box, or on the part a region `g >= 0` cuts -- an algebraic endpoint written exactly; `(lo, None)` is a ray | Bernstein coefficients on a subdivision, region multipliers | **the point where it fails**, solver-free |
 | `pin` | `cp(G) = X` from both sides: a cover by cliques above, a clique LP rounded up below | both halves re-verified and tied to ONE edge list | the range when they do not meet, solver-free |
 | `semigroup` | Affine semigroups as a checker: pointedness, minimality, and membership of the cone, the group and the semigroup | exact integer and rational arithmetic | **refutes normality with a witness, never asserts it**, solver-free |
 | `profile` | How an optimum responds to ONE capacity across an interval: a piecewise-affine function, not a value | exact rational arithmetic | **decides `f` on its domain** — bound, attainment and coverage — solver-free |
@@ -202,6 +202,7 @@ with what each one does **not** establish, in
 | `report` | Whose bug is it -- certo's, the spec's or the machine's -- and a local folder to file it with. Sends nothing | — | — |
 | `ask` | One entry point: load a spec and run whatever it asks for (`what` is the same command) | — | whatever the command produces |
 | `commands` | Which command answers which question | — | — |
+| `find` | Is it in certo, and where? Every command, flag, spec field, certificate kind and API function, searched by what you need; `--exact` for one contract | index derived from the code | — |
 | `repro` | Bundle spec, certificates, versions and hashes for a referee | — | the bundle |
 | `promote` | Run an `--explore` again, certified, and say whether the two agree | re-run certified | the certificate of the certified run |
 | `pack` | Thousands of certificates into one zip with a manifest, each member readable alone | — | the archive; `verify` checks every member |
@@ -289,7 +290,16 @@ Three design decisions:
    exception into `Error executing tool X` and swallows the reason; a model
    reading that cannot fix its spec. Here it gets what happened and what to
    correct.
-3. **`dsl_guide` first.** Both a tool and a resource (`certo://dsl`).
+3. **`dsl_guide` first.** Both a tool and a resource (`certo://dsl`). Its
+   second half -- every spec, field and flag -- is derived from the code, so
+   it cannot lag a release.
+
+Unsure which tool fits? **`find`** searches every command, flag, spec field,
+certificate kind and API function by what you need, and `find(exact=...)`
+returns one contract. Sixty-one tools is a lot of context for a model to carry:
+`certo-mcp --compact` (or `CERTO_MCP_COMPACT=1`) serves four -- `find`, `run`
+(any command that takes a spec, by name), `verify` and `dsl_guide` -- and
+loses nothing, since `run` reaches every command `find` names.
 
 > **Specs are Python code and they get executed when loaded.** That is
 > inherent to the DSL and it is the same level of trust an agent with file

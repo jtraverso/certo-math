@@ -511,11 +511,14 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     if not ring:
         return refuse(t("nonneg.no_box"))
     try:
-        box = {n: (Fraction(spec.box[n][0]), Fraction(spec.box[n][1]))
+        box = {n: (Fraction(spec.box[n][0]),
+                   None if spec.box[n][1] is None else Fraction(spec.box[n][1]))
                for n in ring}
     except (TypeError, ValueError, IndexError) as e:
+        if any(spec.box[n][0] is None for n in ring if len(spec.box[n]) == 2):
+            return refuse(t("nonneg.no_floor"))
         return refuse(t("nonneg.box_bad", detail=str(e)))
-    if any(hi < lo for lo, hi in box.values()):
+    if any(hi is not None and hi < lo for lo, hi in box.values()):
         return refuse(t("nonneg.box_bad", detail="lo > hi"))
 
     def P(x):
@@ -534,9 +537,12 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     except (ValueError, TypeError, KeyError) as e:
         return refuse(e)
     payload = {"parameters": list(ring), "poly": poly.serialize(),
-               "box": {n: [str(lo), str(hi)] for n, (lo, hi) in box.items()},
+               "box": {n: [str(lo), None if hi is None else str(hi)]
+                       for n, (lo, hi) in box.items()},
                "region": {n: g.serialize() for n, g in conditions},
                "title": spec.title}
+    if any(hi is None for _lo, hi in box.values()):
+        return _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path)
     depth = max(0, int(spec.subdivide or 0))
     terms = bernstein.region_terms(conditions) if conditions else []
     ok, tree = (bernstein.nonneg_region(poly, box, terms, depth) if terms
@@ -592,8 +598,75 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                   meta={"diagnose": hint})
 
 
+def _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path):
+    """A box with an open end: the shift test, not Bernstein.
+
+    Substitute `v -> lo + u` and ask for every coefficient to be >= 0 after
+    subtracting non-negative multiples of the region's conditions and of the
+    ceilings the box does have. SUFFICIENT, NOT NECESSARY -- a polynomial can
+    be >= 0 on the ray with a negative coefficient -- and declared so: what
+    fails is `unknown`, never `refuted`, unless a point is found.
+    """
+    from fractions import Fraction
+    from itertools import product as _product
+
+    from ..certificate import polynomial_nonneg_certificate
+    from ..parametric import evaluate, nonneg_on_region, ray_terms, shift
+
+    ring = poly.vars
+    lows = {n: lo for n, (lo, _hi) in box.items()}
+    terms = ray_terms(ring, conditions, box)
+    if terms:
+        ok, shifted, used, _rem = nonneg_on_region(poly, lows, terms)
+    else:
+        shifted = shift(poly, lows)
+        ok, used = all(c >= 0 for c in shifted.terms.values()), {}
+    if ok:
+        cert = polynomial_nonneg_certificate(dict(
+            payload, holds=True, tree=None,
+            ray={"multipliers": {k: str(v) for k, v in used.items()}})
+        ).stamp(spec_path or None)
+        return Result("nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG,
+                      ms(), cert, detail=t("nonneg.proved_ray",
+                                           poly=str(poly) or "0",
+                                           box=_box_text(box),
+                                           region=_region_text(conditions)))
+
+    def inside(pt):
+        return all(evaluate(g, pt) >= 0 for _n, g in conditions)
+
+    # Points: a grid on boxes reaching further out along the open ends.
+    for reach in (1, 10, 1000, 10 ** 6):
+        sides = {n: (lo, hi if hi is not None else lo + reach)
+                 for n, (lo, hi) in box.items()}
+        k = 8 if len(ring) <= 3 else 2
+        for idx in _product(range(k + 1), repeat=len(ring)):
+            pt = {n: sides[n][0] + (sides[n][1] - sides[n][0]) * Fraction(i, k)
+                  for n, i in zip(ring, idx)}
+            v = evaluate(poly, pt)
+            if v < 0 and inside(pt):
+                cert = polynomial_nonneg_certificate(dict(
+                    payload, holds=False,
+                    point={n: str(x) for n, x in pt.items()},
+                    value=str(v))).stamp(spec_path or None)
+                return Result("nonneg", Status.SAT, Verdict.REFUTED,
+                              ENGINE_NONNEG, ms(), cert, detail=t(
+                                  "nonneg.refuted", value=str(v),
+                                  point=", ".join("{} = {}".format(n, x)
+                                                  for n, x in pt.items())),
+                              meta={"point": {n: str(x) for n, x in pt.items()},
+                                    "value": str(v)})
+    neg = sorted((c, e) for e, c in shifted.terms.items() if c < 0)
+    return Result("nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                  ENGINE_NONNEG, ms(), None,
+                  detail=t("nonneg.ray_unknown", n=len(neg),
+                           least=str(neg[0][0]) if neg else "-"),
+                  meta={"negative_coefficients": len(neg)})
+
+
 def _box_text(box):
-    return ", ".join("{} in [{}, {}]".format(n, lo, hi) for n, (lo, hi) in box.items())
+    return ", ".join("{} in [{}, +inf)".format(n, lo) if hi is None else
+                     "{} in [{}, {}]".format(n, lo, hi) for n, (lo, hi) in box.items())
 
 
 def _region_text(conditions):

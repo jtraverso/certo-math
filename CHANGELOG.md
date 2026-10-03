@@ -6,6 +6,81 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-10-02
+
+**Discoverable: what certo can do, found by what you need.** One new command
+(58), no new kinds (55); the schema stays 5, with two optional fields.
+
+### New
+
+- **`certo find`**: is it in certo, and where? Every command, flag, spec
+  field, certificate kind and Python API function, searched by what you need
+  in English or Spanish, each hit with how to call it. `--exact NAME` returns
+  one contract -- a command with its flags and API options, a spec with its
+  fields and defaults (`opt.round`, `NonnegSpec.region`,
+  `polynomial_nonneg`); `--json` the rows. The index is DERIVED from the
+  argument parser, the routing table, the spec dataclasses with their field
+  comments, the verifiers and the public API, so it cannot drift from what
+  ships. Agents kept rebuilding what a flag already did; golden queries in the
+  suite hold the ones that were missed.
+- **MCP `find` and `run`**, and **`certo-mcp --compact`** (or
+  `CERTO_MCP_COMPACT=1`): four tools -- `find`, `run` (any command that takes
+  a spec, by name), `verify`, `dsl_guide` -- instead of sixty-one, with
+  nothing out of reach. `dsl_guide`'s second half is derived from the code;
+  it had lagged `ParametricSpec` and `AtlasSpec` for releases.
+
+### From users' reports
+
+- **`farkas` asks infeasibility directly**: a claim of `False` (or none), or
+  an `LPSpec` / `PackingSpec`, read as its bounds and constraints, each a
+  named hypothesis. PROVED carries the multipliers, is not called vacuous,
+  and goes to Lean as `example ... : False := by linarith only [...]` (it was
+  a `True := sorry` placeholder). When no combination exists and a point
+  satisfies the hypotheses -- and the negated claim, for an ordinary one --
+  the answer is REFUTED with that point (`model`), where it was
+  `unknown_solver`. An integer program is decided over the reals when that is
+  infeasible, and the point offered is integral.
+- **`nonneg` on a ray**: `box={"x": (0, None)}` failed reading the box. It is
+  the shift test `v -> lo + u` now, using the region's conditions and the
+  ceilings the box does have, re-derived by `verify` by arithmetic (optional
+  field `ray`). Sufficient, not necessary, and declared: what it misses is
+  INCONCLUSIVE, never REFUTED without a point. `(None, hi)` is refused with
+  the substitution that turns it into one.
+- **`opt` says what it is doing above 500 variables**, on stderr: the size,
+  the float solve, the exact reconstruction, and first where to go if it
+  stalls (`columns`, `--explore`, `--no-exact`). About 1000 variables had run
+  twelve minutes on a terminal that printed nothing. `CERTO_QUIET=1`
+  silences it.
+
+### Soundness
+
+- **`variable_range` re-derives an EMPTY regime**: the certificate carries
+  the Farkas combination of its rows (optional field `farkas`), and `verify`
+  checks it -- the `partial` of 0.23 stays only for certificates without one.
+- **A strict empty regime was not empty**: `a < 1, a >= 1` passed the
+  inhabitation LP, which reads `<` as `<=`, and came back as the interval
+  `[1, 1)`. With a strict row the Farkas search, which tells them apart, is
+  asked too.
+
+### Platforms and Lean
+
+Every failed release so far passed locally and failed on a clean runner, and
+none of them was about the platform: a test reading `out/`, which only the
+examples make; doctor tests reading this machine; a file nobody had added;
+PuLP 4 renaming `lowBound` and the CBC command; a missing `nauty-geng`.
+
+- **`tests/prerelease.py`** runs what CI runs, here, before a tag: a fresh
+  worktree of exactly what would be tagged (untracked files left out, and
+  named), the suites in `publish.yml`'s order, the examples, and with
+  `--lean` every exporter against Mathlib. A step that did not run counts as
+  failing.
+- **`tests/run_lean.py` compiles every exporter**, and fails when one has no
+  case: a Farkas combination of 170 rows, an exact LP bound, an infeasible LP
+  as `False`, the Smith form of a 3x3 matrix, a unimodular cone in dimension
+  4 and a partial semigroup -- two exporters had never been compiled. A file
+  that compiles WITH warnings counts as failing. CI's `lean` job runs it,
+  with a missing Mathlib a failure there.
+
 ## [0.23.0] — 2026-10-02
 
 **Every kind in the battery, a report rooted at the target, and semigroups

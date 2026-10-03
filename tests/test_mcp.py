@@ -694,6 +694,64 @@ def test_every_answer_names_the_server_version():
     assert got["certo_version"] == __version__, got.get("certo_version")
 
 
+def test_find_and_run_reach_the_model_and_the_guide_is_derived():
+    """`find` is where an agent learns a flag exists; `run` runs any command
+    by name; `dsl_guide` carries the derived appendix."""
+    got = run(call("find", {"query": "is a polynomial nonnegative on a box", "n": 3}))
+    assert got["ok"] and got["results"][0]["id"] == "nonneg"
+    exact = run(call("find", {"exact": "opt.round"}))
+    assert exact["contract"]["id"] == "opt --round"
+    src = "\n".join([
+        "from fractions import Fraction",
+        "from certo import NonnegSpec",
+        "from certo.polynomials import Poly",
+        "x = Poly.var(('x',), 'x')",
+        "def spec():",
+        "    return NonnegSpec(poly=x**2, box={'x': (-1, Fraction(99, 100))})",
+    ])
+    out = run(call("run", {"command": "nonneg", "spec_source": src}))
+    assert out["verdict"] == "proved", out
+    guide = run(call("dsl_guide", {}))
+    text = guide if isinstance(guide, str) else json.dumps(guide)
+    assert "NonnegSpec" in text and "PinSpec" in text
+
+
+def test_farkas_takes_a_linear_program_over_mcp_and_returns_the_point():
+    """The tool loaded with `Spec` only; an LPSpec is infeasibility asked
+    directly, and a feasible one comes back with its point."""
+    src = "\n".join([
+        "from certo import LPSpec",
+        "def spec():",
+        "    m = LPSpec(sense='max')",
+        "    m.variable('a', 0, None)",
+        "    m.objective({'a': 1})",
+        "    m.constraint({'a': 1}, '<=', 1, name='cap')",
+        "    m.constraint({'a': 1}, '>=', 2, name='need')",
+        "    return m",
+    ])
+    out = run(call("farkas", {"spec_source": src}))
+    assert out["verdict"] == "proved", out
+    assert set(out["multipliers"]) == {"cap", "need"}
+    out = run(call("farkas", {"spec_source": src.replace("'>=', 2", "'>=', 0")}))
+    assert out["verdict"] == "refuted" and "a" in out["point"], out
+
+
+def test_the_compact_server_keeps_four_tools():
+    """Fifty-odd tools is a long list to read before knowing what you need;
+    `certo-mcp --compact` keeps find, run, verify and the guide."""
+    import importlib
+
+    import certo.mcp_server as m
+
+    fresh = importlib.reload(m)
+    try:
+        fresh.compact()
+        names = sorted(tl.name for tl in run(fresh.mcp.list_tools()))
+        assert names == ["dsl_guide", "find", "run", "verify"]
+    finally:
+        importlib.reload(m)
+
+
 def test_verify_never_runs_a_spec_named_from_outside_the_workspace():
     """CM-10: only the certificate's path was checked against the workspace.
     A certificate inside it whose payload named a spec OUTSIDE was replayed,

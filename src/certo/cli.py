@@ -521,6 +521,52 @@ def cmd_nonneg(args):
     return emit(algebra.nonneg(spec, limits_from(args), spec_path=args.spec), args)
 
 
+def cmd_find(args):
+    from . import discovery
+
+    if args.exact:
+        got = discovery.contract(args.exact)
+        if got is None:
+            print(t("cli.find.no_exact", name=args.exact), file=sys.stderr)
+            near = discovery.find(args.exact.replace(".", " "), n=5)
+            for e in near:
+                print("  " + e["id"], file=sys.stderr)
+            return 2
+        if args.json:
+            print(json.dumps(got, indent=2, ensure_ascii=False, default=str))
+            return 0
+        print("{}  ({})".format(got["id"], got["type"]))
+        print("  " + (got.get("summary") or ""))
+        for key in ("use", "spec", "kind", "solver_free", "default", "commands"):
+            if got.get(key) not in (None, [], ""):
+                print("  {:<12} {}".format(key, got[key]))
+        for f in got.get("flags") or []:
+            print("    {:<22} {}".format(f["flag"], (f["summary"] or "")[:100]))
+        for f in got.get("fields") or []:
+            print("    .{:<21} {}  {}".format(f["field"], f["default"] if f["default"]
+                                             is not None else "(required)",
+                                             (f["summary"] or "")[:80]))
+        if got.get("api_options"):
+            print("  api.run options: " + ", ".join(got["api_options"]))
+        return 0
+    query = " ".join(args.query)
+    if not query.strip():
+        print(t("cli.find.empty"), file=sys.stderr)
+        return 2
+    rows = discovery.find(query, n=args.n)
+    if args.json:
+        print(json.dumps(rows, indent=2, ensure_ascii=False, default=str))
+        return 0 if rows else 2
+    if not rows:
+        print("  " + t("cli.find.none", query=query))
+        return 2
+    for e in rows:
+        print("  {:<30} {:<10} {}".format(e["id"], e["type"], (e["summary"] or "")[:90]))
+        print("  {:<30} {:<10} {}".format("", "", e["use"]))
+    print("  " + t("cli.find.next"))
+    return 0
+
+
 def cmd_batch(args):
     from . import api, batch
 
@@ -996,9 +1042,12 @@ def _print_matrix(table, goals, never):
 
 def cmd_farkas(args):
     from .engines import farkas
-    from .spec import Spec, load_spec
+    from .spec import LPSpec, Spec, load_spec
 
-    spec = load_spec(args.spec, Spec)
+    spec = load_spec(args.spec)
+    if not isinstance(spec, (Spec, LPSpec)) and type(spec).__name__ != "PackingSpec":
+        raise TypeError(t("spec.wrong_type", got=type(spec).__name__,
+                          want="Spec / LPSpec"))
     res = farkas.farkas(spec, limits_from(args), nonlinear=args.nonlinear,
                         spec_path=args.spec)
     rc = emit(res, args)
@@ -1007,6 +1056,10 @@ def cmd_farkas(args):
         for name, lam in res.meta["multipliers"].items():
             print("    {:<22} {}".format(name, lam))
         print("  " + t("cli.farkas.hint", hint=res.meta.get("hint", "")))
+    if not args.json and res.meta.get("point"):
+        print("  " + t("cli.farkas.point"))
+        for name, v in res.meta["point"].items():
+            print("    {:<22} {}".format(name, v))
     return rc
 
 
@@ -2787,7 +2840,10 @@ def build_parser():
     sp.set_defaults(func=cmd_mixed)
 
     sp = add("farkas", "linarith/nlinarith: non-negative multipliers that "
-                       "close the system, in exact rationals")
+                       "close the system, in exact rationals. With a claim "
+                       "of False, or a linear program (LPSpec): is it "
+                       "infeasible, the hypotheses contradictory -- and why? "
+                       "A feasible system comes back REFUTED with its point")
     sp.add_argument("spec", help=".py file with a spec() function")
     sp.add_argument("--nonlinear", action="store_true",
                     help="add products and squares of the hypotheses first "
@@ -2856,6 +2912,17 @@ def build_parser():
                     help="where to write the folder (default: "
                          "./certo-report-<time>-<triage>)")
     sp.set_defaults(func=cmd_report)
+    sp = add("find", "is it in certo, and where? Search every command, flag, "
+                     "spec field, certificate kind and API function by what "
+                     "you need, in English or Spanish; --exact for one contract")
+    sp.add_argument("query", nargs="*", help="what you need, in your words")
+    sp.add_argument("--exact", metavar="NAME",
+                    help="one entry, exactly: a command (opt), a flag (opt.round "
+                         "or 'opt --round'), a spec (NonnegSpec), a field "
+                         "(NonnegSpec.region) or a kind (polynomial_nonneg)")
+    sp.add_argument("-n", type=int, default=8, metavar="N",
+                    help="how many results (default 8)")
+    sp.set_defaults(func=cmd_find)
     sp = add("batch", "every spec in a directory through ONE command, in one "
                       "process (or N with --jobs): one certificate per spec, "
                       "start-up paid once")
@@ -2997,7 +3064,8 @@ def build_parser():
                          "built from, how each was checked, and every "
                          "obligation still open -- bridges, cited results, "
                          "finite windows -- plus what in the directory is off "
-                         "the route")
+                         "the route. Tells reducing the crux from closing "
+                         "another case")
     sp.add_argument("--since", metavar="FILE",
                     help="with --root: a previous `--root --json` report; says "
                          "what was discharged, added or changed under the target")
@@ -3254,8 +3322,11 @@ def build_parser():
                          "which is what you want for a certificate that is "
                          "not one of certo's")
     sp.add_argument("--md", action="store_true",
-                    help="for a counterexample: what each formula does at its "
-                         "point, as a Markdown table to paste into a proof")
+                    help="the certificate as mathematics, as Markdown to paste "
+                         "into a proof: for a counterexample what each formula "
+                         "does at its point; for a core the hypotheses used and "
+                         "unused; for Farkas the combination as an identity; for "
+                         "an LP the tight constraints and their dual prices")
     sp.set_defaults(func=cmd_verify)
 
     sp = add("export", "dump the spec to SMT-LIB2 or DIMACS, or a "

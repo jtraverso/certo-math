@@ -1,4 +1,4 @@
-# Los cincuenta y siete comandos
+# Los cincuenta y ocho comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -84,14 +84,15 @@ núcleos**.
 ### `certo farkas`
 
 **Pregunta** — ¿Es cierta esta desigualdad, con los multiplicadores a la vista?
-**Spec** — `Spec`
+O: ¿son contradictorias estas hipótesis -- este programa lineal?
+**Spec** — `Spec`, o un `LPSpec` / `PackingSpec`
 **Responde** — los multiplicadores racionales no negativos que combinan las
 hipótesis con el objetivo negado hasta que todo se cancela, más la llamada a
 `linarith` / `nlinarith` lista para pegar
 **Certificado** — `farkas`, **sin solver**: comprobarlo es sumar fracciones
 **No establece** — nada, cuando no encuentra nada. `farkas` es incompleto a
 propósito en ambos modos, así que "sin certificado" significa *esta búsqueda no
-lo cerró*, nunca *falso*.
+lo cerró*, nunca *falso* -- salvo que además encuentre un punto, abajo.
 
 ```
 $ certo farkas examples/farkas_linear.py
@@ -114,6 +115,16 @@ un lector debe saber cuáles no eran hipótesis.
 
 > **`prove` para saber. `farkas` para certificar.** El `nlsat` de Z3 es
 > completo para aritmética real; esto no lo es, y a cambio te da la razón.
+
+**Infactibilidad, preguntada directamente.** Un claim `False` (o ninguno), o un
+`LPSpec` -- leído como sus cotas y restricciones, cada una una hipótesis con su
+propio nombre -- pregunta si las hipótesis se contradicen entre sí. DEMOSTRADO
+lleva los multiplicadores, no se llama vacuo (esa es la pregunta), y va a Lean
+como `example ... : False := by linarith only [...]`. Cuando no existe una
+combinación y un punto cumple las hipótesis (y el claim negado), la respuesta
+es REFUTADO con ese punto, un certificado `model`, donde antes era
+`unknown_solver`. Un programa entero se lee sobre los reales: una contradicción
+ahí lo es también para sus puntos enteros, y el punto ofrecido es entero.
 
 ### `certo induct`
 
@@ -510,6 +521,10 @@ reconstrucción se rechaza sola.
 Un programa INFACTIBLE vuelve con su rayo de Farkas exacto -- `y >= 0`,
 `A^T y >= 0`, `b.y < 0`, tipo `farkas_ray` -- y `mixed` lo conserva cuando la
 relajación ya es infactible.
+
+Sobre 500 variables `opt` dice lo que está haciendo, por stderr: el tamaño, la
+resolución en flotantes, la reconstrucción exacta -- y, primero, adónde ir si
+se estanca (`columns`, `--explore`, `--no-exact`). `CERTO_QUIET=1` lo calla.
 
 `--round`, con un objetivo entero (coeficientes enteros sobre variables
 enteras), certifica además `óptimo entero <= floor(LP)` (`>= ceil` si se
@@ -1390,6 +1405,15 @@ la caja -- `x^2` en `[-1, 0.99]` -- deja un coeficiente negativo en cada celda
 a su alrededor, así que la caja se corta en las raíces racionales del
 polinomio y de su derivada, y el punto de corte se registra y se recomprueba.
 
+Un extremo abierto, `box={"x": (0, None)}`, es un rayo, y ningún árbol de
+Bernstein lo cubre. Ahí el test es el desplazamiento `v -> lo + u`: todo
+coeficiente >= 0 tras restar múltiplos no negativos de las condiciones de la
+región y de los techos que la caja sí tiene (`hi - v >= 0`), rederivado por
+`verify` con aritmética. Es suficiente, no necesario -- `(x-1)^2 + 1` en
+`[0, +inf)` conserva un coeficiente negativo -- así que lo que no alcanza es
+INCONCLUSO, y lo dice; desde `x >= 1` el mismo polinomio queda demostrado.
+`(None, hi)` se rechaza: sustituye `v -> -v`.
+
 ### `certo pin`
 
 **Pregunta** — Un cubrimiento da `cp(G) <= X` y un LP da `cp(G) >= X`: ¿pueden
@@ -2094,6 +2118,40 @@ significa la respuesta.
 
 Un punto de entrada que carga un spec, lee su tipo y corre el comando al que
 ese tipo pertenece. `certo what` es el mismo comando.
+
+### `certo find`
+
+**Pregunta** — ¿Está en certo, y dónde?
+**Spec** — ninguno: lo que necesitas, en tus palabras, en inglés o español
+**Responde** — los comandos, opciones, campos de spec, tipos de certificado y
+funciones de la API de Python que coinciden, el mejor primero, cada uno con
+cómo llamarlo. `--exact NOMBRE` devuelve un contrato: un comando con sus
+opciones y las de la API, un spec con sus campos y valores por defecto, una
+opción, un campo o un tipo
+**Certificado** — ninguno
+**No establece** — que lo que lista pueda responder tu instancia. La búsqueda
+es léxica, sobre texto derivado del código; un resultado es un lugar para
+leer, no una ruta.
+
+```
+$ certo find "un polinomio no negativo en un intervalo" -n 2
+  nonneg                         command    is this polynomial >= 0 on a box -- or on the part a region cuts?
+                                            certo nonneg SPEC
+  sos                            command    Is this polynomial non-negative everywhere?
+                                            certo sos SPEC
+$ certo find --exact opt.round
+opt --round  (flag)
+  with an integer objective (integer coefficients on integer variables): also certify ...
+  use          certo opt SPEC --round
+```
+
+La mayor parte de certo son opciones y campos, no comandos, y los agentes
+reconstruían lo que una opción ya hacía: `opt --round` a mano, un extremo
+racional donde `NonnegSpec.region` escribe el algebraico exacto. El índice se
+construye desde el parser de argumentos, la tabla de rutas, las dataclasses de
+los specs (con los comentarios de sus campos), los verificadores y la API
+pública, así que no puede desviarse de lo que se publica. `--json` da las
+filas; por MCP es la herramienta `find`.
 
 ### `certo commands`
 

@@ -6,7 +6,7 @@ romper las afirmaciones falsas, medir lo que sobrevive, reducirlo a lo que
 realmente es, y ensamblar el resto— y cada paso vuelve con un **certificado
 que cualquiera puede re-comprobar sin fiarse de certo.**
 
-CLI y MCP. Cincuenta y siete comandos. Corre en milisegundos donde una
+CLI y MCP. Cincuenta y ocho comandos. Corre en milisegundos donde una
 formalización cuesta horas.
 
 *English: [README.md](README.md) · cualquier comando acepta `--lang en`.*
@@ -14,7 +14,7 @@ formalización cuesta horas.
 | | |
 |---|---|
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
-| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta y siete, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
+| **[Comandos](docs/es/COMMANDS.md)** | los cincuenta y ocho, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
 | **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los cincuenta y tres tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
@@ -145,7 +145,7 @@ en tu idioma.
    un bucle sobre la CLI: manda el arranque, y un apaño escrito para evitarlo
    es un apaño en punto flotante.
 
-## Los cincuenta y siete comandos
+## Los cincuenta y ocho comandos
 
 Agrupados como los agrupa [`certo commands`](docs/es/COMMANDS.md). Las entradas
 completas, con lo que cada uno **no** establece, en
@@ -157,7 +157,7 @@ completas, con lo que cada uno **no** establece, en
 | `check` | Satisfacibilidad; `--hypotheses-only` pregunta si el régimen es no vacío | Z3 | modelo, o núcleo |
 | `core` | MUS: qué hipótesis hacen falta | Z3 | núcleo minimal |
 | `audit` | ¿Cada hipótesis se gana su lugar, o el teorema está sobreenunciado? | Z3 | **veredicto por hipótesis, cada uno con la asignación que la rompe** |
-| `farkas` | `linarith` / `nlinarith`, con los multiplicadores | LP exacto | **certificado de Farkas**, sin solver |
+| `farkas` | `linarith` / `nlinarith`, con los multiplicadores; con un claim `False` o un `LPSpec`, infactibilidad | LP exacto | **certificado de Farkas**, sin solver; un sistema factible, **su punto** |
 | `compose` | Ensambla lemas en una demostración, comprobando la unión | Z3 | **demostración**: cada lema, su certificado y el enlace |
 | `induct` | Casos base + paso, y la comprobación de que la cadena une | Z3 | **inducción**: ambas mitades, y los dos números que importan |
 | `synth` | CEGIS: ∃obj ∀entrada ∃aux | CEGIS/Z3 | objeto + los contraejemplos que lo forzaron |
@@ -176,7 +176,7 @@ completas, con lo que cada uno **no** establece, en
 | `cone` | Datos tóricos locales: primitividad, multiplicidad, funcional de altura, discrepancias | det y solve exactos | **los números que consumen dos teoremas geométricos**, sin solver |
 | `columns` | Un LP sobre todas las cliques de un grafo, sin listarlas: generación de columnas con una búsqueda de precios que el verificador repite | aritmética racional exacta | sin solver |
 | `atlas` | Un dominio de parámetros cubierto por cajas, cada una certificada por `parametric`, y UN enunciado para el todo | cada pieza re-verificada, el cubrimiento recalculado celda por celda | **nombra la franja sin cubrir**, sin solver |
-| `nonneg` | Un polinomio >= 0 en una caja, o en la parte que corta una región `g >= 0` -- un extremo algebraico escrito exacto | coeficientes de Bernstein en una subdivisión, multiplicadores de la región | **el punto donde falla**, sin solver |
+| `nonneg` | Un polinomio >= 0 en una caja, o en la parte que corta una región `g >= 0` -- un extremo algebraico escrito exacto; `(lo, None)` es un rayo | coeficientes de Bernstein en una subdivisión, multiplicadores de la región | **el punto donde falla**, sin solver |
 | `pin` | `cp(G) = X` por ambos lados: un cubrimiento por cliques arriba, un LP de cliques redondeado abajo | ambas mitades re-verificadas y atadas a UNA lista de aristas | el rango cuando no se encuentran, sin solver |
 | `semigroup` | Semigrupos afines como comprobador: puntiagudez, minimalidad y pertenencia al cono, al grupo y al semigrupo | aritmética entera y racional exacta | **refuta la normalidad con un testigo, nunca la afirma**, sin solver |
 | `profile` | Cómo responde un óptimo a UNA capacidad en todo un intervalo: una función afín a trozos, no un valor | aritmética racional exacta | **decide `f` en su dominio** — cota, alcanzabilidad y cobertura — sin solver |
@@ -202,6 +202,7 @@ completas, con lo que cada uno **no** establece, en
 | `report` | ¿De quién es el bug -- de certo, del spec o de la máquina? -- y una carpeta local para reportarlo. No envía nada | — | — |
 | `ask` | Un único punto de entrada: carga un spec y corre lo que pida (`what` es el mismo comando) | — | lo que produzca el comando |
 | `commands` | Qué comando responde qué pregunta | — | — |
+| `find` | ¿Está en certo, y dónde? Todo comando, opción, campo de spec, tipo de certificado y función de la API, buscados por lo que necesitas; `--exact` para un contrato | índice derivado del código | — |
 | `repro` | Empaqueta spec, certificados, versiones y hashes para un árbitro | — | el paquete |
 | `promote` | Corre de nuevo un `--explore`, certificado, y dice si coinciden | se corre certificado | el certificado de la corrida certificada |
 | `pack` | Miles de certificados en un solo zip con manifiesto, cada miembro legible por separado | — | el archivo; `verify` comprueba cada miembro |
@@ -290,7 +291,17 @@ Tres decisiones de diseño:
    cualquier excepción en `Error executing tool X` y se traga la razón; un
    modelo que lee eso no puede arreglar su spec. Aquí recibe qué pasó y qué
    corregir.
-3. **`dsl_guide` primero.** Es herramienta y recurso (`certo://dsl`).
+3. **`dsl_guide` primero.** Es herramienta y recurso (`certo://dsl`). Su
+   segunda mitad -- todo spec, campo y opción -- se deriva del código, así que
+   no puede quedar atrás de una versión.
+
+¿No sabes qué herramienta corresponde? **`find`** busca todo comando, opción,
+campo de spec, tipo de certificado y función de la API por lo que necesitas, y
+`find(exact=...)` devuelve un contrato. Sesenta y una herramientas son mucho contexto
+para que un modelo lo cargue: `certo-mcp --compact` (o `CERTO_MCP_COMPACT=1`)
+sirve cuatro -- `find`, `run` (cualquier comando que toma un spec, por nombre),
+`verify` y `dsl_guide` -- y no pierde nada, porque `run` llega a todo comando
+que `find` nombre.
 
 > **Los specs son código Python y se ejecutan al cargarse.** Eso es inherente
 > al DSL y es el mismo nivel de confianza que ya tiene un agente con acceso a

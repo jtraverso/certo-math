@@ -115,6 +115,7 @@ BY_QUESTION = (
         ("commands.q.ledger", "ledger"),
         ("commands.q.promote", "promote"),
         ("commands.q.batch", "batch"),
+        ("commands.q.find", "find"),
         ("commands.q.pack", "pack"),
         ("commands.q.mcp", "mcp status"),
     )),
@@ -145,6 +146,10 @@ def table() -> dict:
 #: two of the most used spec types in the corpus.
 ALSO = {"PackingSpec": "opt", "DomainSpec": "sweep",
         "ParametricSymmetrySpec": "reduce"}
+
+#: Spec types a command takes BESIDES its own. `farkas` reads a linear
+#: program as hypotheses with the claim False: is it infeasible, and why?
+ALSO_TAKES = {"farkas": ("LPSpec", "PackingSpec")}
 
 
 def command_for(spec) -> str | None:
@@ -234,7 +239,7 @@ TIER = {
     "lint": None, "status": None, "doctor": None, "ask": None,
     "commands": None, "repro": None, "verify": None, "export": None,
     "ledger": None, "report": None, "pack": None, "mcp": None,
-    "promote": None, "batch": None,
+    "promote": None, "batch": None, "find": None,
 }
 
 
@@ -282,7 +287,7 @@ KIND_OF = {
     "lint": None, "status": None, "doctor": None, "ask": None,
     "commands": None, "repro": None, "verify": None, "export": None,
     "ledger": None, "catalogue": None, "report": None, "pack": None,
-    "mcp": None, "promote": None, "batch": None,
+    "mcp": None, "promote": None, "batch": None, "find": None,
 }
 
 

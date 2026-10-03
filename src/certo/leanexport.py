@@ -238,8 +238,10 @@ def farkas_to_lean(data: dict, source="") -> str:
     # Both BEFORE the doc comment, which must sit right on the declaration.
     lines.append("set_option maxRecDepth {} in".format(max(512, 256 * len(hyps))))
     lines.append("set_option linter.unusedVariables false in")
+    no_goal = not any(n == "__goal__" for n, _, _, _ in used)
     lines.append("/-- The hypotheses the certificate actually used, and the")
-    lines.append("goal they close. `linarith` is given exactly those: the")
+    lines.append("{} `linarith` is given exactly those: the".format(
+        "contradiction they reach." if no_goal else "goal they close."))
     lines.append("certificate's whole content is which ones matter. -/")
     lines.append("example ({} : {})".format(binder, types))
     for name, poly, rel in hyps:
@@ -248,12 +250,14 @@ def farkas_to_lean(data: dict, source="") -> str:
 
     goal = next(((poly, rel) for n, poly, rel, _ in used if n == "__goal__"),
                 None)
+    hints = [_safe(n) for n, _, _ in hyps]
     if goal is None:
-        # No goal row: there is nothing to state, so this is a placeholder and
-        # is marked as one rather than closed with `trivial`.
-        lines.append("    : True := by")
-        lines.append("      sorry    -- certo: {} no goal row in the "
-                     "certificate".format(HOLLOW))
+        # No goal row: the hypotheses are contradictory among themselves,
+        # which is the statement `False` -- closed by linarith from the same
+        # rows the multipliers name.
+        lines.append("    : False := by")
+        lines.append("  linarith only{}".format(
+            " [{}]".format(", ".join(hints)) if hints else ""))
     else:
         # The stored row is the NEGATED goal. Emitting the goal positively
         # rather than as `¬ (row)` is what linarith expects, and it is what
@@ -265,7 +269,6 @@ def farkas_to_lean(data: dict, source="") -> str:
         # not everything in scope. Narrowing the list is the difference
         # between a call that closes and one that times out when somebody
         # retypes the lemma later with more around it.
-        hints = [_safe(n) for n, _, _ in hyps]
         lines.append("  linarith only{}".format(
             " [{}]".format(", ".join(hints)) if hints else ""))
 

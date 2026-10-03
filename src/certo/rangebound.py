@@ -200,6 +200,51 @@ def _inhabited(rows, names, limits) -> bool:
     return probe["bound"] is not None
 
 
+def _empty_combination(rows, limits):
+    """Multipliers `y >= 0` whose combination of the rows reads `0 <= -c`
+    with `c > 0` (or `0 < 0`): the regime has no point, and this shows it.
+    The same search `farkas` makes, over the rows this command already has.
+    """
+    from . import linarith
+    from .engines.farkas import _search
+    from .limits import Limits
+
+    lin = []
+    for name, coeffs, const, strict in rows:
+        p = {(v,): c for v, c in coeffs.items() if c}
+        if const:
+            p[linarith.CONST] = const
+        lin.append((name, p, "<" if strict else "<="))
+    lams, _const, _strict, is_exact = _search(lin, limits or Limits())
+    if lams is None or not is_exact:
+        return None
+    return {rows[i][0]: lam for i, lam in enumerate(lams) if lam}
+
+
+def check_empty(payload):
+    """Is the recorded combination a contradiction of the recorded rows?
+    Returns (ok, reason). Products and a comparison, as for the ends."""
+    rows = {r["name"]: r for r in payload["rows"]}
+    mult = {k: Fraction(v) for k, v in payload["farkas"].items()}
+    if not mult:
+        return False, "no multipliers"
+    bad = sorted(k for k, v in mult.items() if v < 0 or k not in rows)
+    if bad:
+        return False, "negative or unknown row(s): " + ", ".join(bad[:4])
+    combo, const, strict = {}, Fraction(0), False
+    for name, y in mult.items():
+        for v, coef in rows[name]["coeffs"].items():
+            combo[v] = combo.get(v, Fraction(0)) + y * Fraction(coef)
+        const += y * Fraction(rows[name]["const"])
+        strict = strict or (bool(rows[name]["strict"]) and y > 0)
+    left = sorted(v for v, c in combo.items() if c != 0)
+    if left:
+        return False, "the combination keeps " + ", ".join(left[:4])
+    if const > 0 or (const == 0 and strict):
+        return True, "0 {} {}".format("<" if strict else "<=", -const)
+    return False, "the combination reads 0 <= {}, which holds".format(-const)
+
+
 def bounds_of(spec, var, limits=None) -> dict:
     """`min var` and `max var` over the regime, each with its multipliers."""
     rows = _linear_rows(spec)
@@ -208,9 +253,18 @@ def bounds_of(spec, var, limits=None) -> dict:
         raise NotRangeable(_t("range.unknown_variable", name=var,
                               known=", ".join(names[:6]) or "-"))
 
-    if not _inhabited(rows, names, limits):
+    # The LP behind `_inhabited` reads `a < 1` as `a <= 1`, so `a < 1, a >= 1`
+    # passed as inhabited and came back as the interval `[1, 1)`. With a
+    # strict row the Farkas search, which does tell them apart, is asked too.
+    inhabited = _inhabited(rows, names, limits)
+    why = (_empty_combination(rows, limits)
+           if not inhabited or any(r[3] for r in rows) else None)
+    if not inhabited or why is not None:
         return {
             "variable": var, "variables": names, "empty": True,
+            # The combination that SHOWS it: without one, `empty` is the
+            # word of the search, and verify says so.
+            **({"farkas": {k: str(v) for k, v in why.items()}} if why else {}),
             "rows": [{"name": n, "coeffs": {k: str(v) for k, v in c.items()},
                       "const": str(k), "strict": s} for n, c, k, s in rows],
             "lower": {"bound": None, "why": EMPTY},
@@ -316,7 +370,10 @@ def check(payload) -> dict:
             # word alone let a payload edited to say `unbounded` verify, and
             # `[0, 1]` came back as `[0, +inf)`. Anything else -- empty,
             # unknown -- establishes nothing and must not read as checked.
-            if payload.get("empty"):
+            if payload.get("empty") and "farkas" in payload:
+                ok, reason = check_empty(payload)
+                out[side] = {"ok": ok, "why": EMPTY, "reason": reason}
+            elif payload.get("empty"):
                 out[side] = {"ok": True, "why": EMPTY}
             elif end.get("why") != UNBOUNDED:
                 out[side] = {"ok": False, "why": end.get("why"),

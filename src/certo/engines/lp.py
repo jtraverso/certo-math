@@ -527,6 +527,21 @@ class Vectors:
                         "objective": objective, "exact": True}
 
 
+#: From how many variables `opt` says what it is doing, on stderr. Below it a
+#: run takes seconds; above it a user waited twelve minutes on a terminal
+#: that printed nothing, with no way to tell a slow step from a stuck one.
+#: `CERTO_QUIET=1` silences it.
+PROGRESS_FROM = 500
+
+
+def _progress(on, t0, key, **kw):
+    if on:
+        import sys
+
+        print("  [{:.1f}s] {}".format(time.perf_counter() - t0, t(key, **kw)),
+              file=sys.stderr, flush=True)
+
+
 def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         target=None, dual_direction=None, _vectors_only: bool = False,
         round: bool = False, cuts=None, _ray: bool = True) -> Result:
@@ -575,6 +590,14 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         return _opt_vectors(spec, lim, t0)
 
     A, b, c, cons_names = spec.as_leq_system()
+    import os
+
+    loud = (not _vectors_only and len(spec.var_names) > PROGRESS_FROM
+            and os.environ.get("CERTO_QUIET", "").strip() in ("", "0"))
+    _progress(loud, t0, "engine.opt.progress.start", n=len(spec.var_names),
+              m=len(cons_names),
+              discrete=len(getattr(spec, "discrete", []) or
+                           (spec.var_names if spec.integer else [])))
 
     # AN EMPTY PROGRAM IS VACUOUS, and saying so is the difference between
     # this and a tool that reports "EXACT optimum certified: 0" for a question
@@ -598,6 +621,8 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
 
     prob, xvars = _build(spec, A, b, c, cons_names)
     st_name = _solve(prob, solver)
+    _progress(loud, t0, "engine.opt.progress.solved", status=st_name,
+              solver=main_name)
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
     engine = lambda: "pulp/" + "+".join(dict.fromkeys(used))  # noqa: E731
 
@@ -668,9 +693,12 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         # repetia el trabajo caro tres veces.
         alts = ([[-v for v in dual_float], [abs(v) for v in dual_float]]
                 if have_duals else [])
+        _progress(loud, t0, "engine.opt.progress.exact")
         x_ex, y_ex, rep, denom = exact.certify(A, b, c, relax_x, dual_float,
                                                y_alts=alts)
         exact_ok = x_ex is not None
+        _progress(loud, t0, "engine.opt.progress.exact_done" if exact_ok
+                  else "engine.opt.progress.exact_failed")
 
     selection = None
     if exact_ok and dual_direction and not _vectors_only:

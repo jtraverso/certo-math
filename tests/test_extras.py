@@ -521,10 +521,16 @@ def test_non_polynomial_input_is_refused_with_the_offending_term():
     assert "division" in r.detail
 
 
-def test_a_false_statement_yields_no_certificate():
+def test_a_false_statement_yields_no_farkas_certificate_but_its_point():
+    """No multipliers exist for a false claim. Until 0.24 that was
+    INCONCLUSIVE with nothing; now the point where it fails comes back, as a
+    `model` certificate -- never a `farkas` one."""
+    from fractions import Fraction
+
     import z3
 
     from certo import Spec
+    from certo.certificate import verify
     from certo.engines import farkas as fk
 
     x = z3.Real("x")
@@ -532,8 +538,10 @@ def test_a_false_statement_yields_no_certificate():
     s.assume("x_ge_1", x >= 1)
     s.claim(x >= 2)                         # false at x = 1
     r = fk.farkas(s, LIM)
-    assert r.verdict is Verdict.INCONCLUSIVE
-    assert r.certificate is None
+    assert r.verdict is Verdict.REFUTED
+    assert r.certificate.kind == "model" and verify(r.certificate).ok
+    v = Fraction(r.meta["point"]["x"])
+    assert 1 <= v < 2
 
 
 def test_equalities_are_split_so_multipliers_stay_non_negative():
@@ -14301,6 +14309,70 @@ def test_the_pair_clique_parts_returns_is_refused_by_name():
     assert check(edges, pair[0])["ok"]
 
 
+#: What agents asked for and did not find, and what `find` must answer with
+#: in its first three results. Most of certo is a FLAG or a FIELD, which a
+#: list of commands never shows -- this is the measured surface.
+FIND_GOLDEN = [
+    ("is a polynomial nonnegative on a box", "nonneg"),
+    ("cota entera redondeada", "opt --round"),
+    ("integer optimum floor of LP bound", "opt --round"),
+    ("LP infactible certificado", "opt"),
+    ("clique cuts conflict graph", "opt --cuts"),
+    ("exact clique partition number cp from both sides", "pin"),
+    ("export to lean", "export --lean"),
+    ("semigroup to lean", "export --lean"),
+    ("which hypotheses are needed", "core"),
+    ("many specs one process", "batch"),
+    ("did we reduce the crux", "status --root"),
+    ("algebraic endpoint sqrt", "NonnegSpec.region"),
+    ("tight constraints and dual prices", "verify --md"),
+    ("forge certificates structural", "certo.tamper.probe_structural"),
+    ("minimal unsatisfiable core", "core"),
+    ("threshold of a constant", "bisect"),
+    ("compose lemmas into a proof", "compose"),
+    ("symmetry reduce orbits", "reduce"),
+    ("las hipótesis son contradictorias", "farkas"),
+    ("is this linear program infeasible and why", "farkas"),
+    ("polynomial nonnegative on a ray to infinity", "nonneg"),
+    ("un polinomio no negativo en un intervalo", "nonneg"),
+]
+
+
+def test_find_answers_what_agents_could_not_find():
+    from certo import discovery
+
+    missed = []
+    for query, want in FIND_GOLDEN:
+        got = [e["id"] for e in discovery.find(query, n=3)]
+        if want not in got:
+            missed.append((query, want, got))
+    assert not missed, missed
+
+
+def test_find_exact_returns_one_contract_and_the_guide_is_derived():
+    """`--exact` returns a whole contract; `dsl_guide` carries every spec and
+    field from the code, so it cannot lag a release again."""
+    from certo import discovery
+
+    c = discovery.contract("opt.round")
+    assert c["id"] == "opt --round" and c["type"] == "flag"
+    spec = discovery.contract("NonnegSpec")
+    assert {f["field"] for f in spec["fields"]} >= {"poly", "box", "region"}
+    cmd = discovery.contract("opt")
+    assert "--round" in {f["flag"] for f in cmd["flags"]}
+    assert "round" in cmd["api_options"]
+    assert discovery.contract("polynomial_nonneg")["type"] == "kind"
+    assert discovery.contract("no_such_thing") is None
+    guide = discovery.guide_appendix()
+    for name in ("NonnegSpec", "AtlasSpec", "PinSpec", "ParametricSpec"):
+        assert name in guide, name
+    # every command in the index, and every spec type
+    from certo import catalogue
+
+    ids = {e["id"] for e in discovery.entries()}
+    assert {c["name"] for c in catalogue.commands()} <= ids
+
+
 def test_a_semigroup_goes_to_lean_in_four_stages():
     """Asked for by a user formalising toric charts, who wrote the free-monoid
     identification by hand: membership, pointedness, irreducibility of each
@@ -14677,6 +14749,183 @@ def test_the_gap_and_mixed_answer_the_packing_with_its_loads():
     assert cert.payload["integral"]["payload"]["achieved"] == "0"
     whole = dataclasses.replace(spec, integer=True)
     assert whole.loads == spec.loads
+
+
+def test_farkas_reads_a_linear_program_and_a_claim_of_false():
+    """Infeasibility asked directly: an LPSpec, or hypotheses claiming False.
+    A contradiction is PROVED with the multipliers (and is not called
+    vacuous: it is what was asked); a feasible system is REFUTED with the
+    point, where it used to be `unknown_solver`."""
+    import z3
+
+    from certo import LPSpec, Spec, api, leanexport
+    from certo.certificate import verify
+    from certo.engines import farkas
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1})
+    m.constraint({"a": 1, "b": 1}, "<=", 1, name="cap")
+    m.constraint({"a": 1}, ">=", 2, name="need")
+    res = farkas.farkas(m, LIM)
+    assert res.verdict is Verdict.PROVED and res.meta["infeasible"]
+    assert not res.meta["vacuous"]
+    assert set(res.meta["multipliers"]) == {"b_lo", "cap", "need"}
+    assert verify(res.certificate).ok
+    d = res.certificate.to_dict()
+    d["digest"] = res.certificate.digest()
+    lean = leanexport.EXPORTERS["farkas"](d)
+    assert ": False := by" in lean and "sorry" not in lean
+    assert leanexport.hollow_count(lean) == 0
+    # the same through the API, which used to refuse an LPSpec for farkas
+    assert api.run("farkas", m, LIM).verdict is Verdict.PROVED
+
+    m.cons.pop()
+    res = farkas.farkas(m, LIM)
+    assert res.verdict is Verdict.REFUTED and res.certificate.kind == "model"
+    assert verify(res.certificate).ok
+
+    # a real point is not an integer one: x + y = 1/2 has none
+    q = LPSpec(sense="max")
+    q.variable("x", 0, None, kind="integer")
+    q.variable("y", 0, None, kind="integer")
+    q.objective({"x": 1})
+    q.constraint({"x": 2, "y": 2}, "==", 1, name="half")
+    assert farkas.farkas(q, LIM).verdict is not Verdict.REFUTED
+
+    x, y = z3.Reals("x y")
+    s = Spec().assume("h", x >= 1).assume("k", y >= x).assume("z", y <= 0)
+    s.claim(False)
+    res = farkas.farkas(s, LIM)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+    # an ordinary claim that fails gets its counterexample
+    s = Spec().assume("h", x >= 1).assume("k", y >= x).claim(y >= 2)
+    res = farkas.farkas(s, LIM)
+    assert res.verdict is Verdict.REFUTED and verify(res.certificate).ok
+    assert z3.is_true(z3.simplify(z3.substitute(
+        y >= 2, (y, z3.RealVal(res.meta["point"]["y"]))))) is False
+
+
+def test_nonneg_on_a_ray_is_the_shift_test_and_verify_redoes_it():
+    """`(0, None)` used to fail reading the box. Now it is the shift test,
+    using the ceilings the box does have, re-derived by `verify`; what the
+    test misses is `unknown`, and a negative point is still REFUTED."""
+    from certo.certificate import Certificate, verify
+    from certo.engines.algebra import nonneg
+    from certo.polynomials import Poly
+    from certo.spec import NonnegSpec
+
+    R = ("x", "y")
+    x, y = Poly.var(R, "x"), Poly.var(R, "y")
+
+    res = nonneg(NonnegSpec(poly=x ** 3 + x * y + 1,
+                            box={"x": (0, None), "y": (0, None)}), LIM)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+    assert "+inf)" in res.detail
+
+    # needs the ceiling of y: 2 - y + x >= 0 only because y <= 2
+    res = nonneg(NonnegSpec(poly=2 - y + x, box={"x": (0, None), "y": (0, 2)}), LIM)
+    assert res.verdict is Verdict.PROVED
+    assert res.certificate.payload["ray"]["multipliers"] == {"box_hi_y": "1"}
+    assert verify(res.certificate).ok
+    d = res.certificate.to_dict()
+    d["payload"]["ray"]["multipliers"]["box_hi_y"] = "0"
+    assert not verify(Certificate.from_dict(d)).ok
+    d["payload"]["ray"] = {"multipliers": {"box_hi_y": "-1"}}
+    assert not verify(Certificate.from_dict(d)).ok
+    d["payload"].pop("ray")
+    assert not verify(Certificate.from_dict(d)).ok
+
+    # and with a region condition
+    res = nonneg(NonnegSpec(poly=x - y, box={"x": (0, None), "y": (0, None)},
+                            region=[("d", x - y)]), LIM)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+
+    res = nonneg(NonnegSpec(poly=x - 3, box={"x": (0, None), "y": (0, 1)}), LIM)
+    assert res.verdict is Verdict.REFUTED and verify(res.certificate).ok
+
+    # (x-1)^2 + 1 is >= 0 but its shifted coefficients from 0 are not:
+    # declared, not refuted -- and from 1 it is shown
+    q = x ** 2 - 2 * x + 2
+    assert nonneg(NonnegSpec(poly=q, box={"x": (0, None), "y": (0, 1)}),
+                  LIM).verdict is Verdict.INCONCLUSIVE
+    assert nonneg(NonnegSpec(poly=q, box={"x": (1, None), "y": (0, 1)}),
+                  LIM).verdict is Verdict.PROVED
+    assert nonneg(NonnegSpec(poly=x, box={"x": (None, 0), "y": (0, 1)}),
+                  LIM).status is Status.OUT_OF_THEORY
+
+
+def test_a_large_opt_says_what_it_is_doing_and_where_to_go():
+    """About 1000 variables ran twelve minutes on a silent terminal. Above
+    PROGRESS_FROM each stage is announced on stderr, the first line naming
+    `columns`, `--explore` and `--no-exact`; below it, and with CERTO_QUIET,
+    nothing is printed."""
+    import contextlib
+    import io
+    import os
+
+    from certo import LPSpec
+    from certo.engines import lp
+
+    def program(n):
+        s = LPSpec(sense="max")
+        for i in range(n):
+            s.variable("x%d" % i, 0, 1)
+        s.objective({"x%d" % i: 1 for i in range(n)})
+        for i in range(0, n - 1, 2):
+            s.constraint({"x%d" % i: 1, "x%d" % (i + 1): 1}, "<=", 1)
+        return s
+
+    def stderr_of(spec):
+        buf = io.StringIO()
+        with contextlib.redirect_stderr(buf):
+            assert lp.opt(spec, LIM).verdict is Verdict.SATISFIABLE
+        return buf.getvalue()
+
+    big = stderr_of(program(lp.PROGRESS_FROM + 2))
+    assert "columns" in big and "--explore" in big and "--no-exact" in big
+    assert len(big.strip().splitlines()) >= 4
+    assert stderr_of(program(20)) == ""
+    os.environ["CERTO_QUIET"] = "1"
+    try:
+        assert stderr_of(program(lp.PROGRESS_FROM + 2)) == ""
+    finally:
+        os.environ.pop("CERTO_QUIET")
+
+
+def test_an_empty_regime_carries_the_combination_that_shows_it():
+    """`empty` was accepted on the search's word and reported partial. It
+    now carries the Farkas combination of its rows, re-derived by verify --
+    a forged one fails, and one from before (none) is still partial."""
+    import copy
+
+    import z3
+
+    from certo import rangebound
+    from certo.certificate import range_certificate, verify
+
+    a = z3.Real("a")
+    out = rangebound.bounds_of(
+        _range_regime(("hi", a <= 1), ("lo", a >= 3)), "a")
+    assert out["empty"] and set(out["farkas"]) == {"hi", "lo"}
+    rep = verify(range_certificate(out))
+    assert rep.ok and rep.degree == "complete", (rep.degree, rep.warnings)
+
+    # strict: a < 1 and a >= 1 is `0 < 0`
+    strict = rangebound.bounds_of(
+        _range_regime(("hi", a < 1), ("lo", a >= 1)), "a")
+    assert strict["empty"] and verify(range_certificate(strict)).ok
+
+    forged = copy.deepcopy(out)
+    forged["farkas"] = {"hi": "1"}
+    assert not verify(range_certificate(forged)).ok
+    forged["farkas"] = {"hi": "1", "lo": "-1"}
+    assert not verify(range_certificate(forged)).ok
+    old = copy.deepcopy(out)
+    old.pop("farkas")
+    rep = verify(range_certificate(old))
+    assert rep.ok and rep.degree == "partial"
 
 
 if __name__ == "__main__":

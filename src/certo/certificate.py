@@ -3180,16 +3180,30 @@ def _verify_polynomial_nonneg(cert, limits) -> VerifyReport:
         poly = Poly.parse(ring, p["poly"])
         if any(len(p["box"][n]) != 2 for n in ring):
             raise ValueError("box")
-        box = {n: (Fraction(p["box"][n][0]), Fraction(p["box"][n][1]))
+        box = {n: (Fraction(p["box"][n][0]),
+                   None if p["box"][n][1] is None else Fraction(p["box"][n][1]))
                for n in ring}
-        if set(p["box"]) != set(ring) or any(hi < lo for lo, hi in box.values()):
+        if set(p["box"]) != set(ring) or any(
+                hi is not None and hi < lo for lo, hi in box.values()):
             raise ValueError("box")
         conditions = [(n, Poly.parse(ring, g))
                       for n, g in sorted((p.get("region") or {}).items())]
         holds = p["holds"]
         if not isinstance(holds, bool):
             raise ValueError("holds")
-        if holds:
+        open_end = any(hi is None for _lo, hi in box.values())
+        if holds and open_end:
+            # The shift test re-derived: no tree can cover an infinite box,
+            # and a tree offered for one is not read.
+            from .parametric import ray_check
+
+            ray = p.get("ray")
+            if not isinstance(ray, dict) or not isinstance(
+                    ray.get("multipliers"), dict):
+                raise ValueError("ray")
+            ok, why = ray_check(poly, box, conditions, ray["multipliers"])
+            checks.append((t("verify.nonneg.ray"), ok, why))
+        elif holds:
             terms = dict(bernstein.region_terms(conditions)) if conditions else None
             ok = bernstein.check(poly, box, p.get("tree"), terms=terms)
             checks.append((t("verify.nonneg.tree"), ok,
@@ -3198,7 +3212,8 @@ def _verify_polynomial_nonneg(cert, limits) -> VerifyReport:
         else:
             pt = {n: Fraction(p["point"][n]) for n in ring}
             in_box = set(p["point"]) == set(ring) and all(
-                box[n][0] <= pt[n] <= box[n][1] for n in ring)
+                box[n][0] <= pt[n] and (box[n][1] is None or pt[n] <= box[n][1])
+                for n in ring)
             checks.append((t("verify.nonneg.in_box"), in_box,
                            ", ".join("{} = {}".format(n, x) for n, x in pt.items())))
             vals = {n: evaluate(g, pt) for n, g in conditions}
@@ -3217,7 +3232,8 @@ def _verify_polynomial_nonneg(cert, limits) -> VerifyReport:
         warnings=warnings, method_key="verify.nonneg.method",
         detail=t("verify.nonneg.detail" if p["holds"] else "verify.nonneg.detail_refuted",
                  poly=str(poly) or "0",
-                 box=", ".join("{} in [{}, {}]".format(n, lo, hi)
+                 box=", ".join("{} in [{}, +inf)".format(n, lo) if hi is None
+                               else "{} in [{}, {}]".format(n, lo, hi)
                                for n, (lo, hi) in box.items()),
                  region="".join("; {} >= 0".format(g) for _n, g in conditions)))
 
@@ -3607,10 +3623,14 @@ def _verify_variable_range(cert, limits) -> VerifyReport:
                              or "-")))
 
     # The interval a reader quotes, and the word `empty`, from the two ends.
-    # EMPTY is a claim -- the regime has no point -- and nothing in the payload
-    # shows it: both ends were accepted on its say-so. Until it carries a
-    # Farkas ray, it is consistent or refused, and reported as not re-derived.
+    # EMPTY is a claim -- the regime has no point. Since 0.24 it carries the
+    # Farkas combination that shows it, re-derived here; a certificate from
+    # before has none, and is consistent or refused, reported as partial.
     from . import rangebound as _rb
+
+    if p.get("empty") and "farkas" in p:
+        ok, reason = _rb.check_empty(p)
+        checks.append((t("verify.varrange.empty_farkas"), ok, reason))
 
     ends_empty = all(p[s].get("bound") is None and p[s].get("why") == _rb.EMPTY
                      for s in ("lower", "upper"))
@@ -3623,7 +3643,8 @@ def _verify_variable_range(cert, limits) -> VerifyReport:
     warnings = [t("verify.varrange.regime_only")]
     if p.get("empty"):
         warnings.append(t("verify.varrange.empty_scope"))
-        warnings.append(_note("partial", "verify.varrange.empty_unproved"))
+        if "farkas" not in p:
+            warnings.append(_note("partial", "verify.varrange.empty_unproved"))
     for side in ("lower", "upper"):
         if p[side].get("strict"):
             warnings.append(t("verify.varrange.strict", side=side))

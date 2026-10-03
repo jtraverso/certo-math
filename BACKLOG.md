@@ -110,11 +110,7 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P2** | `farkas` for infeasibility directly: an `LPSpec`, or a claim `False` -- and on a FEASIBLE system, REFUTED with the feasible point rather than `unknown_solver` | **S** | med | med | user feedback: an LP had to be rewritten in z3 by hand, and an absurd claim invented for "no solution". Partly answered by the `opt` row above |
-| **P2** | `nonneg` on unbounded boxes `(0, None)`: the shift test `parametric` already uses on a ray (coefficients after `p = p0 + u`), declared | **S-M** | med | med | user feedback: a polynomial with every coefficient positive on the orthant could not be stated for all u, w >= 0, only on a box |
-| **P2** | `opt` at scale: progress by default above ~500 variables, and a pointer to `columns` / `--explore` before the exact path | **S** | med | low | user feedback: 586 variables in 3.7 s, about 1000 not done in 12 minutes, with nothing printed. The cliff itself is the P2 B&B/exact-reconstruction rows below |
 | **P3** | `divisibility`: the incidence matrix pieces x edges built for you, and "Q yes / Z no" with the obstruction -- a thin entry point over `solve` | **S-M** | med | low | user feedback: the Smith-normal-form step is what divisibility arguments need, and `solve` already does it once the matrix is written |
-| **P2** | `variable_range` on an EMPTY regime: carry the Farkas combination of its rows that shows it, so `empty` is re-derived rather than reported as not | **S** | high | med | found by the 0.23 battery: an empty regime was accepted on its word; it is now consistent-or-refused and `partial` |
 | **P3** | `farkas_ray` tied to the program it is about when it travels alone (a spec digest, or the LP's own rows by name) | **S** | med | low | a standalone ray is about the system in its payload, which is true and checked; nothing says which user program that system is |
 | **P2** | Piecewise programs in `atlas`: a DECLARED piecewise definition (region k -> program k), each piece checked against the program declared for its region, the statement about that declared function | **M** | med | med | user feedback (a piecewise phi): one program for the whole domain forced a reformulation as a max of lines, which is not always possible. Declared, not inferred from the pieces -- otherwise the atlas would define the function it claims to bound |
 | **P2** | A declarative spec notation that is not code: typed variables, named hypotheses, infix formulas, parsed without `eval`; certo DERIVES the structure (the induction step from P(k), the family of a bisect), echoes a canonical reading back, and hashes it. SMT-LIB accepted as an alternative | **M-L** | med | high | specs other than the 10 JSON types are Python that certo executes. This makes third-party specs safe for `prove`, `induct`, `parametric`, `bisect`, gives a model less to get wrong than Python + z3, and removes by construction the class of CM-08 (a step that is not the one the chain needs). First stage `Spec` and `induct`, then `parametric` and `bisect`; `sweep` predicates stay in Python. Natural language stays OUTSIDE certo: a model writes the notation, certo parses it, reads it back and lints it, a person confirms |
@@ -123,7 +119,6 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | SageMath as an optional PROPOSER, through `sage -python`: automorphism groups (for orbital branching), large Groebner bases, exact real-root isolation, Normaliz/PPL | **M-L** | **low** | med | gigabytes, not pip-installable, no native Windows -- so never a dependency, an optional backend like `geng` or `cadical`. Every answer checked by certo: generators are automorphisms, cofactors multiply out, Sturm sequences, `check_hilbert`. CAD proposes only; it produces no certificate |
 | **P2** | Branch and bound at the size users bring: an external incumbent (a partition already verified by `cover`), a progress callback in the Python API, orbital branching with the group `reduce` certifies | **M-L** | **low** | med | asked for again: a symmetric instance stalled at 18 497 nodes in 600 s, and symmetry is the bottleneck (the clique-cut row above closes that one; orbital branching is the general answer). A 100-edge template with ~400 binary columns ran over an hour where a float MILP closed it in a second. Joins the 1048-column row below |
 | **P2** | `--deadline` that ends certo's CHILDREN too (a Windows Job Object, a process group elsewhere) | **M** | med | med | `python -m certo` fixes the launcher half of a reported hang; a `geng`, `cbc` or `lake` child can still outlive a deadline |
-| **P2** | `certo commands --json` with every subcommand's arguments, in one call | **S** | **high** | low | `certo <cmd> --help` six times took over 120 s on a loaded Windows machine -- the interpreter start, each time |
 | **P2** | `exists` with clique candidates generated, not only `triangles_of` | **M** | med | med | a clique partition needs every clique as a candidate; `columns` already enumerates them |
 | **P3** | `verify --reenumerate`: rerun the enumeration with the stored filters and compare the counts | **M** | med | low | `verify` says honestly that it does not check completeness; for graph families it could |
 | **P3** | Extra allowed roots for the MCP workspace | **S-M** | med | med | specs living in another tree had to be copied in; the restriction is a security boundary, so the list must be explicit |
@@ -148,7 +143,6 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | Rational SOS certificates on a lower-rank sub-face (rank reduction) | **L** | **low** | med | research-grade. Facial reduction was tried and rescued 0 of 5 -- see below |
 | **P3** | Split `cli.py` and `spec.py` the way `certificate.py` was split | **M** | high | med | **demoted from P1**, see below |
 | **P3** | Content-addressed certificate cache for `compose` / `status` | **M** | med | med | nobody has measured these as slow; it also adds a staleness surface |
-| **P3** | `commands` / `what` / `dsl_guide` as a measured coverage surface | **S** | med | low | three asks this cycle were reachability, not capability |
 | **P3** | `certo report`, phase 2: `--redact` that checks the bug survives, and a minimiser that shrinks the spec | **M** | med | low | phase 1 writes the folder and decides whose bug it is |
 | **P3** | `certo report --submit`, opt-in | **S** | med | low | phase 1 sends nothing, deliberately |
 | **P3** | PyNormaliz as a proposer for `semigroup --hilbert` | **S** | med | low | Linux-only, no Windows wheel; Normaliz computes, `check_hilbert` already decides. Optional backend like `geng` |
@@ -355,6 +349,15 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Is it in certo, and where: every command, flag, spec field, kind and API function, searched | `certo find`, MCP `find`, **0.24.0** |
+| Every subcommand's arguments in one call | `certo find --exact CMD --json`, **0.24.0** |
+| `commands` / `what` / `dsl_guide` as a measured coverage surface | golden queries in the suite; `dsl_guide` derived from the code, **0.24.0** |
+| Four MCP tools instead of sixty-one | `certo-mcp --compact` (`find`, `run`, `verify`, `dsl_guide`), **0.24.0** |
+| Infeasibility asked directly, and the point when there is none | `farkas` on an `LPSpec` or a claim `False`, **0.24.0** |
+| A polynomial >= 0 on a ray | `nonneg` with `(lo, None)`, the shift test, **0.24.0** |
+| `opt` says what it is doing above 500 variables | stderr, `CERTO_QUIET`, **0.24.0** |
+| An EMPTY regime re-derived | `variable_range` carries its Farkas combination, **0.24.0** |
+| A release checked as CI checks it, and every Lean exporter compiled | `tests/prerelease.py --lean`, `tests/run_lean.py`, **0.24.0** |
 | A report rooted at one target | `status --root`, `--since`, **0.23.0** |
 | Semigroups to Lean, four stages | `export --lean`, **0.23.0** |
 | Self-check of solver-backed certificates | `self_check="all"`, **0.23.0** |
@@ -1045,7 +1048,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.23.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.24.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1053,7 +1056,8 @@ field, or a command that emits no certificate. Among the optional fields added u
 `declared` and `relative`, in 0.18.0 `dual_selection`, `map` and a
 lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
-`bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`.
+`bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
+`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

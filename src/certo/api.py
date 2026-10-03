@@ -90,6 +90,7 @@ REQUIRED = {"range": ("var",)}
 NOT_FROM_A_SPEC = frozenset({
     "verify", "status", "doctor", "ask", "commands", "repro", "export",
     "ledger", "lint", "enum", "report", "pack", "mcp", "promote", "batch",
+    "find",
 })
 
 
@@ -163,7 +164,8 @@ def run(command: str, spec, limits=None, *, spec_path=None,
     spec = routing.prepared(spec)
     wants = routing.SPEC_OF.get(command)
     got = type(spec).__name__
-    if wants and wants != "*" and wants != got:
+    if (wants and wants != "*" and wants != got
+            and got not in routing.ALSO_TAKES.get(command, ())):
         raise TypeError("{} wants a {}, got a {}".format(command, wants, got))
 
     fn = _entry(command, spec)

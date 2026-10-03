@@ -1,4 +1,4 @@
-# The fifty-seven commands
+# The fifty-eight commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -84,15 +84,16 @@ $ certo core examples/core_matrix.py
 
 ### `certo farkas`
 
-**Question** — Is this inequality true, with the multipliers shown?
-**Spec** — `Spec`
+**Question** — Is this inequality true, with the multipliers shown? Or: are
+these hypotheses -- this linear program -- contradictory?
+**Spec** — `Spec`, or an `LPSpec` / `PackingSpec`
 **Answers** — the non-negative rational multipliers that combine the
 hypotheses with the negated goal until everything cancels, plus the
 `linarith` / `nlinarith` call to paste
 **Certificate** — `farkas`, **solver-free**: checking it is adding fractions
 **Not established** — anything, when it finds nothing. `farkas` is incomplete
 on purpose in both modes, so "no certificate" means *this search did not close
-it*, never *false*.
+it*, never *false* -- unless it also finds a point, below.
 
 ```
 $ certo farkas examples/farkas_linear.py
@@ -115,6 +116,16 @@ reader should know which rows were not hypotheses.
 
 > **`prove` to know. `farkas` to certify.** Z3's `nlsat` is complete for real
 > arithmetic; this is not, and it hands you the reason instead.
+
+**Infeasibility, asked directly.** A claim of `False` (or no claim), or an
+`LPSpec` -- read as its bounds and constraints, each a hypothesis named after
+itself -- asks whether the hypotheses contradict each other. PROVED carries
+the multipliers, is not called vacuous (that is the question), and goes to
+Lean as `example ... : False := by linarith only [...]`. When no combination
+exists and a point satisfies the hypotheses (and the negated claim), the
+answer is REFUTED with that point, a `model` certificate, where it used to be
+`unknown_solver`. An integer program is read over the reals: a contradiction
+there is one for its integer points too, and the point offered is integral.
 
 ### `certo induct`
 
@@ -499,6 +510,10 @@ reconstruction rejects itself.
 An INFEASIBLE program comes back with its exact Farkas ray -- `y >= 0`,
 `A^T y >= 0`, `b.y < 0`, kind `farkas_ray` -- and `mixed` keeps it when the
 relaxation is already infeasible.
+
+Above 500 variables `opt` says what it is doing, on stderr: the size, the
+float solve, the exact reconstruction -- and, first, where to go if it
+stalls (`columns`, `--explore`, `--no-exact`). `CERTO_QUIET=1` silences it.
 
 `--round`, with an integer objective (integer coefficients on integer
 variables), also certifies `integer optimum <= floor(LP)` (`>= ceil` for a
@@ -1364,6 +1379,15 @@ box -- `x^2` on `[-1, 0.99]` -- keeps a coefficient negative on every cell
 around it, so the box is cut at the rational roots of the polynomial and its
 derivative, and the cut point is recorded and rechecked.
 
+An open end, `box={"x": (0, None)}`, is a ray, and no Bernstein tree covers
+one. There the test is the shift `v -> lo + u`: every coefficient >= 0 after
+subtracting non-negative multiples of the region's conditions and of the
+ceilings the box does have (`hi - v >= 0`), re-derived by `verify` by
+arithmetic. It is sufficient, not necessary -- `(x-1)^2 + 1` on `[0, +inf)`
+keeps a negative coefficient -- so what it misses is INCONCLUSIVE, and says
+so; from `x >= 1` the same polynomial is shown. `(None, hi)` is refused:
+substitute `v -> -v`.
+
 ### `certo pin`
 
 **Question** — A cover gives `cp(G) <= X` and an LP gives `cp(G) >= X`: can the
@@ -2052,6 +2076,38 @@ answer means.
 
 One entry point that loads a spec, reads its type, and runs the command that
 type belongs to. `certo what` is the same command.
+
+### `certo find`
+
+**Question** — Is it in certo, and where?
+**Spec** — none: what you need, in your words, English or Spanish
+**Answers** — the commands, flags, spec fields, certificate kinds and Python
+API functions that match, best first, each with how to call it.
+`--exact NAME` returns one contract: a command with its flags and API
+options, a spec with its fields and defaults, a flag, a field or a kind
+**Certificate** — none
+**Not established** — that what it lists can answer your instance. The
+search is lexical, over text derived from the code; a hit is a place to read,
+not a route.
+
+```
+$ certo find "polynomial nonnegative on an interval" -n 2
+  nonneg                         command    is this polynomial >= 0 on a box -- or on the part a region cuts?
+                                            certo nonneg SPEC
+  sos                            command    Is this polynomial non-negative everywhere?
+                                            certo sos SPEC
+$ certo find --exact opt.round
+opt --round  (flag)
+  with an integer objective (integer coefficients on integer variables): also certify ...
+  use          certo opt SPEC --round
+```
+
+Most of certo is flags and fields, not commands, and agents kept rebuilding
+what a flag already did: `opt --round` by hand, a rational endpoint where
+`NonnegSpec.region` writes the algebraic one exactly. The index is built from
+the argument parser, the routing table, the spec dataclasses (their field
+comments included), the verifiers and the public API, so it cannot drift from
+what ships. `--json` gives the rows; over MCP it is the `find` tool.
 
 ### `certo commands`
 

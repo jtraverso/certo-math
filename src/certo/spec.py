@@ -1437,12 +1437,21 @@ class NonnegSpec:
 
     A region is how an ALGEBRAIC endpoint is written exactly: `[0, sqrt(3/40)]`
     is the box `[0, 1/2]` with `3/40 - x^2 >= 0`, not a rational cut nearby.
+
+    An open end, `(0, None)`, is a ray: no Bernstein tree covers it, and the
+    test is the shift `v -> lo + u` with every coefficient >= 0 after the
+    region's multiples -- sufficient, not necessary, so what it misses is
+    `unknown`.
     """
 
-    poly: object
+    poly: object                     # a Poly, a z3 term, or a number
+    # name -> (lo, hi), exact rationals; hi None is a ray [lo, +inf),
+    # certified by the shift test rather than by Bernstein.
     box: dict
+    # Conditions g >= 0 cutting the box: an algebraic endpoint written
+    # exactly, [0, sqrt(3/40)] as [0, 1/2] with 3/40 - x^2 >= 0.
     region: list = field(default_factory=list)
-    subdivide: int = 12
+    subdivide: int = 12              # how many times a box may be halved
     title: str = ""
 
 
