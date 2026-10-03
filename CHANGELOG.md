@@ -6,6 +6,66 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-03
+
+**Bridges: from a certificate to the proof that uses it.** No new commands
+(58) or kinds (55); the schema stays 5, with one optional field (`repair` on
+`exact_cover`). From four reports on 0.24.
+
+### New
+
+- **`export --lean` for `ideal`**: one `example` closed by
+  `linear_combination` with the certificate's cofactors -- Lean searches
+  nothing, `ring1` checks the identity. The ring is in the statement: integer
+  data in every commutative ring, a denominator in every field of
+  characteristic zero, an inconsistent system as `False`. MEASURED before it
+  shipped: 67 emissions (a user's 16 certificates, the engine's, odd variable
+  names, both rings, inconsistent systems, up to the size limit) compiled
+  against Mathlib v4.28 with no error and no warning. Past 120 terms `ring1`
+  ran out of Lean's budget in 24 of 24 cases, and five times the budget did
+  not rescue them, so past 100 terms the file is refused -- as is an identity
+  whose claim expanded to `0 = 0`, which compiles and says nothing. The text
+  is read back against the certificate (hypotheses, claim, ring, cofactors),
+  and CI compiles three cases with the other exporters.
+- **A change of a received partition, certified as a change**:
+  `CoverSpec(repair={"before", "withdraw", "insert", "frozen", "new",
+  "balance"})`. The withdrawn owners exist and go once, no frozen owner is
+  touched, the inserted pieces cover exactly what was freed, the balance is
+  the declared one -- a valid final cover is not enough. On K4, `abc` frozen
+  refuses `abc, ad, bd, cd -> abd, ac, bc, cd`; a piece taking an edge of an
+  owner not withdrawn is refused even though the edge is in the graph.
+  `verify` re-derives the change.
+- **`compose` reads what a stored certificate states**: a
+  `lemma(..., certificate=...)` was always a bridge; a `polynomial_nonneg`, a
+  `farkas` or an `unsat_core` now LINKS when the lemma's negation entails what
+  it refutes -- box (no ceiling on a ray), region, `poly >= 0`. A certificate
+  on `[0, 1]` does not link to a lemma about `x >= 0`, or to another
+  polynomial; `lemma(..., proves=NonnegSpec(...))` discharges it in place.
+- **The exported semigroup's DATA is read back** and compared with the
+  certificate: generators in order (and the order named), dimension,
+  grading, each membership, each separator, the integer inverse. A user's
+  real export matched on all nine.
+- **The scope beside the success**: `scope` on the result line, in the JSON
+  and over MCP -- the box or the parameter floors, the region, a restricted
+  clique family, a finite case, a relaxation bound, a cover not shown
+  minimum, the bridges and cited results a proof rests on.
+- **A closed form proposed for a number** (`certo.closedform`, PSLQ through
+  `mpmath.findpoly`): an explored value `10.66666656` comes back with `32/3`,
+  a `bisect` threshold with `sqrt(2)`, always labelled a CONJECTURE; only a
+  small rational or a quadratic irrational, and only when the match is
+  significant for its size (`(3 + 5 sqrt 7)/4` had been `32563/8026` to nine
+  digits). `promote` says whether the exact value was it.
+
+### Changed
+
+- **The MCP tools take what the commands take**: `reduce parametric`,
+  `shrink` on a `DomainSpec` with `item`, `objective` and `from_cert`,
+  `sweep witnesses` (one certificate for the orbits and their minimal
+  witnesses), `status manifest` / `expect`. The parity test declares what
+  remains CLI-only and why.
+- **`lint` checks `PeakSpec`**: the variable and its degree, the declared
+  parameters against the ring, an integral argmax, a concave objective.
+
 ## [0.24.1] — 2026-10-03
 
 **Corrections from four reports on 0.24.0.** No new commands (58) or kinds

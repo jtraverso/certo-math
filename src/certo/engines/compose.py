@@ -56,8 +56,24 @@ def _statement_of(sub_spec):
     return z3.Implies(z3.And(*hyps) if len(hyps) > 1 else hyps[0], sub_spec.goal)
 
 
+def _statement_of_cert(sub):
+    """What a certificate states, read from its obligations: they cannot hold
+    together, so the last one negated follows from the rest. For a
+    `polynomial_nonneg`: the box and the region imply poly >= 0."""
+    obl = obligations_of(sub)
+    if not obl:
+        return None
+    *given, last = obl
+    if not given:
+        return z3.Not(last)
+    return z3.Implies(z3.And(*given) if len(given) > 1 else given[0], z3.Not(last))
+
+
 def _discharge(lem, limits):
     """Run the lemma's own engine. Returns (Result, engine label)."""
+    if lem.via == "nonneg" or type(lem.proves).__name__ == "NonnegSpec":
+        from . import algebra
+        return algebra.nonneg(lem.proves, limits), "nonneg"
     if lem.via == "prove":
         from . import smt
         return smt.prove(lem.proves, limits), "prove"
@@ -100,8 +116,10 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
                 return _fail(t("engine.compose.lemma_failed", name=lem.name,
                                status=res.status.value, detail=res.detail), t0,
                              meta={"failed_lemma": lem.name})
-            phi = lem.states if lem.states is not None else _statement_of(lem.proves)
             sub = res.certificate.to_dict()
+            phi = (lem.states if lem.states is not None
+                   else _statement_of_cert(sub) if engine == "nonneg"
+                   else _statement_of(lem.proves))
             # Refuse to emit what we could not link ourselves. A certificate
             # whose link fails verification should never have been written.
             obl = obligations_of(sub)
@@ -126,6 +144,14 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
                              meta={"failed_lemma": lem.name})
             phi, engine = lem.states, sub.get("kind", "?")
             derived, bridge = False, lem.bridge
+            # A stored certificate whose content certo can read as formulas is
+            # LINKED, not taken on its word: if the lemma's negation entails
+            # what the certificate refutes, the lemma is derived -- and a
+            # `polynomial_nonneg` on [0, 1] does not link to a lemma about
+            # x >= 0. What does not link stays a bridge, as it was.
+            obl = obligations_of(sub)
+            if obl and entails(z3.Not(phi), obl, lim):
+                derived, bridge = True, ""
 
         statements.append((lem.name, phi))
         entry = {"name": lem.name, "statement_smt2": z3util.smt2(phi),

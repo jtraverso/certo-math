@@ -123,6 +123,9 @@ IMPORTS = {
     # table rather than a guess.
     # `ᵥ*`, `*ᵥ` and `⬝ᵥ` are scoped to `Matrix` (hence `open Matrix`), and
     # the lemmas -- sums of non-negatives, `linarith` -- are all over Mathlib.
+    # `linear_combination` and the field/char-zero classes the binder names.
+    "ideal": ["Mathlib.Tactic.LinearCombination", "Mathlib.Algebra.CharZero.Defs",
+              "Mathlib.Algebra.Field.Defs"],
     "semigroup": ["Mathlib.LinearAlgebra.Matrix.Notation",
                   "Mathlib.Data.Matrix.Mul", "Mathlib.Tactic"],
     "smith": ["Mathlib.LinearAlgebra.Matrix.Notation",
@@ -860,6 +863,146 @@ _FREE = """theorem certo_free (p : Fin {k} → ℤ) :
     rw [vecMul_vecMul, certo_unimodular.2, vecMul_one]"""
 
 
+# ---------------------------------------------------------------------------
+# ideal -> a linear_combination
+# ---------------------------------------------------------------------------
+
+#: The largest identity sent to Lean, in terms: the claim, the equations and
+#: the cofactors together. MEASURED against Mathlib v4.28 at the default
+#: `maxHeartbeats`: up to 121 terms compiled, from 128 every one ran out of
+#: heartbeats in `ring1` (24 of 24, the only failure there was), and degree
+#: weighs as much as length. Past this the file is refused rather than
+#: emitted with a budget nobody measured.
+IDEAL_LEAN_MAX_TERMS = 100
+
+#: Lean's reserved words a certo variable may be spelled as. Such a name is
+#: escaped `«at»` rather than renamed, so the file still says the user's name.
+LEAN_KEYWORDS = frozenset("""
+at by do else end example fun have if in instance let match namespace open
+show then theorem variable where with from def structure class section
+universe import export calc suffices obtain mut return for unless try catch
+finally this Type Prop Sort deriving abbrev axiom lemma private protected
+noncomputable partial unsafe macro syntax notation infix prefix postfix
+attribute local scoped set_option termination_by decreasing_by nomatch nofun
+""".split())
+
+
+def lean_name(name: str) -> str:
+    """A Lean identifier for a variable: as written when it is one, escaped
+    in guillemets otherwise -- never silently renamed."""
+    name = str(name)
+    plain = (name.isidentifier() and name.isascii() and not name.startswith("_")
+             and name not in LEAN_KEYWORDS)
+    if plain:
+        return name
+    if not name or "«" in name or "»" in name:
+        raise NotExportable(t("lean.ideal.bad_name", name=name))
+    return "«{}»".format(name)
+
+
+def _ideal_rat(c: Fraction, ring: str) -> str:
+    if c.denominator == 1:
+        return "({} : {})".format(c.numerator, ring) if c < 0 else str(c.numerator)
+    return "({}/{} : {})".format(c.numerator, c.denominator, ring)
+
+
+def _ideal_poly(poly: dict, names, ring: str) -> str:
+    """`{exponents: coefficient}` as Lean, highest terms first."""
+    if not poly:
+        return "(0 : {})".format(ring)
+    parts = []
+    for e, c in sorted(poly.items(), reverse=True):
+        mono = " * ".join(n if k == 1 else "{}^{}".format(n, k)
+                          for n, k in zip(names, e) if k)
+        if not mono:
+            parts.append(_ideal_rat(c, ring))
+        elif c == 1:
+            parts.append(mono)
+        else:
+            parts.append("{} * {}".format(_ideal_rat(c, ring), mono))
+    return " + ".join(parts)
+
+
+def _ideal_parse(nvars, data) -> dict:
+    out = {}
+    for k, v in (data or {}).items():
+        e = tuple(int(x) for x in k.split())
+        if len(e) != nvars:
+            raise NotExportable(t("lean.ideal.malformed"))
+        c = Fraction(v)
+        if c:
+            out[e] = out.get(e, Fraction(0)) + c
+    return {e: c for e, c in out.items() if c}
+
+
+def ideal_to_lean(data: dict, source="") -> str:
+    """An `ideal` certificate as ONE `example` closed by `linear_combination`.
+
+    The certificate carries the cofactors, so Lean searches nothing: the
+    tactic subtracts the combination and `ring1` -- a decision procedure for
+    commutative-ring identities -- checks that what is left is zero, which
+    certo already checked in exact rationals. The statement is the most
+    general one the data supports, and the ring is IN it: integer
+    coefficients hold in every commutative ring; a denominator needs a field
+    of characteristic zero, and the binder says so rather than a reader
+    assuming the identity travels.
+    """
+    p = data["payload"]
+    names_in = list(p["variables"])
+    n = len(names_in)
+    gs = [_ideal_parse(n, g) for g in p["equations"]]
+    hs = [_ideal_parse(n, h) for h in p["cofactors"]]
+    if len(gs) != len(hs):
+        raise NotExportable(t("lean.ideal.malformed"))
+    claim = None if p.get("inconsistent") else _ideal_parse(n, p.get("claim"))
+    if claim is not None and not claim:
+        # An identity whose claim was expanded to 0 states `0 = 0`: it
+        # compiles and says nothing. The same refusal as a hollow `True`.
+        raise NotExportable(t("lean.ideal.zero_claim"))
+    size = sum(len(q) for q in gs + hs + ([claim] if claim else []))
+    if size > IDEAL_LEAN_MAX_TERMS:
+        raise NotExportable(t("lean.ideal.too_large", n=size,
+                              limit=IDEAL_LEAN_MAX_TERMS))
+    coeffs = [c for q in gs + hs + ([claim] if claim else []) for c in q.values()]
+    integral = all(c.denominator == 1 for c in coeffs)
+    ring = "R" if integral else "K"
+    binder = ("{R : Type*} [CommRing R]" if integral
+              else "{K : Type*} [Field K] [CharZero K]")
+    if integral and claim is None:
+        binder += " [Nontrivial R]"
+    names = [lean_name(v) for v in names_in]
+    if len(set(names)) != len(names):
+        raise NotExportable(t("lean.ideal.bad_name", name=", ".join(names_in)))
+    used = {i for q in gs + ([claim] if claim else []) for e in q
+            for i, k in enumerate(e) if k}
+    vs = [names[i] for i in range(n) if i in used]
+
+    lines = [_header("ideal", data.get("digest", "?"), source), ""]
+    lines.append("set_option linter.unusedVariables false in")
+    lines.append("/-- {} -/".format(t(
+        "lean.ideal.doc_inconsistent" if claim is None else "lean.ideal.doc_member",
+        ring=t("lean.ideal.ring_any" if integral else "lean.ideal.ring_field"))))
+    lines.append("example {}{}".format(
+        binder, " ({} : {})".format(" ".join(vs), ring) if vs else ""))
+    hyp = []
+    for i, g in enumerate(gs):
+        hyp.append("h{}".format(i))
+        lines.append("    (h{} : {} = 0)".format(i, _ideal_poly(g, names, ring)))
+    combo = " + ".join("({}) * {}".format(_ideal_poly(h, names, ring), name)
+                       for h, name in zip(hs, hyp) if h)
+    if claim is not None:
+        lines.append("    : {} = 0 := by".format(_ideal_poly(claim, names, ring)))
+        lines.append("  linear_combination" + (" " + combo if combo else ""))
+    else:
+        lines.append("    : False := by")
+        lines.append("  have certo_one : (1 : {}) = 0 := by".format(ring))
+        lines.append("    linear_combination" + (" " + combo if combo else ""))
+        lines.append("  exact one_ne_zero certo_one")
+    lines.append("")
+    lines.append(FOOTER)
+    return _trim_header("\n".join(lines))
+
+
 EXPORTERS = {
     "farkas": farkas_to_lean,
     # Registered only after it elaborated against a real Mathlib, which took
@@ -877,6 +1020,12 @@ EXPORTERS = {
     # stages, on a unimodular cone and on a semigroup where one generator lies
     # in the cone of the others and stage 3 leaves it out.
     "affine_semigroup": semigroup_to_lean,
+    # Registered after 67 emissions compiled against Mathlib v4.28 with no
+    # error and no warning -- a user's 16 certificates, the engine's, odd
+    # variable names, integer and rational identities, inconsistent systems,
+    # and identities up to the size limit -- and the five it refused were the
+    # ones it should: an identity claiming `0 = 0` and four past 100 terms.
+    "ideal": ideal_to_lean,
 }
 
 

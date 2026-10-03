@@ -110,15 +110,8 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P2** | `export --lean` for `ideal`: the cofactor identity as `linear_combination`, with the ring and any denominators recorded -- an identity over QQ is not silently one over every ring | **M** | med | med | user feedback (an algebraic-geometry formalisation): the cofactors are there and the export is refused; the semigroup exporter compiled unchanged against their Mathlib |
-| **P2** | Structural correspondence for an exported semigroup: generators, coordinate order, grading, separators and the integer inverse compared with the definition the project uses | **M** | med | med | user feedback: compiling the exported data does not show it is the paper's cone, and the exporter said it had no linear rows to compare |
 | **P2** | `bind` reading the ELABORATED type of the Lean declaration (and its axioms), hashed; `user_asserted` and `kernel_checked` correspondence kept apart | **M-L** | med | med | user feedback: `provides` is a transcription the user writes, and `bind` does not read the declaration |
-| **P2** | `cover` relative to a partition received: the owners withdrawn, the pieces inserted, frozen owners kept, the same resource covered, the balance declared | **M** | high | med | user feedback, with acceptance criteria: a valid final cover that replaced a frozen owner must be refused; today an own auditor does it |
-| **P2** | `compose` reading a `polynomial_nonneg` certificate as an obligation: variables, box, rays and region, matched against the use -- `[0,1]` must not be reused for `x >= 0` | **M** | med | med | user feedback: `obligations_of` translates `unsat_core` and `farkas` only; the link is by hand |
 | **P2** | `ideal`: linear definitions eliminated first, traceably (each substitution recorded and checked), and Groebner progress -- pairs, sizes, why it stopped | **M** | med | low | user feedback: identities with many implicit relations ran out of a 60 s budget until the definitions were substituted by hand |
-| **P2** | The scope beside the success: a restricted column family, a box, an open coverage obligation -- on the result line, not only in `partial`, `assumed` and the warnings | **S-M** | med | low | user feedback: the information exists and is not where the success is read |
-| **P3** | The remaining MCP gaps the parity test declares CLI-only: `reduce --parametric`, `shrink --from-cert/--item/--objective`, `sweep --witnesses/--worst`, `status --verify/--expect` | **S-M** | high | low | 0.24.1 closed `opt`, `mixed` and `cover`; `run` reaches the engines' options meanwhile |
-| **P3** | `lint` rules for the kinds that still have none (`PeakSpec` first) | **S** | high | low | `checked: false` says so now; a rule set is the rest |
 | **P3** | An isomorphism certificate for localised quotients: the ideal each way, both compositions, the domains, denominators kept before cancelling | **M-L** | **low** | med | user feedback (same formalisation); a typed cocycle certificate and descent obligations in `status` follow it |
 | **P3** | Bernstein data with a small Lean checker against a pinned Mathlib, before any automatic export of `polynomial_nonneg` | **L** | **low** | med | user feedback: no `sorry`, no heuristic tactic -- the kernel checks the identities and signs of the data |
 | **P3** | A weighted combinatorial transport as a parametric certificate, with the bridge from single classes to the reduced model | **L** | **low** | med | user feedback, still loosely specified: a replacement rule preserving every edge demand, legality, non-negativity and cost for any number of classes |
@@ -127,7 +120,6 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P2** | Piecewise programs in `atlas`: a DECLARED piecewise definition (region k -> program k), each piece checked against the program declared for its region, the statement about that declared function | **M** | med | med | user feedback (a piecewise phi): one program for the whole domain forced a reformulation as a max of lines, which is not always possible. Declared, not inferred from the pieces -- otherwise the atlas would define the function it claims to bound |
 | **P2** | A declarative spec notation that is not code: typed variables, named hypotheses, infix formulas, parsed without `eval`; certo DERIVES the structure (the induction step from P(k), the family of a bisect), echoes a canonical reading back, and hashes it. SMT-LIB accepted as an alternative | **M-L** | med | high | specs other than the 10 JSON types are Python that certo executes. This makes third-party specs safe for `prove`, `induct`, `parametric`, `bisect`, gives a model less to get wrong than Python + z3, and removes by construction the class of CM-08 (a step that is not the one the chain needs). First stage `Spec` and `induct`, then `parametric` and `bisect`; `sweep` predicates stay in Python. Natural language stays OUTSIDE certo: a model writes the notation, certo parses it, reads it back and lints it, a person confirms |
 | **P2** | python-flint for the polynomial arithmetic behind the checks (`fmpq_mpoly`) | **M** | med | med | exact and much faster than `Poly` over `Fraction`, which is where a large parametric verification spends its time (19 s before the `shift` fix, 2.4 s after). Nothing changes in what is trusted: the same exact arithmetic, a faster implementation, `Poly` kept as the fallback when flint is absent |
-| **P2** | mpmath `identify` / `findpoly` (PSLQ) in `--explore`: guess a closed form for an explored constant, then certify THAT | **S-M** | med | low | exploration returns 0.6666667 or 1.618034; PSLQ proposes 2/3 or (1+sqrt5)/2; certo certifies the conjectured exact value. The library proposes, certo checks -- `explore -> promote` with the constant named |
 | **P3** | SageMath as an optional PROPOSER, through `sage -python`: automorphism groups (for orbital branching), large Groebner bases, exact real-root isolation, Normaliz/PPL | **M-L** | **low** | med | gigabytes, not pip-installable, no native Windows -- so never a dependency, an optional backend like `geng` or `cadical`. Every answer checked by certo: generators are automorphisms, cofactors multiply out, Sturm sequences, `check_hilbert`. CAD proposes only; it produces no certificate |
 | **P2** | Branch and bound at the size users bring: an external incumbent (a partition already verified by `cover`), a progress callback in the Python API, orbital branching with the group `reduce` certifies | **M-L** | **low** | med | asked for again: a symmetric instance stalled at 18 497 nodes in 600 s, and symmetry is the bottleneck (the clique-cut row above closes that one; orbital branching is the general answer). A 100-edge template with ~400 binary columns ran over an hour where a float MILP closed it in a second. Joins the 1048-column row below |
 | **P2** | `--deadline` that ends certo's CHILDREN too (a Windows Job Object, a process group elsewhere) | **M** | med | med | `python -m certo` fixes the launcher half of a reported hang; a `geng`, `cbc` or `lake` child can still outlive a deadline |
@@ -361,6 +353,14 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| An `ideal` certificate to Lean as a `linear_combination`, the ring in the statement, measured and size-limited | `export --lean`, **0.25.0** |
+| A change of a received partition, certified as a change | `CoverSpec(repair=...)`, **0.25.0** |
+| `compose` reading what a `polynomial_nonneg` (and a stored `farkas` / `unsat_core`) states | linked lemmas, **0.25.0** |
+| An exported semigroup's data read back and compared with its certificate | `export --lean`, **0.25.0** |
+| The scope beside the success | `scope` on the result line, in the JSON and over MCP, **0.25.0** |
+| The MCP tools take what the commands take: `reduce`, `shrink`, `sweep`, `status` | **0.25.0** |
+| `lint` rules for `PeakSpec` | **0.25.0** |
+| A closed form proposed for an explored value or a threshold | `closedform` (PSLQ) in `--explore`, `promote`, `bisect`, **0.25.0** |
 | Is it in certo, and where: every command, flag, spec field, kind and API function, searched | `certo find`, MCP `find`, **0.24.0** |
 | Every subcommand's arguments in one call | `certo find --exact CMD --json`, **0.24.0** |
 | `commands` / `what` / `dsl_guide` as a measured coverage surface | golden queries in the suite; `dsl_guide` derived from the code, **0.24.0** |
@@ -1060,7 +1060,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.24.1**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.25.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1069,7 +1069,7 @@ field, or a command that emits no certificate. Among the optional fields added u
 lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
-`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`).
+`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

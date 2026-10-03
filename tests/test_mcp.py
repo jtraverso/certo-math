@@ -754,11 +754,16 @@ CLI_ONLY = {
     "mcp": {"all", "yes"},                     # stops processes
     "report": {"certificate", "coverage", "stderr_file"},
     "repro": {"no_ledger"},
-    "reduce": {"parametric"},
-    "shrink": {"from_cert", "item", "no_geng", "no_keep_filters", "objective"},
-    "status": {"expect", "manifest", "verify"},
-    "sweep": {"cert_all", "cert_none", "no_geng", "witnesses", "worst"},
+    "shrink": {"no_geng"}, "sweep": {"no_geng", "worst"},  # binary, printing
     "verify": {"jobs", "md", "tamper", "tamper_all"},
+}
+
+#: The same option under another name on the tool: (command, CLI dest) ->
+#: the tool's parameter, which must exist.
+RENAMED = {
+    ("shrink", "no_keep_filters"): "keep_filters",
+    ("sweep", "cert_all"): "cert_mode", ("sweep", "cert_none"): "cert_mode",
+    ("status", "verify"): "verify_all",
 }
 
 
@@ -783,10 +788,34 @@ def test_every_cli_option_is_on_its_tool_or_declared_cli_only():
         cli = {a.dest for a in sp._actions
                if a.option_strings and a.dest not in common and a.dest != "help"}
         params = set(tools[name].parameters.get("properties", {}))
-        gap = cli - params - CLI_ONLY.get(name, set())
+        renamed = {d for d in cli if RENAMED.get((name, d)) in params}
+        gap = cli - params - renamed - CLI_ONLY.get(name, set())
         if gap:
             missing[name] = sorted(gap)
     assert not missing, missing
+
+
+def test_the_tools_do_what_their_commands_do_since_0_25():
+    """`sweep --witnesses`, `shrink` on a DomainSpec from an item, `reduce
+    --parametric` refusing one instance, `status --manifest` -- each was a
+    CLI option only."""
+    from pathlib import Path
+
+    ex = Path(__file__).resolve().parent.parent / "examples"
+    orbits = (ex / "sweep_orbits.py").read_text(encoding="utf-8")
+    out = run(call("sweep", {"spec_source": orbits, "witnesses": True}))
+    assert out["certificate"]["kind"] == "orbit_witnesses", out
+    assert len(out["witnesses"]) == 3
+
+    out = run(call("shrink", {"spec_source": orbits, "item": "(2,2,2)"}))
+    assert out["certificate"]["kind"] == "shrink_domain", out
+
+    single = (ex / "symmetry_reduction.py").read_text(encoding="utf-8")
+    out = run(call("reduce", {"spec_source": single, "parametric": True}))
+    assert out.get("ok") is False or "error" in out, out
+
+    out = run(call("status", {"manifest": True, "expect": ["no such headline"]}))
+    assert "fingerprint" in out and out.get("complete") is False, out
 
 
 def test_opt_gap_and_mixed_on_a_packing_over_mcp():

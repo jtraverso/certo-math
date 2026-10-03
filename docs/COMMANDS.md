@@ -666,6 +666,11 @@ one; two people wrote exactly that within a day of each other and both got a
 wrong number. `bisect` carries three states and stops on the inconclusive
 probe instead of picking a side.
 
+A real threshold comes back with the closed form its digits suggest -- `2`,
+`sqrt(2)`, `(1 + sqrt(5))/2` -- in `meta["closed_form"]`, labelled a
+CONJECTURE: the certificate certifies the bracket and nothing else. Proving
+the closed form is a `prove` at that value.
+
 ### `certo bounds`
 
 **Question** — Is this numeric inequality true? (`e`, `log`, `π`, `ζ`)
@@ -1863,6 +1868,18 @@ Three ways it goes wrong, reported as three different things:
 Finding a minimum clique partition is NP-hard and deliberately not what this
 does. Bring your own, from whatever found it.
 
+**A change of a partition you received** is certified as a change, not only
+by its result. `CoverSpec(..., repair={"before": {owner: part}, "withdraw":
+[...], "insert": {owner: part}, "frozen": [...], "new": [...], "balance":
+k})`: the withdrawn owners exist and are withdrawn once, no frozen owner is
+touched, the inserted pieces cover EXACTLY what was freed (plus what is
+declared new), the balance is the declared one, and the final cover is valid.
+A final cover can be valid and the change still refused -- a frozen owner
+replaced, or a piece taking an edge of an owner that was not withdrawn just
+because the edge is in the graph. On K4, `abc, ad, bd, cd -> abd, ac, bc, cd`
+is refused with `abc` frozen and accepted with `cd` frozen; `verify`
+re-derives the whole change from the certificate.
+
 ---
 
 ## Build it, assemble it, keep it
@@ -1941,6 +1958,16 @@ lemma with its source and says whether the final step actually used it. A
 citation needs a source, and cannot carry a certificate of its own — if there
 is one, it is a `lemma(..., certificate=...)`.
 
+**A stored certificate is linked when certo can read what it states.** A
+`lemma(..., certificate=...)` was always a bridge; now, when the certificate
+is a `farkas`, an `unsat_core` or a `polynomial_nonneg`, the lemma's negation
+is checked to entail what the certificate refutes, and a lemma that links is
+DERIVED. For `polynomial_nonneg` what it states is the box (no ceiling on an
+open end), the region and `poly >= 0`: a certificate on `[0, 1]` links to a
+lemma about `[0, 1]`, not to one about `x >= 0`, and not to another
+polynomial. `lemma(..., proves=NonnegSpec(...))` discharges it in place.
+What does not link stays a bridge, as before.
+
 ### `certo verify`
 
 **Question** — Is this stored certificate still good?
@@ -2004,11 +2031,12 @@ checked against a statement that has since changed would be worse than none.
 
 **Question** — Get this into Lean
 **Spec** — none; it takes a certificate or a spec
-**Answers** — a spec as SMT-LIB2 or DIMACS; to Lean, four kinds: a **linear
+**Answers** — a spec as SMT-LIB2 or DIMACS; to Lean, five kinds: a **linear
 Farkas certificate** and an **exact LP bound** as `linarith` examples, an
-**integer matrix** as literal matrices and the identities over them, and an
+**integer matrix** as literal matrices and the identities over them, an
 **affine semigroup** as its membership, pointedness, irreducibility and
-freeness theorems
+freeness theorems, and an **ideal** certificate as a `linear_combination`
+with its cofactors
 **Certificate** — none
 **Not established** — anything for the other kinds: they are refused rather
 than written hopefully. Each exporter joined only after its output compiled
@@ -2037,6 +2065,27 @@ separating functional, and a generator in the cone of the rest is left out
 and said; (4) for a unimodular generator matrix, its integer inverse and the
 statement that a point is in the semigroup exactly when its coordinates are
 non-negative: the free monoid on the generators.
+
+**An ideal certificate** goes out as one `example` closed by
+`linear_combination` with the certificate's cofactors: Lean searches nothing,
+`ring1` -- a decision procedure for commutative-ring identities -- checks the
+identity certo already checked. The ring is in the statement: integer data
+holds in every commutative ring (`[CommRing R]`), a denominator needs a field
+of characteristic zero (`[Field K] [CharZero K]`), and an inconsistent system
+is `False`. Measured before it shipped: 67 emissions compiled with no error and
+no warning; past 120 terms `ring1` runs out of Lean's budget -- five times the
+budget did not rescue those -- so past 100 terms the file is refused, and so is
+an identity whose claim expanded to `0 = 0`. The text is read back and
+compared with the certificate: each hypothesis, the claim, the ring, the
+cofactors.
+
+Compiling shows a file is consistent with itself, not that its data is the
+certificate's. So the DATA is read back from the emitted text and recomputed:
+the generators in the certificate's order (and that order named), the
+dimension, the grading, each membership, each separator separating its
+generator, and the integer inverse inverting. A file edited in any of them
+is refused. That the generators are the paper's cone, in the project's
+order, is what `bind` ties.
 
 Everything else certo used to emit was scaffolding that did not compile, and
 a Lean file that does not compile is worse than no Lean file: it costs a build
@@ -2182,6 +2231,14 @@ the cheap way, for `opt`, `mixed`, `parametric` and `sweep`:
 **It says so.** The status is `explored` and the verdict `likely`, never
 `proved`. There is no certificate, and the exit code is `2`, so a script treats
 it as the uncertified answer it is. Other commands run certified, and say so.
+**A closed form is proposed for a floating-point value** -- `10.66666656` as
+`32/3`, `1.6180339887` as `(1 + sqrt(5))/2` -- by PSLQ (`mpmath.findpoly`),
+only as a small rational or a quadratic irrational, and only when the match
+is significant for its size: a CONJECTURE, in `meta["closed_form"]`, and
+`promote` says whether the exact value was it. At seven digits about one
+random number in a hundred gets a proposal, which is why it is never more
+than one.
+
 **A counterexample is still certified when that is cheap.** A parametric claim
 that fails at a sampled point is re-solved exactly at that point, and comes
 back `refuted` with the certificate of that instance: a "no" is cheap to

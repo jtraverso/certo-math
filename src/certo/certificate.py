@@ -2008,6 +2008,40 @@ def obligations_of(sub: dict):
         sorts = p.get("sorts") or {}
         return [linarith.row_to_z3(poly, rel, sorts)
                 for (_, poly, rel), lam in zip(rows, lams) if lam > 0]
+    if kind == "polynomial_nonneg" and p.get("holds") is True:
+        # Proved: poly >= 0 on the box, cut by the region. As formulas that
+        # cannot hold together: the box (no ceiling on an open end), the
+        # region's conditions, and poly < 0. A lemma links when its negation
+        # entails all of them -- so a certificate on [0, 1] is NOT one for
+        # x >= 0, since `x <= 1` does not follow, and another polynomial or
+        # other variables do not link either.
+        from fractions import Fraction
+
+        from .polynomials import Poly
+
+        ring = tuple(p["parameters"])
+        xs = {v: z3.Real(v) for v in ring}
+
+        def z3_of(poly):
+            out = z3.RealVal(0)
+            for e, c in poly.terms.items():
+                term = z3.RealVal(str(c))
+                for v, k in zip(ring, e):
+                    for _ in range(k):
+                        term = term * xs[v]
+                out = out + term
+            return z3.simplify(out)
+
+        out = []
+        for v in ring:
+            lo, hi = p["box"][v]
+            out.append(xs[v] >= z3.RealVal(str(Fraction(lo))))
+            if hi is not None:
+                out.append(xs[v] <= z3.RealVal(str(Fraction(hi))))
+        for _name, g in sorted((p.get("region") or {}).items()):
+            out.append(z3_of(Poly.parse(ring, g)) >= 0)
+        out.append(z3_of(Poly.parse(ring, p["poly"])) < 0)
+        return out
     return None
 
 
@@ -2438,6 +2472,28 @@ def _verify_exact_cover(cert, limits) -> VerifyReport:
             checks.append((t("verify.cover.max_size"), not big,
                            t("verify.cover.max_size_detail", cap=p["max_size"],
                              n=len(big))))
+
+    # A REPAIR is a claim about the change: re-derived from `before`, the
+    # withdrawn and the inserted owners, and the final parts tied to it.
+    if p.get("repair") is not None:
+        from .cover import _key, check_repair, edges_of, repair_text
+
+        rep = check_repair(p["repair"], p["universe"], cliques=p.get("cliques"))
+        checks.append((t("verify.cover.repair"), rep["ok"],
+                       repair_text(rep["problems"]) or t(
+                           "verify.cover.repair_detail",
+                           out=len(p["repair"]["withdraw"]),
+                           into=len(p["repair"]["insert"]))))
+        if rep["ok"]:
+            def as_set(part):
+                es = edges_of(part) if p.get("cliques") else part
+                return frozenset(_key(e) for e in es)
+
+            want = [as_set(rep["final"][o]) for o in rep["order"]]
+            got = [frozenset(_key(e) for e in part) for part in p["parts"]]
+            checks.append((t("verify.cover.repair_parts"),
+                           sorted(map(sorted, want)) == sorted(map(sorted, got)),
+                           str(len(got))))
 
     ok = all(c[1] for c in checks)
     return VerifyReport(

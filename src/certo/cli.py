@@ -56,7 +56,7 @@ def scope_note(res: Result):
 # ---------------------------------------------------------------------------
 
 
-_HIDDEN_META = ("self_check", "trace", "errors", "describe", "counterexamples", "solution",
+_HIDDEN_META = ("self_check", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
                 "counterexample", "hint", "lemmas", "used", "unused", "bridges", "lo", "hi",
@@ -106,6 +106,9 @@ def _as_json(res, args) -> dict:
     for keeping.
     """
     out = res.to_dict()
+    from .scope import scope_of
+
+    out["scope"] = scope_of(res.certificate)
     if res.meta.get("self_check") == "FAILED":
         # What the engine claimed is kept, under its own name; the verdict a
         # reader acts on is that there is none.
@@ -177,6 +180,11 @@ def emit(res: Result, args) -> int:
         print("{}  [{}]".format(head, res.status.value))
         if res.detail:
             print("  " + res.detail)
+        from .scope import scope_of
+
+        scope = scope_of(res.certificate)
+        if scope:
+            print("  " + t("cli.scope", scope="; ".join(scope)))
 
         impl = res.meta.get("implementation")
         if impl:
@@ -1264,39 +1272,11 @@ def cmd_induct(args):
 
 
 def _shrink_orbits(spec, sweep_res, args):
-    """Minimise one representative per orbit. The end of the structural story.
-
-    Running `shrink` by hand from each representative is the same work; what
-    this removes is lining up three artefacts afterwards and hoping they came
-    from the same run -- which is exactly what the certificate then records.
-    """
-    from .certificate import orbit_witnesses_certificate
+    """Minimise one representative per orbit: `engines.shrink.orbit_witnesses`."""
     from .engines import shrink
 
-    rows = sweep_res.meta.get("orbits") or []
-    by_id = {spec.id_of(i): i for i in spec.enumerate()}
-    witnesses = []
-    for row in rows:
-        start = by_id.get(row["representative"])
-        if start is None:
-            continue
-        r = shrink.shrink_domain(spec, start, limits_from(args),
-                                 spec_path=args.spec)
-        witnesses.append({
-            "representative": row["representative"],
-            "size": row["size"],
-            "minimal": r.meta.get("minimal", "?"),
-            "steps": r.meta.get("steps", 0),
-            "cert": r.certificate.to_dict() if r.certificate else None,
-        })
-    # Stamp the sweep certificate before embedding it: emit() will stamp the
-    # wrapper, and an inner certificate with no spec path cannot be replayed.
-    return orbit_witnesses_certificate(
-        sweep_cert=sweep_res.certificate.stamp(args.spec).to_dict(),
-        witnesses=witnesses,
-        labelled=sweep_res.meta.get("labelled", 0),
-        title=spec.title,
-    ), witnesses
+    return shrink.orbit_witnesses(spec, sweep_res, limits_from(args),
+                                  spec_path=args.spec)
 
 
 def _print_witnesses(witnesses):
@@ -2630,9 +2610,26 @@ def _write_lean(text, args, sources, cert=None):
     # rather than as a second opinion that agrees with itself.
     from . import leancheck
 
-    corr = ({"checked": False, "reason": t("leancheck.no_rows", kind="?")}
-            if cert is None else leancheck.correspondence(cert, text))
-    if not corr.get("checked"):
+    if cert is not None and cert.get("kind") in ("affine_semigroup", "ideal"):
+        corr = (leancheck.semigroup_correspondence(cert, text)
+                if cert["kind"] == "affine_semigroup"
+                else leancheck.ideal_correspondence(cert, text))
+        if corr.get("checked") and corr["ok"]:
+            print("  " + t("cli.lean.sg_corresponds",
+                           items=", ".join(i["item"] for i in corr["items"])))
+        elif corr.get("checked"):
+            print("  !! " + t("cli.lean.sg_mismatch",
+                              items=", ".join(corr["mismatched"])))
+            return 1
+        else:
+            print("  " + t("cli.lean.not_compared", reason=corr["reason"]))
+        corr = None
+    else:
+        corr = ({"checked": False, "reason": t("leancheck.no_rows", kind="?")}
+                if cert is None else leancheck.correspondence(cert, text))
+    if corr is None:
+        pass
+    elif not corr.get("checked"):
         print("  " + t("cli.lean.not_compared", reason=corr["reason"]))
     elif corr["ok"]:
         print("  " + t("cli.lean.corresponds", n=corr["hypotheses"]))
@@ -2686,8 +2683,10 @@ def build_parser():
     common.add_argument("--explore", action="store_true",
                         help="a CHEAP look before paying for a certificate: "
                              "floating point, samples, no certificate. The "
-                             "verdict is `likely`, never `proved` (exit 2). "
-                             "For opt, mixed, parametric and sweep")
+                             "verdict is `likely`, never `proved` (exit 2), "
+                             "and a value comes with the closed form its digits "
+                             "suggest (PSLQ), as a conjecture. For opt, mixed, "
+                             "parametric and sweep")
     common.add_argument("--record", metavar="FILE",
                         help="with --explore: keep what was asked and found, "
                              "for `certo promote FILE` to run certified")
@@ -3358,8 +3357,8 @@ def build_parser():
                     dest="check_timeout_s",
                     help="how long --check may compile before it is stopped")
     sp.add_argument("--lean", action="store_true",
-                    help="emit a graph counterexample as Lean 4 data "
-                         "(checked against Lean/Mathlib v4.28.0)")
+                    help="export to Lean 4: Farkas, LP bound, integer matrix, "
+                         "semigroup, ideal identity; or a graph as data")
     sp.add_argument("--graph", metavar="G6",
                     help="with --lean: export this graph6 instead of a certificate")
     sp.add_argument("--out", metavar="FILE", help="write to a file")

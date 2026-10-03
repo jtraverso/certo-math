@@ -341,3 +341,35 @@ def shrink_domain(spec, start, limits: Limits | None = None,
                            item=spec.id_of(current), start=spec.id_of(start),
                            steps=steps),
                   meta=meta)
+
+
+def orbit_witnesses(spec, sweep_res, limits, spec_path=None):
+    """Minimise one representative per orbit, and wrap the sweep, the orbits
+    and the minimal witnesses as ONE certificate -- `sweep --witnesses`.
+    Returns `(certificate, witnesses)`. Shared by the command and the MCP
+    tool, which had no way to ask for it."""
+    from ..certificate import orbit_witnesses_certificate
+
+    rows = sweep_res.meta.get("orbits") or []
+    by_id = {spec.id_of(i): i for i in spec.enumerate()}
+    witnesses = []
+    for row in rows:
+        start = by_id.get(row["representative"])
+        if start is None:
+            continue
+        r = shrink_domain(spec, start, limits, spec_path=spec_path)
+        witnesses.append({
+            "representative": row["representative"],
+            "size": row["size"],
+            "minimal": r.meta.get("minimal", "?"),
+            "steps": r.meta.get("steps", 0),
+            "cert": r.certificate.to_dict() if r.certificate else None,
+        })
+    # Stamp the sweep certificate before embedding it: an inner certificate
+    # with no spec path cannot be replayed.
+    return orbit_witnesses_certificate(
+        sweep_cert=sweep_res.certificate.stamp(spec_path).to_dict(),
+        witnesses=witnesses,
+        labelled=sweep_res.meta.get("labelled", 0),
+        title=spec.title,
+    ), witnesses

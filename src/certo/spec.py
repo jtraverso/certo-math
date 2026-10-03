@@ -1012,6 +1012,11 @@ class CoverSpec:
     # of all cliques is usually enormous and rarely what anyone meant -- so it
     # is refused rather than guessed.
     candidates: object = None
+    # A CHANGE of a partition you received, certified as a change: {"before":
+    # {owner: part}, "withdraw": [owners], "insert": {owner: part}, "frozen":
+    # [owners], "new": [resources added], "balance": insert - withdraw}.
+    # `parts` is then derived (kept, then inserted) and may be left empty.
+    repair: dict = None
 
     def to_lp(self, integral: bool = False):
         """The exact-cover LP: choose the fewest candidates covering everything.

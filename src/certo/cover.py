@@ -163,3 +163,115 @@ def clique_parts(edges, vertex_sets, max_size=None):
         parts.append(own)
         report.append({"vertices": [str(v) for v in vs], "edges": len(own)})
     return parts, report
+
+
+# ---------------------------------------------------------------------------
+# a repair of a partition somebody handed you
+# ---------------------------------------------------------------------------
+
+
+def check_repair(repair, universe, cliques=False):
+    """Is `repair` an admissible change of the partition it names?
+
+    `repair` is `{"before": {owner: part}, "withdraw": [owner, ...],
+    "insert": {owner: part}, "frozen": [owner, ...], "new": [resource, ...],
+    "balance": int or None}`, parts being vertex sets when `cliques`. The
+    claim is about the CHANGE, not only its result: a final cover can be
+    valid and the change still inadmissible -- a frozen owner replaced, or an
+    edge taken from an owner that was not withdrawn just because the edge is
+    there in the graph.
+
+    Returns `{"ok", "problems": [(key, values)], "final": {owner: part},
+    "order": [owner, ...]}`. `final` is the partition after the change, in
+    a fixed order: the kept owners as `before` lists them, then the inserted.
+    Called by `cover` and by `verify`, so the two cannot read a repair two
+    ways.
+    """
+    before = dict(repair.get("before") or {})
+    withdraw = [str(o) for o in repair.get("withdraw") or []]
+    insert = dict(repair.get("insert") or {})
+    frozen = [str(o) for o in repair.get("frozen") or []]
+    new = list(repair.get("new") or [])
+    balance = repair.get("balance")
+    before = {str(k): v for k, v in before.items()}
+    insert = {str(k): v for k, v in insert.items()}
+    problems = []
+
+    def resources(part):
+        return [_key(e) for e in (edges_of(part) if cliques else part)]
+
+    unknown = [o for o in withdraw if o not in before]
+    if unknown:
+        problems.append(("cover.repair.unknown_owner", {"owners": unknown}))
+    twice = sorted(o for o, n in Counter(withdraw).items() if n > 1)
+    if twice:
+        problems.append(("cover.repair.withdrawn_twice", {"owners": twice}))
+    missing_frozen = [o for o in frozen if o not in before]
+    if missing_frozen:
+        problems.append(("cover.repair.unknown_owner", {"owners": missing_frozen}))
+    touched = [o for o in frozen if o in set(withdraw)]
+    if touched:
+        problems.append(("cover.repair.frozen_withdrawn", {"owners": touched}))
+    kept = [o for o in before if o not in set(withdraw)]
+    clash = [o for o in insert if o in set(kept)]
+    if clash:
+        problems.append(("cover.repair.owner_clash", {"owners": clash}))
+
+    # The resource freed -- the withdrawn owners' and the declared new --
+    # must be exactly what the inserted pieces cover. Exactly: a piece that
+    # reaches an element of a KEPT owner takes it, whether or not the element
+    # is in the graph.
+    freed = Counter()
+    for o in withdraw:
+        if o in before:
+            freed.update(resources(before[o]))
+    freed.update(_key(e) for e in new)
+    placed = Counter()
+    for part in insert.values():
+        placed.update(resources(part))
+    owner_of = {}
+    for o in kept:
+        for r in resources(before[o]):
+            owner_of.setdefault(r, o)
+    taken = sorted(r for r in placed if (placed[r] > freed[r]) and r in owner_of)
+    if taken:
+        problems.append(("cover.repair.takes_other",
+                         {"resources": taken,
+                          "owners": sorted({owner_of[r] for r in taken})}))
+    extra = sorted(r for r in placed if placed[r] > freed[r] and r not in owner_of)
+    if extra:
+        problems.append(("cover.repair.not_freed", {"resources": extra}))
+    left = sorted(r for r in freed if freed[r] > placed[r])
+    if left:
+        problems.append(("cover.repair.left_uncovered", {"resources": left}))
+    if balance is not None and int(balance) != len(insert) - len(set(withdraw)):
+        problems.append(("cover.repair.balance",
+                         {"declared": int(balance),
+                          "actual": len(insert) - len(set(withdraw))}))
+
+    # The universe the final cover is about: what `before` covered, and the
+    # resource declared new. Not a larger graph the pieces happen to fit in.
+    covered = set()
+    for part in before.values():
+        covered.update(resources(part))
+    covered.update(_key(e) for e in new)
+    if covered != {_key(u) for u in universe}:
+        problems.append(("cover.repair.universe",
+                         {"extra": sorted({_key(u) for u in universe} - covered)[:4],
+                          "missing": sorted(covered - {_key(u) for u in universe})[:4]}))
+
+    order = kept + [o for o in insert if o not in set(kept)]
+    final = {o: (before[o] if o in before and o in set(kept) else insert[o])
+             for o in order}
+    return {"ok": not problems, "problems": problems, "final": final,
+            "order": order}
+
+
+def repair_text(problems) -> str:
+    """The problems of a repair as one readable line."""
+    out = []
+    for key, values in problems:
+        flat = {k: ", ".join(map(str, v[:4])) if isinstance(v, list) else v
+                for k, v in values.items()}
+        out.append(_t(key, **flat))
+    return "; ".join(out)

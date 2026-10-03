@@ -31,6 +31,11 @@ What it does per command:
   parametric   the LP solved in floating point on a grid of the box or ray
                (respecting the region); the claim compared at every point
   sweep        a seeded random sample of the family, not all of it
+
+A floating-point value comes back with a CLOSED FORM PROPOSED for it --
+`10.66666656` as `32/3`, `1.6180339887` as `(1 + sqrt(5))/2` -- by
+`closedform.guess` (PSLQ): a conjecture from the digits, labelled as one, and
+`promote` says whether the certified value was it.
 """
 from __future__ import annotations
 
@@ -51,6 +56,18 @@ ENGINE = "certo/explore"
 MAX_POINTS = 125
 #: Items a sweep exploration evaluates, by default.
 SAMPLE = 200
+
+
+def _proposed(value, detail, meta):
+    """Attach the closed form the digits suggest, if any, as a conjecture."""
+    from .closedform import guess
+
+    g = guess(value)
+    if g is None:
+        return detail, meta
+    sep = " " if detail.rstrip().endswith((".", "!", "?")) else ". "
+    return (detail.rstrip() + sep + t("explore.closed_form", value=g["value"]),
+            dict(meta, closed_form=g))
 
 
 def _likely(command, t0, detail, meta):
@@ -82,6 +99,7 @@ def lp(command, spec, limits=None, target=None):
                value="{:.10g}".format(value))
     meta = {"answer": "value", "value": value, "integer": discrete,
             "lp_solver": res.meta.get("lp_solver")}
+    detail, meta = _proposed(value, detail, meta)
     if target is not None:
         meets = value >= float(Fraction(str(target))) - 1e-9 * (1 + abs(value))
         meta["meets_target"] = meets
@@ -200,10 +218,10 @@ def parametric(spec, limits=None):
     meta = {"answer": "sampled", "points": sampled,
             "best": {"value": best[0], "point": {k: str(x) for k, x in best[1].items()}}}
     if T is None:
-        return _likely("parametric", t0,
-                       t("explore.param_no_claim", n=sampled,
-                         value="{:.10g}".format(best[0]), point=_pt(best[1]),
-                         word="lowest" if minimising else "highest"), meta)
+        detail, meta = _proposed(best[0], t(
+            "explore.param_no_claim", n=sampled, value="{:.10g}".format(best[0]),
+            point=_pt(best[1]), word="lowest" if minimising else "highest"), meta)
+        return _likely("parametric", t0, detail, meta)
     meta["worst_margin"] = worst[0]
     meta["worst_point"] = {k: str(x) for k, x in worst[1].items()}
     return _likely("parametric", t0,
@@ -304,13 +322,24 @@ def agreement(rec, res) -> tuple:
     ans = rec.get("answer") or {}
     kind = ans.get("answer")
     if kind == "value" and res.meta.get("objective") is not None:
-        got = float(Fraction(str(res.meta.get("objective"))))
+        exact = res.meta.get("objective")
         if ans.get("integer") and res.meta.get("achieved") is not None:
-            got = float(Fraction(str(res.meta["achieved"])))
+            exact = res.meta["achieved"]
+        got = float(Fraction(str(exact)))
         v = float(ans["value"])
         ok = abs(got - v) <= 1e-6 * (1 + abs(got))
-        return ok, t("explore.promote_value", explored="{:.10g}".format(v),
-                     certified=str(res.meta.get("objective")))
+        why = t("explore.promote_value", explored="{:.10g}".format(v),
+                certified=str(res.meta.get("objective")))
+        # The proposed closed form, judged against the exact value: the one
+        # place a conjecture from digits meets a certified number.
+        from .closedform import matches
+
+        hit = matches(ans.get("closed_form"), exact)
+        if hit is not None:
+            why += "; " + t("explore.closed_form_right" if hit
+                            else "explore.closed_form_wrong",
+                            value=ans["closed_form"]["value"], exact=str(exact))
+        return ok, why
     if kind == "infeasible":
         ok = res.verdict is Verdict.UNSATISFIABLE
         return ok, t("explore.promote_infeasible")

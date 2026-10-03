@@ -68,13 +68,14 @@ def _generated(limits):
     """Cases the examples do not reach, each the shape that broke or could:
     a Farkas combination of 170 rows (Lean's default recursion depth stopped
     one of 169), an exact LP bound, an infeasible LP read as hypotheses
-    whose contradiction is the statement `False`, the Smith form of an integer matrix, a
+    whose contradiction is the statement `False`, ideal identities over a field
+    and over every commutative ring and an inconsistent system, the Smith form of an integer matrix, a
     unimodular cone in dimension 4 (all four semigroup stages) and a
     semigroup with a generator in the cone of the others (stage 3 leaves it
     out)."""
     import z3
 
-    from certo import LPSpec, MatrixSpec, SemigroupSpec, Spec
+    from certo import IdealSpec, LPSpec, MatrixSpec, SemigroupSpec, Spec
     from certo.engines import algebra, farkas, lp
 
     out = []
@@ -96,6 +97,16 @@ def _generated(limits):
     m.constraint({"a": 1, "b": 1}, ">=", 4, name="too_much")
     out.append(("farkas_infeasible_lp", farkas.farkas(m, limits).certificate))
 
+    x, y, z = z3.Reals("x y z")
+    out.append(("ideal_member_rational", algebra.ideal(IdealSpec(
+        variables=["x", "y"], equations=[x * y - 1, x - z3.Q(1, 3) * y],
+        claim=y * y - 3), limits).certificate))
+    out.append(("ideal_member_integral", algebra.ideal(IdealSpec(
+        variables=["x", "y", "z"], equations=[x * y - z, y - 2],
+        claim=2 * x - z), limits).certificate))
+    out.append(("ideal_inconsistent", algebra.ideal(IdealSpec(
+        variables=["x", "y"], equations=[x * y - 1, x], claim=None),
+        limits).certificate))
     out.append(("smith_3x3", algebra.integer_matrix(MatrixSpec(
         matrix=[[2, 4, 4], [-6, 6, 12], [10, -4, -16]], question="smith"),
         limits).certificate))

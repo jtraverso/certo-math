@@ -75,16 +75,28 @@ def _poly(expr, variables):
 
 def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """Is this an exact cover, and how many parts does it use?"""
-    from ..cover import NotACover, check, clique_parts
+    from ..cover import NotACover, check, check_repair, clique_parts, repair_text
 
     t0 = time.perf_counter()
     universe = [u for u in spec.universe]
     report = None
+    repair = getattr(spec, "repair", None)
+    given = list(spec.parts or [])
+    if repair is not None:
+        rep = check_repair(repair, universe, cliques=spec.cliques)
+        if not rep["ok"]:
+            # The change is not admissible, whatever the final cover is.
+            return Result("cover", Status.SAT, Verdict.REFUTED, ENGINE_COVER,
+                          (time.perf_counter() - t0) * 1000, None,
+                          detail=t("engine.cover.repair_refused",
+                                   why=repair_text(rep["problems"])),
+                          meta={"repair_problems": [k for k, _v in rep["problems"]]})
+        given = [rep["final"][o] for o in rep["order"]]
     try:
         if spec.cliques:
-            parts, report = clique_parts(universe, spec.parts, spec.max_size)
+            parts, report = clique_parts(universe, given, spec.max_size)
         else:
-            parts = [list(part) for part in spec.parts]
+            parts = [list(part) for part in given]
         out = check(universe, parts, exact=spec.exact)
     except NotACover as e:
         return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
@@ -117,13 +129,30 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         multiplicities={}, part_report=report, max_size=spec.max_size,
         title=spec.title,
     ).stamp(spec_path or None)
-
+    detail = t("engine.cover.proved" if spec.exact
+               else "engine.cover.proved_atleast",
+               parts=out["parts"], n=out["universe"])
+    if repair is not None:
+        cert.payload["repair"] = _serial_repair(repair)
+        detail += " " + t("engine.cover.repair_ok",
+                          out=len(repair.get("withdraw") or []),
+                          into=len(repair.get("insert") or {}),
+                          frozen=len(repair.get("frozen") or []))
     return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms,
-                  cert,
-                  detail=t("engine.cover.proved" if spec.exact
-                           else "engine.cover.proved_atleast",
-                           parts=out["parts"], n=out["universe"]),
-                  meta=meta)
+                  cert, detail=detail, meta=meta)
+
+
+def _serial_repair(repair) -> dict:
+    """The repair as JSON: owners as strings, parts and resources as lists."""
+    def part(p):
+        return [list(e) if isinstance(e, (tuple, list)) else e for e in p]
+
+    return {"before": {str(k): part(v) for k, v in (repair.get("before") or {}).items()},
+            "withdraw": [str(o) for o in repair.get("withdraw") or []],
+            "insert": {str(k): part(v) for k, v in (repair.get("insert") or {}).items()},
+            "frozen": [str(o) for o in repair.get("frozen") or []],
+            "new": part(repair.get("new") or []),
+            "balance": repair.get("balance")}
 
 
 def cover_bounds(spec, limits=None, prove_optimal=False, max_nodes=5_000,

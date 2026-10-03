@@ -209,7 +209,7 @@ with what each one does **not** establish, in
 | `batch` | Every spec in a directory through one command, in one process (or N) | each run self-checked as a single run is | one certificate per spec; nothing joined |
 | `mcp` | Which certo MCP servers are running old code after a reinstall; `restart --yes` stops them | — | — |
 | `verify` | Re-verify a stored certificate | — | — |
-| `export` | Spec to SMT-LIB2/DIMACS, or a linear Farkas certificate to Lean | — | — |
+| `export` | Spec to SMT-LIB2/DIMACS; to Lean: Farkas, LP bounds, integer matrices, semigroups and ideal identities, each read back against its certificate | — | — |
 | `ledger` | Audit log of what was run | — | — |
 
 Common options, **after** the subcommand: `--json`, `--cert FILE`, `--lang`,

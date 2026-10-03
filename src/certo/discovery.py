@@ -68,6 +68,10 @@ SYNONYMS = {
     "progress": "route", "many": "batch", "hundreds": "batch",
     "clique": "clique", "cliques": "clique", "partitions": "partition",
     "tight": "active", "slack": "active", "prices": "dual",
+    "reparar": "repair", "reparacion": "repair", "congelado": "frozen",
+    "congelados": "frozen", "propietario": "owner", "propietarios": "owner",
+    "forma": "form", "cerrada": "closed", "conjetura": "conjecture",
+    "identidad": "identity", "flotante": "floating",
     "packings": "packing", "empaquetamiento": "packing", "empaquetamientos": "packing",
     "empacar": "packing", "triangulo": "triangle", "triangulos": "triangle",
     "arista": "edge", "aristas": "edge", "cubierta": "cover",
@@ -282,7 +286,7 @@ def entries() -> list:
 
 #: The modules whose public functions are indexed as the Python API.
 API_MODULES = ("api", "explain", "batch", "tamper", "status_report",
-               "discovery", "nosite")
+               "discovery", "nosite", "closedform", "scope")
 
 
 def _default_text(f):

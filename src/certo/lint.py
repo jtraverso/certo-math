@@ -920,6 +920,16 @@ def _check_cover(spec, limits):
     parts = list(getattr(spec, "parts", None) or [])
     if not universe:
         yield _f(ERROR, "cover.no_universe")
+    repair = getattr(spec, "repair", None)
+    if repair is not None:
+        # The parts are DERIVED from the change; what lint can say is whether
+        # the change is admissible, which is cheap.
+        from .cover import check_repair, repair_text
+
+        rep = check_repair(repair, universe, cliques=getattr(spec, "cliques", False))
+        if not rep["ok"]:
+            yield _f(ERROR, "cover.repair", why=repair_text(rep["problems"]))
+        return
     if not parts:
         yield _f(ERROR, "cover.no_parts")
         return
@@ -937,6 +947,51 @@ def _check_cover(spec, limits):
     empty = [i for i, p in enumerate(parts) if not list(p)]
     if empty:
         yield _f(WARN, "cover.empty_part", n=len(empty), first=empty[0])
+
+
+def _check_peak(spec, limits):
+    """The shape `peak` needs, read the way it reads it -- no LP solved."""
+    from fractions import Fraction
+
+    from .peak import NotAPeak, _as_poly, split
+    from .polynomials import Poly
+
+    objective = getattr(spec, "objective", None)
+    if not isinstance(objective, Poly):
+        yield _f(ERROR, "peak.shape", detail=_t_peak("peak.not_poly"))
+        return
+    try:
+        A, _B, _C = split(objective, spec.variable)
+    except NotAPeak as e:
+        yield _f(ERROR, "peak.shape", detail=str(e))
+        return
+    params = A.vars
+    declared = set(map(str, (spec.parameters or {})))
+    if declared != set(params):
+        yield _f(ERROR, "peak.parameters", declared=", ".join(sorted(declared)) or "-",
+                 ring=", ".join(params) or "-")
+    star = (spec.argmax if isinstance(spec.argmax, Poly)
+            else Poly.const(params, spec.argmax))
+    if star.vars != params:
+        yield _f(ERROR, "peak.shape", detail=_t_peak(
+            "peak.wrong_ring", got=", ".join(star.vars), want=", ".join(params) or "-"))
+    elif any(c.denominator != 1 for c in star.terms.values()):
+        yield _f(ERROR, "peak.fractional_argmax")
+    for n, g in (getattr(spec, "region", None) or []):
+        try:
+            _as_poly(g, params)
+        except (NotAPeak, ValueError) as e:
+            yield _f(ERROR, "peak.shape", detail="{}: {}".format(n, e))
+    lead = A.terms.get((0,) * len(params), Fraction(0))
+    if len(A.terms) <= 1 and lead >= 0:
+        # A constant leading coefficient that is not negative: no peak at all.
+        yield _f(ERROR, "peak.not_concave", a=str(lead))
+
+
+def _t_peak(key, **kw):
+    from .i18n import t as tt
+
+    return tt(key, **kw)
 
 
 def _hashable(x):
@@ -958,4 +1013,5 @@ CHECKS = {
     "ParametricSpec": _check_parametric,
     "MatrixSpec": _check_matrix,
     "NonnegSpec": _check_nonneg, "CoverSpec": _check_cover,
+    "PeakSpec": _check_peak,
 }

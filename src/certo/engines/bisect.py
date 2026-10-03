@@ -138,12 +138,35 @@ def bisect(spec, limits: Limits | None = None, on_probe=None) -> Result:
         evaluations=evals,
     )
     width = abs(good_t - bad_t)
-    return done(
-        Status.SAT, Verdict.PROVED,
-        t("engine.bisect.summary",
-          where="{}".format(good_t) if spec.integer else "[{:.6g}, {:.6g}]".format(
-              min(good_t, bad_t), max(good_t, bad_t)),
-          good=good_t, bad=bad_t, probes=len(evals)),
-        cert,
-        meta={"threshold": good_t, "fails_at": bad_t, "width": width,
-              "probes": len(evals)})
+    detail = t("engine.bisect.summary",
+               where="{}".format(good_t) if spec.integer else "[{:.6g}, {:.6g}]".format(
+                   min(good_t, bad_t), max(good_t, bad_t)),
+               good=good_t, bad=bad_t, probes=len(evals))
+    meta = {"threshold": good_t, "fails_at": bad_t, "width": width,
+            "probes": len(evals)}
+    if not spec.integer:
+        # What the bracket's digits suggest the threshold IS -- a conjecture,
+        # outside the certificate, which certifies only the bracket. Proving
+        # the closed form is a `prove` at that value.
+        from ..closedform import guess
+
+        mid = (good_t + bad_t) / 2
+        g = guess(mid, rel_tol=max(width, 1e-15) / (1 + abs(mid)))
+        if g is not None and min(good_t, bad_t) - width <= _value(g, mid) <= \
+                max(good_t, bad_t) + width:
+            meta["closed_form"] = g
+            detail = detail.rstrip().rstrip(".") + ". " + t(
+                "engine.bisect.closed_form", value=g["value"])
+    return done(Status.SAT, Verdict.PROVED, detail, cert, meta=meta)
+
+
+def _value(g, near: float) -> float:
+    """The number a proposal names; for a quadratic, its root nearest `near`."""
+    from fractions import Fraction
+
+    if g["kind"] == "rational":
+        return float(Fraction(g["value"]))
+    a, b, c = g["polynomial"]
+    d = (b * b - 4 * a * c) ** 0.5
+    roots = ((-b + d) / (2 * a), (-b - d) / (2 * a))
+    return min(roots, key=lambda r: abs(r - near))

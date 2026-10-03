@@ -209,7 +209,7 @@ completas, con lo que cada uno **no** establece, en
 | `batch` | Todos los specs de un directorio por un comando, en un proceso (o N) | cada corrida se autoverifica como una sola | un certificado por spec; nada se une |
 | `mcp` | Qué servidores MCP de certo siguen con código viejo tras reinstalar; `restart --yes` los detiene | — | — |
 | `verify` | Re-verifica un certificado guardado | — | — |
-| `export` | Spec a SMT-LIB2/DIMACS, o un certificado de Farkas lineal a Lean | — | — |
+| `export` | Spec a SMT-LIB2/DIMACS; a Lean: Farkas, cotas de LP, matrices enteras, semigrupos e identidades de ideales, cada uno releído contra su certificado | — | — |
 | `ledger` | Registro de auditoría de lo que se corrió | — | — |
 
 Opciones comunes, **después** del subcomando: `--json`, `--cert FILE`,

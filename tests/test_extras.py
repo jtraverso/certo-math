@@ -7045,7 +7045,25 @@ def test_lint_says_whether_it_checked_and_reads_what_the_engines_read():
         "def spec():",
         "    return PeakSpec(parameters={}, variable='q', objective=q*(3-q),",
         "                    argmax=Poly.const((), 1))"]))
-    assert peak["ok"] and peak["checked"] is False and peak["command"] == "peak"
+    assert peak["ok"] and peak["checked"] is True and peak["command"] == "peak"
+    flat = run("q.py", "\n".join([
+        "from certo import PeakSpec",
+        "from certo.polynomials import Poly",
+        "q = Poly.var(('q',), 'q')",
+        "def spec():",
+        "    return PeakSpec(parameters={}, variable='q', objective=q*q + q,",
+        "                    argmax=Poly.const((), 1))"]))
+    assert not flat["ok"] and any(f["key"] == "peak.not_concave"
+                                  for f in flat["findings"])
+    half = run("h.py", "\n".join([
+        "from fractions import Fraction",
+        "from certo import PeakSpec",
+        "from certo.polynomials import Poly",
+        "q = Poly.var(('q',), 'q')",
+        "def spec():",
+        "    return PeakSpec(parameters={}, variable='q', objective=q*(3-q),",
+        "                    argmax=Poly.const((), Fraction(3, 2)))"]))
+    assert any(f["key"] == "peak.fractional_argmax" for f in half["findings"])
 
     mixed = run("n.py", "\n".join([
         "from certo import Poly, NonnegSpec",
@@ -7133,6 +7151,286 @@ def test_opt_on_an_integer_program_prints_both_numbers_and_the_whole_witness():
     assert "--top 0" in text
     every = out_of("--top", "0")
     assert "e2 = 1" in every and "e4 = 1" in every and "--top 0" not in every
+
+
+def test_a_closed_form_is_proposed_labelled_and_judged_by_promote():
+    """`--explore` answers in floating point and the reader guesses what the
+    number IS. `closedform.guess` proposes a small rational or a quadratic
+    irrational, refuses the rest (pi, log 2), and refuses a match that is
+    not significant -- `(3 + 5 sqrt 7)/4` was once `32563/8026` to nine
+    digits. `promote` says whether the proposal was the exact value, and
+    `bisect` proposes one for its threshold, outside the certificate."""
+    import math
+
+    import z3
+
+    from certo import BisectSpec, LPSpec, Spec, explore
+    from certo.closedform import guess, matches
+    from certo.engines import bisect, lp
+
+    assert guess(10.66666656003499)["value"] == "32/3"      # CBC's digits
+    assert guess((1 + math.sqrt(5)) / 2)["value"] == "(1 + sqrt(5))/2"
+    assert guess(2 - math.sqrt(3))["value"] == "2 - sqrt(3)"
+    assert guess((3 + 5 * math.sqrt(7)) / 4)["value"] == "(3 + 5*sqrt(7))/4"
+    assert guess(math.pi) is None and guess(math.log(2)) is None
+    assert matches({"kind": "rational", "value": "32/3"}, "32/3") is True
+    assert matches({"kind": "rational", "value": "10"}, "32/3") is False
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1, "b": 1})
+    m.constraint({"a": 3}, "<=", 2, name="cap_a")
+    m.constraint({"a": 1, "b": 3}, "<=", 3, name="both")
+    res = explore.lp("opt", m, LIM)
+    assert res.verdict is Verdict.LIKELY
+    assert res.meta["closed_form"]["value"] == "13/9" and "CONJECTURE" in res.detail
+    exact = lp.opt(m, LIM)
+    ok, why = explore.agreement({"answer": res.meta}, exact)
+    assert ok and "WAS the exact value" in why
+
+    def build(c):
+        s = Spec(title="c^2 >= 2")
+        s.claim(z3.RealVal(c) * z3.RealVal(c) >= 2)
+        return s
+
+    res = bisect.bisect(BisectSpec(build=build, lo=0.0, hi=10.0,
+                                   direction="min_true", tol=1e-10), LIM)
+    assert res.meta["closed_form"]["value"] == "sqrt(2)", res.meta.get("closed_form")
+
+
+def test_a_repair_of_a_received_partition_is_certified_as_a_change():
+    """The acceptance criteria of the report that asked for it, on K4:
+    abc, ad, bd, cd  ->  abd, ac, bc, cd. Refused when abc is FROZEN; accepted
+    when its replacement is authorised; refused when a piece takes an edge of
+    an owner that was not withdrawn, just because the edge is in the graph."""
+    import copy
+
+    from certo.certificate import Certificate, verify
+    from certo.engines import algebra
+    from certo.spec import CoverSpec
+
+    K4 = [("a", "b"), ("a", "c"), ("a", "d"), ("b", "c"), ("b", "d"), ("c", "d")]
+    before = {"abc": ["a", "b", "c"], "ad": ["a", "d"], "bd": ["b", "d"],
+              "cd": ["c", "d"]}
+    change = {"before": before, "withdraw": ["abc", "ad", "bd"],
+              "insert": {"abd": ["a", "b", "d"], "ac": ["a", "c"], "bc": ["b", "c"]},
+              "balance": 0}
+
+    def run(repair):
+        return algebra.cover(CoverSpec(universe=K4, parts=[], cliques=True,
+                                       repair=repair), LIM)
+
+    frozen = run(dict(change, frozen=["abc"]))
+    assert frozen.verdict is Verdict.REFUTED and "FROZEN" in frozen.detail
+
+    ok = run(dict(change, frozen=["cd"]))
+    assert ok.verdict is Verdict.PROVED and verify(ok.certificate).ok
+    assert ok.certificate.payload["repair"]["frozen"] == ["cd"]
+
+    # ac and bc are fine; a piece {c, d} would take cd's edge, which exists
+    greedy = dict(change, insert={"abd": ["a", "b", "d"], "ac": ["a", "c"],
+                                  "bcd": ["b", "c", "d"]}, balance=None)
+    refused = run(greedy)
+    assert refused.verdict is Verdict.REFUTED and "cd" in refused.detail
+
+    wrong_balance = run(dict(change, balance=1))
+    assert wrong_balance.verdict is Verdict.REFUTED
+
+    # the certificate cannot be edited into another change
+    d = copy.deepcopy(ok.certificate.to_dict())
+    d["payload"]["repair"]["frozen"] = ["abc"]
+    assert not verify(Certificate.from_dict(d)).ok
+    d = copy.deepcopy(ok.certificate.to_dict())
+    d["payload"]["repair"]["withdraw"] = ["abc", "ad"]
+    assert not verify(Certificate.from_dict(d)).ok
+
+    # a new vertex, declared: K4 plus e joined to a, inserted as a new piece
+    grown = run({"before": before, "withdraw": [], "insert": {"ae": ["a", "e"]},
+                 "new": [("a", "e")], "balance": 1})
+    assert grown.verdict is not Verdict.PROVED      # the universe is still K4
+    bigger = algebra.cover(CoverSpec(universe=K4 + [("a", "e")], parts=[],
+                                     cliques=True,
+                                     repair={"before": before, "withdraw": [],
+                                             "insert": {"ae": ["a", "e"]},
+                                             "new": [("a", "e")], "balance": 1}),
+                           LIM)
+    assert bigger.verdict is Verdict.PROVED and verify(bigger.certificate).ok
+
+
+def test_compose_links_a_polynomial_nonneg_certificate_by_what_it_states():
+    """A `polynomial_nonneg` certificate used in `compose` was a bridge: its
+    link to the lemma was by hand. Its statement -- box, rays, region, poly
+    >= 0 -- is read now: on [0, 1] it links to a lemma about [0, 1], NOT to
+    one about x >= 0, and not to another polynomial."""
+    import tempfile
+    from pathlib import Path
+
+    import z3
+
+    from certo import store
+    from certo.certificate import verify
+    from certo.engines import algebra, compose
+    from certo.polynomials import Poly
+    from certo.spec import NonnegSpec, ProofSpec
+
+    x = Poly.var(("x",), "x")
+    cert = algebra.nonneg(NonnegSpec(poly=x - x * x, box={"x": (0, 1)}), LIM).certificate
+    f = Path(tempfile.mkdtemp()) / "nn.json"
+    store.write_certificate(cert, str(f))
+
+    X = z3.Real("x")
+    on_box = z3.Implies(z3.And(X >= 0, X <= 1), X - X * X >= 0)
+    on_ray = z3.Implies(X >= 0, X - X * X >= 0)
+    other = z3.Implies(z3.And(X >= 0, X <= 1), X - 2 * X * X >= 0)
+
+    def run(states):
+        p = ProofSpec(title="t")
+        p.assume("in", z3.And(X >= 0, X <= 1))
+        p.lemma("nn", certificate=str(f), states=states)
+        p.conclude(X * X <= X)
+        return compose.compose(p, LIM)
+
+    good = run(on_box)
+    lem = good.certificate.payload["lemmas"][0]
+    assert good.verdict is Verdict.PROVED and lem["derived"] is True
+    assert verify(good.certificate).ok
+    for wrong in (on_ray, other):
+        res = run(wrong)
+        assert (not res.certificate
+                or res.certificate.payload["lemmas"][0]["derived"] is False)
+
+    # discharged in place, the statement read off the certificate
+    p = ProofSpec(title="t2")
+    p.assume("in", z3.And(X >= 0, X <= 1))
+    p.lemma("nn", proves=NonnegSpec(poly=x - x * x, box={"x": (0, 1)}))
+    p.conclude(X * X <= X)
+    res = compose.compose(p, LIM)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+
+
+def test_an_exported_semigroup_is_read_back_and_compared_with_its_certificate():
+    """Compiling shows a file is consistent with itself, not that its data is
+    the certificate's. The generators in order, the grading, each
+    membership, each separator and the integer inverse are read back from
+    the text and recomputed; a file edited in any of them is caught."""
+    from certo import Limits, SemigroupSpec, leanexport
+    from certo.engines import algebra
+    from certo.leancheck import semigroup_correspondence
+
+    c = algebra.affine_semigroup(SemigroupSpec(
+        generators={"e0": (1, 0, 0, 0), "e1": (1, 1, 0, 0), "e2": (1, 1, 1, 0),
+                    "e3": (1, 1, 1, 1)}, points={"p": (4, 3, 2, 1)}),
+        Limits()).certificate
+    d = c.to_dict()
+    d["digest"] = c.digest()
+    text = leanexport.EXPORTERS["affine_semigroup"](d)
+    rep = semigroup_correspondence(d, text)
+    assert rep["checked"] and rep["ok"], rep
+    kinds = {i["item"].split()[0] for i in rep["items"]}
+    assert {"generators", "order", "grading", "membership", "separator",
+            "inverse"} <= kinds
+
+    edits = [
+        ("1, 1, 1, 0; 1, 1, 1, 1]", "1, 1, 1, 0; 1, 1, 2, 1]"),   # a generator
+        ("order: e0, e1, e2, e3", "order: e1, e0, e2, e3"),           # the order
+        ("certo_u : Fin 4 → ℤ := ![1, 0, 0, 0]", "certo_u : Fin 4 → ℤ := ![2, 0, 0, 0]"),
+        ("certo_y1 : Fin 4 → ℤ := ![0, -1, 1, 0]", "certo_y1 : Fin 4 → ℤ := ![0, 1, 1, 0]"),
+        ("-1, 1, 0, 0; 0, -1, 1, 0", "-1, 1, 0, 0; 0, -1, 2, 0"),     # the inverse
+    ]
+    for old, new in edits:
+        assert old in text, old
+        bad = semigroup_correspondence(d, text.replace(old, new))
+        assert bad["checked"] and not bad["ok"], (old, bad)
+
+
+def test_the_scope_travels_beside_the_success():
+    """A box, a restricted column family, a relaxation bound, a cover not
+    shown minimum: in the certificate, and now on the result line and in the
+    JSON as `scope` -- read from the payload, never guessed."""
+    from certo import LPSpec
+    from certo.engines import algebra, lp
+    from certo.polynomials import Poly
+    from certo.scope import scope_of
+    from certo.spec import CoverSpec, NonnegSpec
+
+    x = Poly.var(("x",), "x")
+    nn = algebra.nonneg(NonnegSpec(poly=x + 1, box={"x": (0, None)}), LIM)
+    assert any("[0, +inf)" in s for s in scope_of(nn.certificate))
+
+    m = LPSpec(sense="max", integer=True)
+    for v in ("a", "b", "c"):
+        m.variable(v, 0, 1)
+    m.objective({"a": 1, "b": 1, "c": 1})
+    for u, w in (("a", "b"), ("b", "c"), ("a", "c")):
+        m.constraint({u: 1, w: 1}, "<=", 1, name=u + w)
+    ilp = lp.opt(m, LIM)
+    assert any("RELAXATION" in s for s in scope_of(ilp.certificate))
+
+    cov = algebra.cover(CoverSpec(universe=[1, 2], parts=[[1], [2]]), LIM)
+    assert any("not shown to be minimum" in s for s in scope_of(cov.certificate))
+    assert scope_of(None) == [] and scope_of({"kind": "nope"}) == []
+
+
+def test_an_ideal_certificate_goes_to_lean_as_a_linear_combination():
+    """The cofactors are the proof: Lean searches nothing, `ring1` checks the
+    identity. The ring is IN the statement -- every commutative ring for
+    integer data, a field of characteristic zero with denominators -- the
+    text is read back against the certificate, and what cannot be promised
+    is refused: `0 = 0`, past the measured size, an unwritable name."""
+    import z3
+
+    from certo import IdealSpec, leanexport
+    from certo.engines import algebra
+    from certo.leancheck import ideal_correspondence
+
+    x, y, z = z3.Reals("x y z")
+
+    def export(spec):
+        c = algebra.ideal(spec, LIM).certificate
+        d = c.to_dict()
+        d["digest"] = c.digest()
+        return d, leanexport.EXPORTERS["ideal"](d)
+
+    d, text = export(IdealSpec(variables=["x", "y", "z"],
+                               equations=[x * y - z, y - 2], claim=2 * x - z))
+    assert "[CommRing R]" in text and "linear_combination" in text
+    assert "sorry" not in text and leanexport.hollow_count(text) == 0
+    assert ideal_correspondence(d, text)["ok"]
+    for old, new in (("(h1 : y + (-2 : R) = 0)", "(h1 : y + (-3 : R) = 0)"),
+                     (": 2 * x + (-1 : R) * z = 0", ": 2 * x + (-2 : R) * z = 0"),
+                     ("[CommRing R]", "[Field R]")):
+        if old in text:
+            assert not ideal_correspondence(d, text.replace(old, new))["ok"], old
+
+    d, text = export(IdealSpec(variables=["x", "y"],
+                               equations=[x * y - 1, x - z3.Q(1, 3) * y],
+                               claim=y * y - 3))
+    assert "[Field K] [CharZero K]" in text and ideal_correspondence(d, text)["ok"]
+
+    d, text = export(IdealSpec(variables=["x", "y"], equations=[x * y - 1, x]))
+    assert ": False := by" in text and "one_ne_zero" in text
+
+    zero = algebra.ideal(IdealSpec(variables=["x"], equations=[],
+                                   claim=(x + x) ** 2 - 4 * x ** 2), LIM).certificate
+    try:
+        leanexport.EXPORTERS["ideal"](zero.to_dict())
+        raise AssertionError("0 = 0 was exported")
+    except leanexport.NotExportable:
+        pass
+
+    big = zero.to_dict()
+    big["payload"] = {"variables": ["x"], "inconsistent": False,
+                      "equations": [{str(k): "1" for k in range(60)}],
+                      "cofactors": [{str(k): "1" for k in range(60)}],
+                      "claim": {str(k): "1" for k in range(60)}}
+    try:
+        leanexport.EXPORTERS["ideal"](big)
+        raise AssertionError("past the size limit was exported")
+    except leanexport.NotExportable as e:
+        assert "100" in str(e)
+    assert leanexport.lean_name("at") == "«at»"
+    assert leanexport.lean_name("x_1") == "x_1"
 
 
 def test_the_json_of_a_failed_self_check_does_not_say_proved():
@@ -7348,8 +7646,10 @@ def test_lean_is_emitted_for_two_things_and_refused_for_the_rest():
     # `affine_semigroup` joined in 0.23 after a unimodular 4-dimensional cone
     # (all four stages) and a semigroup with a generator in the cone of the
     # others (stage 3 leaving it out) both compiled, with no `sorry`.
+    # `ideal` joined in 0.25 after 67 emissions compiled with no error and no
+    # warning, and the five it refused were the ones it should.
     assert sorted(leanexport.EXPORTERS) == ["affine_semigroup", "farkas",
-                                            "integer_matrix", "lp_dual"]
+                                            "ideal", "integer_matrix", "lp_dual"]
 
     root = pathlib.Path(__file__).resolve().parent.parent
     cert = farkas.farkas(
@@ -14536,6 +14836,10 @@ FIND_GOLDEN = [
     ("triangle packing", "PackingSpec"),
     ("empaquetamiento de triángulos", "PackingSpec"),
     ("integrality gap fractional integer packing", "opt --gap"),
+    ("ideal identity to lean", "export --lean"),
+    ("repair a partition with frozen owners", "CoverSpec.repair"),
+    ("reparar una partición con propietarios congelados", "CoverSpec.repair"),
+    ("closed form of a floating point value", "--explore"),
 ]
 
 

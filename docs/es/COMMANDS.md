@@ -680,6 +680,11 @@ personas escribieron exactamente eso con un día de diferencia y las dos
 obtuvieron un número falso. `bisect` lleva tres estados y se detiene ante el
 sondeo inconcluso en vez de elegir un lado.
 
+Un umbral real vuelve con la forma cerrada que sugieren sus dígitos -- `2`,
+`sqrt(2)`, `(1 + sqrt(5))/2` -- en `meta["closed_form"]`, rotulada como
+CONJETURA: el certificado certifica el intervalo y nada más. Demostrar la
+forma cerrada es un `prove` en ese valor.
+
 ### `certo bounds`
 
 **Pregunta** — ¿Es cierta esta desigualdad numérica? (`e`, `log`, `π`, `ζ`)
@@ -1902,6 +1907,19 @@ Tres formas de salir mal, reportadas como tres cosas distintas:
 Encontrar una partición mínima en cliques es NP-duro y deliberadamente no es lo
 que esto hace. Trae la tuya, de lo que sea que la encontró.
 
+**Un cambio de una partición que recibiste** se certifica como cambio, no solo
+por su resultado. `CoverSpec(..., repair={"before": {propietario: parte},
+"withdraw": [...], "insert": {propietario: parte}, "frozen": [...], "new":
+[...], "balance": k})`: los propietarios retirados existen y se retiran una
+vez, ningún congelado se toca, las piezas insertadas cubren EXACTAMENTE lo
+liberado (más lo declarado nuevo), el saldo es el declarado y la cubierta
+final es válida. Una cubierta final puede ser válida y el cambio rechazarse
+igual -- un congelado reemplazado, o una pieza que toma una arista de un
+propietario no retirado solo porque la arista está en el grafo. En K4,
+`abc, ad, bd, cd -> abd, ac, bc, cd` se rechaza con `abc` congelado y se
+acepta con `cd` congelado; `verify` rederiva el cambio completo desde el
+certificado.
+
 ---
 
 ## Construir, ensamblar, conservar
@@ -1982,6 +2000,16 @@ veredicto lo dice, y cada `verify` lista cada lema citado con su fuente y dice
 si el paso final lo usó de verdad. Una cita necesita una fuente, y no puede
 llevar un certificado propio — si lo hay, es un `lemma(..., certificate=...)`.
 
+**Un certificado guardado se enlaza cuando certo puede leer lo que afirma.** Un
+`lemma(..., certificate=...)` siempre fue un puente; ahora, cuando el
+certificado es un `farkas`, un `unsat_core` o un `polynomial_nonneg`, se
+comprueba que la negación del lema implique lo que el certificado refuta, y un
+lema que enlaza es DERIVADO. Para `polynomial_nonneg` lo que afirma es la caja
+(sin techo en un extremo abierto), la región y `poly >= 0`: un certificado en
+`[0, 1]` enlaza con un lema sobre `[0, 1]`, no con uno sobre `x >= 0`, ni con
+otro polinomio. `lemma(..., proves=NonnegSpec(...))` lo descarga en el lugar.
+Lo que no enlaza sigue siendo un puente, como antes.
+
 ### `certo verify`
 
 **Pregunta** — ¿Sigue siendo bueno este certificado guardado?
@@ -2045,11 +2073,12 @@ comprobada contra un enunciado que ha cambiado sería peor que ninguna.
 
 **Pregunta** — Llévame esto a Lean
 **Spec** — ninguno; toma un certificado o un spec
-**Responde** — un spec como SMT-LIB2 o DIMACS; a Lean, cuatro tipos: un
+**Responde** — un spec como SMT-LIB2 o DIMACS; a Lean, cinco tipos: un
 **certificado de Farkas lineal** y una **cota exacta de LP** como ejemplos
 `linarith`, una **matriz entera** como matrices literales y las identidades
-entre ellas, y un **semigrupo afín** como sus teoremas de pertenencia,
-apuntado, irreducibilidad y libertad
+entre ellas, un **semigrupo afín** como sus teoremas de pertenencia,
+apuntado, irreducibilidad y libertad, y un certificado **ideal** como un
+`linear_combination` con sus cofactores
 **Certificado** — ninguno
 **No establece** — nada para los demás tipos: se rechazan en vez de escribirse
 con esperanza. Cada exportador entró solo después de que su salida compilara
@@ -2079,6 +2108,28 @@ demás se omite y se dice; (4) para una matriz de generadores unimodular, su
 inversa entera y el enunciado de que un punto está en el semigrupo
 exactamente cuando sus coordenadas son no negativas: el monoide libre sobre
 los generadores.
+
+**Un certificado ideal** sale como un `example` cerrado por
+`linear_combination` con los cofactores del certificado: Lean no busca nada,
+`ring1` -- un procedimiento de decisión para identidades en anillos
+conmutativos -- comprueba la identidad que certo ya comprobó. El anillo está en
+el enunciado: datos enteros valen en todo anillo conmutativo
+(`[CommRing R]`), un denominador necesita un cuerpo de característica cero
+(`[Field K] [CharZero K]`), y un sistema inconsistente es `False`. Medido antes
+de publicarse: 67 emisiones compilaron sin errores ni advertencias; pasados
+120 términos `ring1` agota el presupuesto de Lean -- cinco veces el presupuesto
+no los salvó -- así que pasados 100 términos el archivo se rechaza, y también
+una identidad cuya afirmación se expandió a `0 = 0`. El texto se relee y se
+compara con el certificado: cada hipótesis, la afirmación, el anillo, los
+cofactores.
+
+Compilar muestra que un archivo es coherente consigo mismo, no que sus datos
+sean los del certificado. Así que los DATOS se releen del texto emitido y se
+recalculan: los generadores en el orden del certificado (y ese orden
+nombrado), la dimensión, la graduación, cada pertenencia, cada separador
+separando a su generador y la inversa entera invirtiendo. Un archivo editado
+en cualquiera de ellos se rechaza. Que los generadores sean el cono del
+paper, en el orden del proyecto, es lo que `bind` ata.
 
 Todo lo demás que certo solía emitir era andamiaje que no compilaba, y un
 archivo Lean que no compila es peor que ninguno: cuesta una compilación
@@ -2227,7 +2278,13 @@ responde la misma pregunta por el camino barato, en `opt`, `mixed`,
 **Lo dice.** El estado es `explored` y el veredicto `likely`, nunca `proved`.
 No hay certificado, y el código de salida es `2`, así que un script lo trata
 como la respuesta sin certificar que es. Los demás comandos corren
-certificados, y lo dicen. **Un contraejemplo se sigue certificando cuando es
+certificados, y lo dicen. **Se propone una forma cerrada para un valor en
+flotante** -- `10.66666656` como `32/3`, `1.6180339887` como
+`(1 + sqrt(5))/2` -- por PSLQ (`mpmath.findpoly`), solo como racional pequeño
+o irracional cuadrático, y solo cuando la coincidencia es significativa para
+su tamaño: una CONJETURA, en `meta["closed_form"]`, y `promote` dice si el
+valor exacto era ese. Con siete dígitos, cerca de un número aleatorio de cada
+cien recibe una propuesta, y por eso nunca es más que una. **Un contraejemplo se sigue certificando cuando es
 barato.** Un claim paramétrico que falla en un punto muestreado se resuelve de
 nuevo exactamente en ese punto, y vuelve `refuted` con el certificado de esa
 instancia: un "no" es barato de certificar, y el "sí" es lo que cuesta. **El

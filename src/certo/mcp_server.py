@@ -410,6 +410,12 @@ def _trim(meta: dict) -> dict:
     return out
 
 
+def _scope(res) -> list:
+    from .scope import scope_of
+
+    return scope_of(res.certificate)
+
+
 def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
     """Render a Result for the model, stamping provenance on the way out.
 
@@ -440,6 +446,9 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
         "status": res.status.value,
         "conclusive": res.status.conclusive,
         "detail": res.detail,
+        # What the claim is restricted to, beside it rather than buried in
+        # the certificate: a box, a column family, a finite case, bridges.
+        "scope": _scope(res),
         "engine": res.engine,
         "elapsed_ms": round(res.elapsed_ms, 1),
         "meta": _trim(res.meta),
@@ -1212,13 +1221,19 @@ async def enum(n: int, filters: list[str] | None = None,
     "response also carries min/max/mean and the extremes with their graph. "
     "With n_range=\"4..8\" it sweeps every size and reports the first one that "
     "fails; stop_on_first stops there. Also accepts a DomainSpec for any "
-    "finite domain, not just graphs."))
+    "finite domain, not just graphs. witnesses=true, after a refuted sweep of "
+    "a DomainSpec with a symmetry and a reducer, minimises one representative "
+    "per orbit: the sweep, the orbits and the witnesses as ONE certificate."))
 @_guard
 async def sweep(spec_path: str | None = None, spec_source: str | None = None,
                 by_orbit: bool = False,
                 timeout_ms: int = 60_000, cert_mode: str = "failures",
                 n_range: str | None = None,
-                stop_on_first: bool = False, explore: bool = False) -> dict:
+                stop_on_first: bool = False, explore: bool = False,
+                witnesses: bool = False) -> dict:
+    """`witnesses=true`, after a refuted sweep of a DomainSpec with a
+    symmetry and a reducer: one minimal witness per orbit, and the sweep,
+    the orbits and the witnesses as ONE certificate."""
     from .engines import domain, graphsearch
     from .spec import DomainSpec, SweepSpec, load_spec
 
@@ -1243,29 +1258,54 @@ async def sweep(spec_path: str | None = None, spec_source: str | None = None,
                          cert_mode, by_orbit)
     elif isinstance(sp, SweepSpec):
         res = await _off(graphsearch.sweep, sp, _limits(timeout_ms), True,
-                         cert_mode)
+                         cert_mode, by_orbit=by_orbit)
     else:
         raise TypeError("sweep needs a SweepSpec (graphs) or a DomainSpec "
                         "(any finite domain); spec() returned "
                         + type(sp).__name__)
+    found = None
+    if witnesses:
+        from .engines.shrink import orbit_witnesses
+        from .i18n import t as _t_
+        from .status import Verdict
+
+        if res.verdict is not Verdict.REFUTED or not res.meta.get("orbits"):
+            raise ValueError(_t_("cli.witness.needs_orbits"))
+        if not isinstance(sp, DomainSpec) or sp.reduce is None:
+            raise ValueError(_t_("cli.witness.needs_reduce"))
+        res.certificate, found = await _off(orbit_witnesses, sp, res,
+                                            _limits(timeout_ms), str(f))
     out = _emit(res, spec_file=f)
     if res.meta.get("calibration"):
         out["calibration"] = res.meta["calibration"]
+    if found is not None:
+        out["witnesses"] = [{k: w[k] for k in ("representative", "size",
+                                               "minimal", "steps")}
+                            for w in found]
     return out
 
 
 @mcp.tool(description=(
     "Minimise a counterexample. With a SweepSpec it reduces a graph (deleting "
     "vertices and edges); with a CNFSpec it extracts a MUS. The result is "
-    "1-MINIMAL, not minimum: no ONE-step reduction is still a counterexample."))
+    "1-MINIMAL, not minimum: no ONE-step reduction is still a counterexample. "
+    "A DomainSpec works too, from `item` (an id) or the sweep's first "
+    "counterexample; `from_cert` starts from the WORST counterexample a "
+    "stored sweep recorded; `objective=true` minimises the spec's objective "
+    "along the way."))
 @_guard
 async def shrink(spec_path: str | None = None, spec_source: str | None = None,
                  graph: str | None = None, timeout_ms: int = 60_000,
-                 keep_filters: bool = True) -> dict:
+                 keep_filters: bool = True, item: str | None = None,
+                 objective: bool = False, from_cert: str | None = None) -> dict:
+    """As the command: a SweepSpec (graphs), a DomainSpec (any finite domain,
+    starting from `item` or the sweep's first counterexample) or a CNFSpec.
+    `from_cert` starts from the WORST counterexample a stored sweep recorded;
+    `objective` minimises the spec's objective along the way."""
     from .cnf import CNF, CNFSpec
-    from .engines import graphsearch, shrink as shr
+    from .engines import domain, graphsearch, shrink as shr
     from .graphs import Graph
-    from .spec import SweepSpec, load_spec
+    from .spec import DomainSpec, SweepSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     obj = await _off(load_spec, f)
@@ -1275,11 +1315,33 @@ async def shrink(spec_path: str | None = None, spec_source: str | None = None,
         s = obj if isinstance(obj, CNFSpec) else CNFSpec(cnf=obj, title=obj.title)
         return _emit_f(f, await _off(shr.shrink_cnf, s, lim))
 
-    if not isinstance(obj, SweepSpec):
-        raise TypeError("shrink needs a SweepSpec or CNFSpec; spec() returned "
-                        + type(obj).__name__)
+    if isinstance(obj, DomainSpec):
+        items = {obj.id_of(i): i for i in obj.enumerate()}
+        if item:
+            start = items.get(item)
+            if start is None:
+                raise ValueError("no item with id " + item)
+        else:
+            sw = await _off(domain.sweep_domain, obj, lim)
+            ces = sw.meta.get("counterexamples", [])
+            if not ces:
+                return {"command": "shrink", "verdict": "inconclusive",
+                        "detail": "the sweep found no counterexample to minimise",
+                        "meta": _trim(sw.meta), "certificate": None}
+            start = items[ces[0]]
+        return _emit_f(f, await _off(shr.shrink_domain, obj, start, lim,
+                                     spec_path=str(f), use_objective=objective))
 
-    if graph:
+    if not isinstance(obj, SweepSpec):
+        raise TypeError("shrink needs a SweepSpec, a DomainSpec or a CNFSpec; "
+                        "spec() returned " + type(obj).__name__)
+
+    if from_cert:
+        from .cli import _worst_from_cert
+
+        start = Graph.from_graph6(_worst_from_cert(
+            str(_resolve(from_cert)), getattr(obj, "worst", "min")))
+    elif graph:
         start = Graph.from_graph6(graph)
     else:
         sw = await _off(graphsearch.sweep, obj, lim)
@@ -1291,7 +1353,8 @@ async def shrink(spec_path: str | None = None, spec_source: str | None = None,
         start = Graph.from_graph6(ces[0])
 
     return _emit_f(f, await _off(shr.shrink_graph, obj, start, lim,
-                            str(f), keep_filters))
+                                 str(f), keep_filters,
+                                 use_objective=objective))
 
 
 @mcp.tool(description=(
@@ -2047,15 +2110,23 @@ async def matrix(spec_path: str | None = None, spec_source: str | None = None,
     "program with four regimes is missing a case. TWO LEVELS, kept apart: the "
     "quotient's SHAPE is symbolic, while that the declared group really has "
     "these orbits is checked per instance on a finite window. Agreement on a "
-    "window is falsifiability, not proof, and the certificate says so."))
+    "window is falsifiability, not proof, and the certificate says so. "
+    "parametric=true ASSERTS the family: one instance is refused, not "
+    "answered with the weaker single-instance result."))
 @_guard
 async def reduce(spec_path: str | None = None, spec_source: str | None = None,
-                 timeout_ms: int = 60_000) -> dict:
+                 timeout_ms: int = 60_000, parametric: bool = False) -> dict:
+    """`parametric=true` ASSERTS the family: a spec that is one instance is
+    refused rather than answered with the weaker single-instance result."""
     from .engines import algebra
     from .spec import ParametricSymmetrySpec, SymmetrySpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f))
+    if parametric and not isinstance(spec, ParametricSymmetrySpec):
+        from .i18n import t as _t
+
+        raise TypeError(_t("cli.reduce.not_parametric", got=type(spec).__name__))
     if isinstance(spec, ParametricSymmetrySpec):
         res = await _off(algebra.reduce_parametric, spec, _limits(timeout_ms),
                          str(f))
@@ -2187,20 +2258,35 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000) -> dict:
     "results rest on), what is HOLLOW (vacuous proofs, sweeps that certified "
     "nothing), and what is STALE (the spec changed since the certificate was "
     "issued). Start here when picking up a workspace you did not build. It "
-    "reads the certificates rather than re-verifying them unless you ask."))
+    "reads the certificates rather than re-verifying them unless you ask. "
+    "manifest=true: the set in canonical order with one fingerprint; with "
+    "`expect` (headlines, or a workspace file of them) it names what is "
+    "MISSING, not only what is there."))
 @_guard
 async def status(directory: str | None = None, verify_all: bool = False,
                  timeout_ms: int = 60_000, root: str | None = None,
-                 since: str | None = None) -> dict:
+                 since: str | None = None, manifest: bool = False,
+                 expect: list[str] | str | None = None) -> dict:
     """With `root` (a certificate path): the report UNDER that target -- every
     certificate it is built from with its degree of checking, every
     obligation still open, and what in the directory is off the route.
-    `since`: a previous such report, saved as JSON, to say what changed."""
+    `since`: a previous such report, saved as JSON, to say what changed.
+    `manifest`: the set in canonical order with one fingerprint; `expect`
+    (headlines, or a workspace file of them, one per line) names what is
+    MISSING rather than only what is there."""
     import json as _json
 
     from . import status_report
 
     where = _resolve(directory) if directory else _workspace()
+    if manifest or expect:
+        wanted = None
+        if isinstance(expect, str):
+            wanted = [ln.strip() for ln in _resolve(expect).read_text(
+                encoding="utf-8").splitlines() if ln.strip()]
+        elif expect:
+            wanted = [str(x) for x in expect]
+        return await _off(status_report.manifest, str(where), expect=wanted)
     if root:
         rep = await _off(status_report.route, str(_resolve(root)), str(where),
                          _limits(timeout_ms))
