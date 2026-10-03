@@ -309,6 +309,10 @@ of these objects. You can pass the file (`spec_path`) or the code itself
                           region=[("r", Fraction(3, 40) - x**2)])   # g >= 0
     # PROVED: Bernstein coefficients. REFUTED: a point and its exact value.
     # A region writes an algebraic endpoint exactly: [0, sqrt(3/40)] here.
+    # An OPEN end is a ray, and rays mix with bounded sides:
+    #   box={"R": (0, None), "x": (0, 1)}   # R >= 0, 0 <= x <= 1
+    # selects the shift test (v -> lo + u, the ceiling x <= 1 used as a
+    # multiplier); meta["method"] says which ran: "bernstein" or "shift".
 
 ## AtlasSpec -> atlas (N box certificates, ONE statement)
     AtlasSpec(domain={"p": (0, 1)}, claim=("<=", T), pieces=["box1.json", ...])
@@ -720,12 +724,38 @@ async def bounds(spec_path: str | None = None, spec_source: str | None = None,
 @_guard
 async def mixed(spec_path: str | None = None, spec_source: str | None = None,
                 target: str | None = None, timeout_ms: int = 120_000,
-                explore: bool = False) -> dict:
+                explore: bool = False, prove_optimal: bool = False,
+                max_nodes: int = 5000, wall_timeout_ms: int | None = None,
+                freeze: dict | None = None) -> dict:
+    """`prove_optimal` is branch and bound to a certified integer optimum
+    (`max_nodes`, `wall_timeout_ms`); `freeze` is a discrete assignment found
+    elsewhere, {variable: value}, whose continuous part is certified."""
+    import dataclasses
+
     from .engines import mixed as mx
+    from .packing import PackingSpec
     from .spec import LPSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    sp = await _off(load_spec, f, LPSpec)
+    sp = await _off(load_spec, f)
+    if isinstance(sp, PackingSpec):
+        # As the CLI does: a packing whose items are whole-or-nothing IS a
+        # mixed design. The tool refused one the command accepted.
+        sp = dataclasses.replace(sp, integer=sp.integer or True).to_lp()
+    elif not isinstance(sp, LPSpec):
+        raise TypeError("mixed needs an LPSpec or a PackingSpec; spec() "
+                        "returned " + type(sp).__name__)
+    if prove_optimal:
+        from .engines import bb
+
+        res = await _off(bb.prove_optimal, sp, _limits(timeout_ms),
+                         spec_path=str(f), max_nodes=max_nodes,
+                         wall_ms=wall_timeout_ms)
+        out = _emit(res, spec_file=f)
+        for k in ("optimum", "nodes", "by_bound", "infeasible", "leaves", "gap"):
+            if k in res.meta:
+                out[k] = res.meta[k]
+        return out
     if explore:
         from . import explore as ex
 
@@ -733,7 +763,7 @@ async def mixed(spec_path: str | None = None, spec_source: str | None = None,
                                 target if target is not None else sp.target),
                      spec_file=f)
     res = await _off(mx.mixed, sp, _limits(timeout_ms), str(f),
-                     target if target is not None else sp.target)
+                     target if target is not None else sp.target, freeze)
     out = _emit(res, spec_file=f)
     for k in ("achieved", "conditional", "bound", "target", "deficit",
               "globally_optimal", "selected"):
@@ -779,14 +809,28 @@ async def ideal(spec_path: str | None = None, spec_source: str | None = None,
     "packing."))
 @_guard
 async def cover(spec_path: str | None = None, spec_source: str | None = None,
-                timeout_ms: int = 60_000) -> dict:
+                timeout_ms: int = 60_000, optimize: bool = False,
+                prove_optimal: bool = False, max_nodes: int = 5000,
+                wall_timeout_ms: int | None = None) -> dict:
+    """`optimize` adds the other side: the relaxation's bound on the cover
+    number and, with `prove_optimal`, the integer optimum by branch and
+    bound -- each labelled with what it IS."""
     from .engines import algebra
     from .spec import CoverSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), CoverSpec)
     res = await _off(algebra.cover, spec, _limits(timeout_ms), str(f))
-    return _emit(res, spec_file=f)
+    out = _emit(res, spec_file=f)
+    if optimize and res.certificate is not None:
+        bounds = await _off(algebra.cover_bounds, spec, _limits(timeout_ms),
+                            prove_optimal=prove_optimal, max_nodes=max_nodes,
+                            wall_ms=wall_timeout_ms)
+        out["bounds"] = {"parts": res.meta.get("parts"),
+                         "relaxation": bounds.get("relaxation"),
+                         "optimum": bounds.get("optimum"),
+                         "stopped": bounds.get("stopped")}
+    return out
 
 
 @mcp.tool(description=(
@@ -1056,14 +1100,22 @@ async def synth(spec_path: str | None = None, spec_source: str | None = None,
 
 
 @mcp.tool(description=(
-    "Solve an LPSpec (LP or ILP). The certificate is the DUAL, checked with "
-    "pure EXACT rational arithmetic. For an ILP the dual certifies the "
-    "relaxation bound, not integer optimality."))
+    "Solve an LPSpec (LP or ILP) or a PackingSpec. The certificate is the "
+    "DUAL, checked with pure EXACT rational arithmetic. For an ILP the dual "
+    "certifies the relaxation bound, not integer optimality: `gap=true` on a "
+    "PackingSpec returns BOTH sides as one certificate -- the fractional "
+    "optimum mu* with its dual, the integral nu with its point -- and the gap "
+    "between them; `round=true` certifies integer optimum <= floor(LP). "
+    "`target` is the value to reach; `no_exact` skips the exact "
+    "reconstruction (faster, NOT citable); `dual_direction` ({row: weight}, "
+    "or 'row=w,...') picks among optimal duals."))
 @_guard
 async def opt(spec_path: str | None = None, spec_source: str | None = None,
               timeout_ms: int = 10_000, by_type: bool = False,
               explore: bool = False, round: bool = False,
-              cuts: str | None = None) -> dict:
+              cuts: str | None = None, gap: bool = False,
+              target: str | None = None, no_exact: bool = False,
+              dual_direction: dict | str | None = None) -> dict:
     from .engines import lp
     from .packing import PackingSpec
     from .spec import LPSpec, load_spec
@@ -1078,12 +1130,26 @@ async def opt(spec_path: str | None = None, spec_source: str | None = None,
         raise TypeError("opt needs an LPSpec or a PackingSpec; spec() returned "
                         + type(sp).__name__)
 
+    if gap:
+        if packing is None:
+            raise TypeError("gap=true needs a PackingSpec: the integral side "
+                            "is a packing's")
+        from .packing import gap_result
+
+        res = await _off(gap_result, packing, _limits(timeout_ms), target)
+        out = _emit(res, spec_file=f)
+        for k in ("mu", "nu", "gap", "tight", "integral_level", "reached"):
+            if k in res.meta:
+                out[k] = res.meta[k]
+        return out
     if explore:
         from . import explore as ex
 
-        return _emit(await _off(ex.lp, "opt", sp, _limits(timeout_ms)),
-                     spec_file=f)
-    res = await _off(lp.opt, sp, _limits(timeout_ms), round=round, cuts=cuts)
+        return _emit(await _off(ex.lp, "opt", sp, _limits(timeout_ms),
+                                target=target), spec_file=f)
+    res = await _off(lp.opt, sp, _limits(timeout_ms), use_exact=not no_exact,
+                     target=target, round=round, cuts=cuts,
+                     dual_direction=lp.direction_from(dual_direction))
     out = _emit(res, spec_file=f)
     if packing is not None:
         from .packing import loads_from_dual

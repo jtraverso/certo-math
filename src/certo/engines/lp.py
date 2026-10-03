@@ -534,6 +534,20 @@ class Vectors:
 PROGRESS_FROM = 500
 
 
+def direction_from(spec):
+    """`--dual-direction`'s `ROW=W,ROW=W` -- or a dict, from the MCP tool --
+    as `{row: weight}`; None for none."""
+    if not spec:
+        return None
+    if isinstance(spec, dict):
+        return {str(k): str(v) for k, v in spec.items()}
+    out = {}
+    for part in str(spec).split(","):
+        name, _, w = part.partition("=")
+        out[name.strip()] = w.strip() or "1"
+    return out
+
+
 def _progress(on, t0, key, **kw):
     if on:
         import sys

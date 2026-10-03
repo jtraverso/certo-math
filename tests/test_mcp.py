@@ -736,6 +736,73 @@ def test_farkas_takes_a_linear_program_over_mcp_and_returns_the_point():
     assert out["verdict"] == "refuted" and "a" in out["point"], out
 
 
+#: CLI options a tool does not take, each with why. A new CLI option on a
+#: command with a tool fails the parity test until it is added to the tool or
+#: here: `opt --gap` -- the fractional against the integral optimum -- was a
+#: CLI option only, and a user over MCP could not ask for it.
+CLI_ONLY = {
+    "batch": {"glob", "gz", "out"},           # writes into a directory tree
+    "bisect": {"trace"}, "synth": {"trace"},   # terminal presentation
+    "cases": {"no_check", "proof", "solver_binary"},  # local files, binaries
+    "columns": {"top"}, "opt": {"top"},        # rows printed to a terminal
+    "commands": {"markdown", "table"}, "lint": {"quiet"},
+    "doctor": {"apply", "launcher", "mcp_path", "mcp_venv", "register_mcp",
+               "repair"},                      # changes this machine
+    "enum": {"filter", "no_geng", "out"},
+    "export": {"check", "check_timeout_s", "graph", "lean", "lean_project",
+               "manifest", "out"},             # `export_lean` is its own tool
+    "mcp": {"all", "yes"},                     # stops processes
+    "report": {"certificate", "coverage", "stderr_file"},
+    "repro": {"no_ledger"},
+    "reduce": {"parametric"},
+    "shrink": {"from_cert", "item", "no_geng", "no_keep_filters", "objective"},
+    "status": {"expect", "manifest", "verify"},
+    "sweep": {"cert_all", "cert_none", "no_geng", "witnesses", "worst"},
+    "verify": {"jobs", "md", "tamper", "tamper_all"},
+}
+
+
+def test_every_cli_option_is_on_its_tool_or_declared_cli_only():
+    import argparse
+
+    from certo import mcp_server as m
+    from certo.cli import build_parser
+
+    sub = [a for a in build_parser()._actions
+           if isinstance(a, argparse._SubParsersAction)][0]
+    counts = {}
+    for sp in sub.choices.values():
+        for a in sp._actions:
+            counts[a.dest] = counts.get(a.dest, 0) + 1
+    common = {d for d, c in counts.items() if c > len(sub.choices) // 3}
+    tools = {tl.name: tl for tl in m.mcp._tool_manager.list_tools()}
+    missing = {}
+    for name, sp in sub.choices.items():
+        if name not in tools:
+            continue
+        cli = {a.dest for a in sp._actions
+               if a.option_strings and a.dest not in common and a.dest != "help"}
+        params = set(tools[name].parameters.get("properties", {}))
+        gap = cli - params - CLI_ONLY.get(name, set())
+        if gap:
+            missing[name] = sorted(gap)
+    assert not missing, missing
+
+
+def test_opt_gap_and_mixed_on_a_packing_over_mcp():
+    """The fractional and the integral optimum, both certified, over MCP;
+    and `mixed`, which refused a PackingSpec the CLI accepted."""
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parent.parent / "examples"
+           / "packing_mixed.py").read_text(encoding="utf-8")
+    out = run(call("opt", {"spec_source": src, "gap": True}))
+    assert out["certificate"]["kind"] == "gap" and "mu" in out and "nu" in out, out
+    out = run(call("mixed", {"spec_source": src, "prove_optimal": True,
+                             "max_nodes": 200}))
+    assert out["verdict"] in ("proved", "inconclusive"), out
+
+
 def test_the_compact_server_keeps_four_tools():
     """Fifty-odd tools is a long list to read before knowing what you need;
     `certo-mcp --compact` keeps find, run, verify and the guide."""

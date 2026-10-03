@@ -516,3 +516,27 @@ def gap(spec, limits=None, target=None):
                   "deficit": (None if target is None else exact.serialize(
                       max(exact.to_fraction(target) - nu,
                           exact.to_fraction(0))))}
+
+
+def gap_result(packing, limits, target=None):
+    """`opt --gap` as a Result, for the CLI and the MCP tool alike: nu
+    against mu*, one artefact rather than two runs to subtract.
+
+    A target that was not reached REFUTES only when the integer optimum is
+    global. Below that, `nu` is a point somebody found, and "we did not get
+    there" is not "it cannot be got to".
+    """
+    from .i18n import t as _t
+    from .status import Result, Status, Verdict
+
+    cert, meta = gap(packing, limits, target=target)
+    if cert is None:
+        return meta
+    verdict = Verdict.SATISFIABLE
+    if meta.get("reached") is False:
+        verdict = (Verdict.REFUTED
+                   if meta.get("integral_level") == "global_optimum"
+                   else Verdict.INCONCLUSIVE)
+    return Result("opt", Status.SAT, verdict, "certo/gap", 0.0, cert,
+                  detail=_t("engine.opt.gap", mu=meta["mu"], nu=meta["nu"],
+                            gap=meta["gap"]), meta=meta)

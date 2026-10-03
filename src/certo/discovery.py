@@ -68,6 +68,11 @@ SYNONYMS = {
     "progress": "route", "many": "batch", "hundreds": "batch",
     "clique": "clique", "cliques": "clique", "partitions": "partition",
     "tight": "active", "slack": "active", "prices": "dual",
+    "packings": "packing", "empaquetamiento": "packing", "empaquetamientos": "packing",
+    "empacar": "packing", "triangulo": "triangle", "triangulos": "triangle",
+    "arista": "edge", "aristas": "edge", "cubierta": "cover",
+    "particiones": "partition", "fraccionario": "fractional",
+    "fraccionaria": "fractional",
     "contradictorio": "contradictory", "contradictoria": "contradictory",
     "contradictorios": "contradictory", "contradictorias": "contradictory",
     "contradiction": "contradictory", "inconsistent": "contradictory",
@@ -84,6 +89,12 @@ STOP = {"a", "an", "the", "of", "on", "in", "is", "it", "to", "for", "and",
 def _fold(text) -> str:
     return "".join(c for c in unicodedata.normalize("NFKD", str(text))
                    if not unicodedata.combining(c)).lower()
+
+
+#: Words whose stem is another word of the index: "packing" stemmed to
+#: "pack", and a search for a triangle packing found `certo pack`, the
+#: archive command.
+UNSTEMMED = {"packing"}
 
 
 def _stem(w) -> str:
@@ -104,7 +115,7 @@ def tokens(text) -> list:
         if w in STOP:
             continue
         w = SYNONYMS.get(w, w)
-        out.append(_stem(w))
+        out.append(w if w in UNSTEMMED else _stem(w))
     return out
 
 
@@ -138,10 +149,14 @@ def _questions() -> dict:
 
 
 def _spec_classes() -> list:
-    from . import spec as S
+    """Every spec class certo EXPORTS, wherever it is defined: reading only
+    `spec.py` left out `PackingSpec` (packing.py) and `CNFSpec` (cnf.py), and
+    a user searching for the packing spec by name found nothing."""
+    import certo
 
-    return [(n, c) for n, c in sorted(vars(S).items())
-            if inspect.isclass(c) and n.endswith("Spec") and c.__module__ == S.__name__]
+    return [(n, c) for n, c in sorted(vars(certo).items())
+            if inspect.isclass(c) and n.endswith("Spec")
+            and c.__module__.startswith("certo")]
 
 
 def entries() -> list:
@@ -223,6 +238,8 @@ def entries() -> list:
                     "text": " ".join([name, doc[:900]] + cmds)})
         if dataclasses.is_dataclass(cls):
             for f in dataclasses.fields(cls):
+                if f.name.startswith("_"):
+                    continue          # private state, not a field to set
                 # The field's own comment line, when the source has one.
                 note = _field_note(cls, f.name)
                 out.append({

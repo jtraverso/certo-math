@@ -4540,7 +4540,7 @@ def _verify_ideal(cert, limits) -> VerifyReport:
     checks = [(t("verify.ideal.count"), len(hs) == len(gs),
                t("verify.ideal.n", h=len(hs), g=len(gs)))]
     if len(hs) == len(gs):
-        got = combination(hs, gs)
+        got = combination(hs, gs, variables)
         checks.append((t("verify.ideal.expands"), got == lhs,
                        t("verify.ideal.difference", d=str(got - lhs)[:60])))
 
@@ -5773,7 +5773,12 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
             warnings = [w for w in warnings if w != gap]
             warnings.append(t("verify.lp.rounded_optimal",
                               value=exact.serialize(got)))
-    detail = (t("verify.lp.exact.detail", value=value)
+    ok = all(k[1] for k in checks)
+    # "optimum" only for a certificate that verified: on a rejected one the
+    # value is the objective of the vectors as given, and reading it as the
+    # optimum is the one thing a rejection must not invite.
+    detail = (t("verify.lp.invalid.detail", value=value) if not ok
+              else t("verify.lp.exact.detail", value=value)
               if not p.get("integer")
               else t("verify.lp.ilp.detail",
                      value=(exact.serialize(
@@ -5781,7 +5786,7 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
                          if p.get("integral_objective") is not None else "-"),
                      bound=value))
     return VerifyReport(
-        all(k[1] for k in checks), "lp_dual", True, checks=checks,
+        ok, "lp_dual", True, checks=checks,
         warnings=warnings, detail=detail,
     )
 

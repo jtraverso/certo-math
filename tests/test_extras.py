@@ -6967,6 +6967,203 @@ def test_self_check_refuses_to_report_a_certificate_verify_rejects():
     assert r.meta["self_check"] == "FAILED"
 
 
+def test_a_polynomial_with_no_variables_reads_back_and_a_bare_peak_verifies():
+    """`Poly.const((), c)` was written under the key "" and could not be read
+    (`int('')`): a PeakSpec with no parameters self-checked as FAILED since
+    0.22. Constants 0, 1 and a fraction, and a peak with two integer argmaxes
+    (q(3-q)/2 is 1 at q = 1 and q = 2)."""
+    from fractions import Fraction
+
+    from certo import PeakSpec
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    for c in (0, 1, Fraction(-7, 3)):
+        p = Poly.const((), c)
+        assert Poly.parse((), p.serialize()) == p
+    R = ("q",)
+    q = Poly.var(R, "q")
+    K = lambda c: Poly.const(R, c)  # noqa: E731
+    for at in (1, 2):
+        res = algebra.peak(PeakSpec(parameters={}, variable="q",
+                                    objective=q * (K(3) - q) * K(Fraction(1, 2)),
+                                    argmax=Poly.const((), at)), LIM)
+        assert res.verdict is Verdict.PROVED and res.meta["value"] == "1"
+        assert verify(res.certificate).ok
+        assert "for all ," not in res.detail
+
+
+def test_an_ideal_with_no_equations_is_an_identity_check():
+    """`equations=[]` died on an IndexError while `lint` refused it by name.
+    The ideal is {0}: a claim is in it exactly when it is the zero
+    polynomial, certified by expanding; otherwise REFUTED with a point."""
+    import z3
+
+    from certo import IdealSpec
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.lint import _check_ideal
+
+    def errors(spec):
+        return [f for f in _check_ideal(spec, None) if f["level"] == "error"]
+
+    x = z3.Real("x")
+    s = IdealSpec(variables=["x"], equations=[], claim=(x + x) ** 2 - 4 * x ** 2)
+    res = algebra.ideal(s, LIM)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+    assert not errors(s)
+
+    res = algebra.ideal(IdealSpec(variables=["x"], equations=[], claim=x), LIM)
+    assert res.verdict is Verdict.REFUTED and res.meta["value"] not in (None, "0")
+    res = algebra.ideal(IdealSpec(variables=["x"], equations=[], claim=None), LIM)
+    assert res.verdict is Verdict.REFUTED
+    assert errors(IdealSpec(variables=["x"], equations=[]))
+
+
+def test_lint_says_whether_it_checked_and_reads_what_the_engines_read():
+    """`ok: true` for a type with no rules read as a validation; `checked`
+    now says whether rules ran. NonnegSpec and CoverSpec have rules, and a
+    MatrixSpec asking for `inertia` -- which the engine answers -- is no
+    longer refused."""
+    import tempfile
+    from pathlib import Path
+
+    from certo.lint import lint
+
+    d = Path(tempfile.mkdtemp())
+
+    def run(name, body):
+        f = d / name
+        f.write_text(body, encoding="utf-8")
+        return lint(f)
+
+    peak = run("p.py", "\n".join([
+        "from certo import PeakSpec",
+        "from certo.polynomials import Poly",
+        "q = Poly.var(('q',), 'q')",
+        "def spec():",
+        "    return PeakSpec(parameters={}, variable='q', objective=q*(3-q),",
+        "                    argmax=Poly.const((), 1))"]))
+    assert peak["ok"] and peak["checked"] is False and peak["command"] == "peak"
+
+    mixed = run("n.py", "\n".join([
+        "from certo import Poly, NonnegSpec",
+        "R = Poly.var(('R', 'x'), 'R'); x = Poly.var(('R', 'x'), 'x')",
+        "def spec():",
+        "    return NonnegSpec(poly=R*(1 - x + x*x), box={'R': (0, None), 'x': (0, 1)},",
+        "                      title='t')"]))
+    assert mixed["ok"] and mixed["checked"] is True and mixed["command"] == "nonneg"
+    assert any(f["key"] == "nonneg.ray" for f in mixed["findings"])
+    bad = run("b.py", "\n".join([
+        "from certo import Poly, NonnegSpec",
+        "x = Poly.var(('x',), 'x')",
+        "def spec():",
+        "    return NonnegSpec(poly=x, box={'x': (None, 0)})"]))
+    assert not bad["ok"] and bad["errors"]
+
+    cover = run("c.py", "\n".join([
+        "from certo import CoverSpec",
+        "def spec():",
+        "    return CoverSpec(universe=[1, 2, 3], parts=[[1, 2], [3, 4]], title='t')"]))
+    assert cover["checked"] and any(f["key"] == "cover.outside"
+                                    for f in cover["findings"])
+
+    inertia = run("m.py", "\n".join([
+        "from certo import MatrixSpec",
+        "def spec():",
+        "    return MatrixSpec(matrix=[[2, 1], [1, '1/2']], question='inertia', title='t')"]))
+    assert inertia["ok"], inertia["findings"]
+
+
+def test_a_rejected_lp_certificate_does_not_report_an_optimum():
+    """A tampered primal was rejected (`ok=false`), and the detail still
+    ended `optimum = 153/2` -- the tampered vector's objective, not the
+    certified 149/2."""
+    from certo import LPSpec
+    from certo.certificate import Certificate, verify
+    from certo.engines import lp
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1, "b": 1})
+    m.constraint({"a": 1}, "<=", 2, name="cap_a")
+    m.constraint({"a": 1, "b": 1}, "<=", 3, name="both")
+    good = lp.opt(m, LIM).certificate
+    assert "optimum" in verify(good).detail
+    d = good.to_dict()
+    d["payload"]["primal"][0] = "5"
+    rep = verify(Certificate.from_dict(d))
+    assert not rep.ok and "optimum" not in rep.detail.replace("not an optimum", "")
+
+
+def test_opt_on_an_integer_program_prints_both_numbers_and_the_whole_witness():
+    """The fractional optimum and the integral point were one `objective`
+    line apart from a `bound` in a list of meta; they are now a labelled
+    pair, and `--top 0` prints every non-zero entry of the point."""
+    import contextlib
+    import io
+    import tempfile
+    from pathlib import Path
+
+    from certo.cli import build_parser
+
+    f = Path(tempfile.mkdtemp()) / "ilp.py"
+    f.write_text("\n".join([
+        "from certo import LPSpec",
+        "def spec():",
+        "    s = LPSpec(sense='max', integer=True, title='c5')",
+        "    n = ['e%d' % i for i in range(5)]",
+        "    for v in n: s.variable(v, 0, 1)",
+        "    s.objective({v: 1 for v in n})",
+        "    for i in range(5):",
+        "        s.constraint({n[i]: 1, n[(i + 1) % 5]: 1}, '<=', 1, name='v%d' % i)",
+        "    return s"]), encoding="utf-8")
+
+    def out_of(*argv):
+        args = build_parser().parse_args(["opt", str(f), *argv])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            args.func(args)
+        return buf.getvalue()
+
+    text = out_of("--top", "1")
+    assert "integral point found:  2" in text and "relaxation bound:      5/2" in text
+    assert "--top 0" in text
+    every = out_of("--top", "0")
+    assert "e2 = 1" in every and "e4 = 1" in every and "--top 0" not in every
+
+
+def test_the_json_of_a_failed_self_check_does_not_say_proved():
+    """The self-check ran AFTER the JSON was printed: stdout said the
+    engine's verdict, the exit code 1 and stderr said not to trust it. The
+    check now runs first, and the JSON's verdict is `invalid`, with what the
+    engine claimed kept as `candidate_verdict`."""
+    import argparse
+    import contextlib
+    import io
+    import json
+
+    from certo import cli
+
+    r = _mixed_with(">=")
+    claimed = r.verdict.value
+    r.certificate.payload["achieved"] = "999"
+    args = argparse.Namespace(
+        json=True, cert=None, log=None, note="", tag=None, spec=None,
+        self_check=True, timeout_ms=20_000, rlimit=20_000_000,
+        max_memory_mb=2048, seed=0, brief=False)
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = cli.emit(r, args)
+    got = json.loads(out.getvalue())
+    assert rc == 1
+    assert got["verdict"] == "invalid" and got["candidate_verdict"] == claimed
+    assert got["meta"]["self_check"] == "FAILED"
+    assert "SELF-CHECK FAILED" in err.getvalue()
+
+
 # --- discovery: a command that shipped and nobody found -------------------
 
 
@@ -14335,6 +14532,10 @@ FIND_GOLDEN = [
     ("is this linear program infeasible and why", "farkas"),
     ("polynomial nonnegative on a ray to infinity", "nonneg"),
     ("un polinomio no negativo en un intervalo", "nonneg"),
+    ("PackingSpec", "PackingSpec"),
+    ("triangle packing", "PackingSpec"),
+    ("empaquetamiento de triángulos", "PackingSpec"),
+    ("integrality gap fractional integer packing", "opt --gap"),
 ]
 
 
@@ -14822,7 +15023,9 @@ def test_nonneg_on_a_ray_is_the_shift_test_and_verify_redoes_it():
     res = nonneg(NonnegSpec(poly=x ** 3 + x * y + 1,
                             box={"x": (0, None), "y": (0, None)}), LIM)
     assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
-    assert "+inf)" in res.detail
+    assert "+inf)" in res.detail and res.meta["method"] == "shift"
+    closed = nonneg(NonnegSpec(poly=x + y, box={"x": (0, 1), "y": (0, 1)}), LIM)
+    assert closed.meta["method"] == "bernstein"
 
     # needs the ceiling of y: 2 - y + x >= 0 only because y <= 2
     res = nonneg(NonnegSpec(poly=2 - y + x, box={"x": (0, None), "y": (0, 2)}), LIM)

@@ -490,6 +490,16 @@ def pin(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
 
 
 def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """`poly >= 0` on a box, cut by a region -- with `meta["method"]` saying
+    which test ran: `bernstein` on a closed box, `shift` on one with an open
+    end. A client reading the method from `detail` was parsing prose."""
+    res = _nonneg(spec, limits, spec_path)
+    if res.status is not Status.OUT_OF_THEORY:
+        res.meta.setdefault("method", "bernstein")
+    return res
+
+
+def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """`poly >= 0` on a box, cut by a region: a Bernstein certificate, or a
     point where it fails."""
     from fractions import Fraction
@@ -542,7 +552,9 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                "region": {n: g.serialize() for n, g in conditions},
                "title": spec.title}
     if any(hi is None for _lo, hi in box.values()):
-        return _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path)
+        return _with_method(
+            _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path),
+            "shift")
     depth = max(0, int(spec.subdivide or 0))
     terms = bernstein.region_terms(conditions) if conditions else []
     ok, tree = (bernstein.nonneg_region(poly, box, terms, depth) if terms
@@ -596,6 +608,11 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                   ENGINE_NONNEG, ms(), None,
                   detail=t("nonneg.unknown", depth=depth) + (" " + where if where else ""),
                   meta={"diagnose": hint})
+
+
+def _with_method(res, method):
+    res.meta["method"] = method
+    return res
 
 
 def _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path):
@@ -1444,7 +1461,10 @@ def peak(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     ).stamp(spec_path or None)
 
     return Result("peak", Status.UNSAT, Verdict.PROVED, ENGINE_PARAM, ms, cert,
-                  detail=t("engine.peak.proved", value=str(out["value"]) or "0",
+                  # With no parameters there is nothing to quantify over,
+                  # and "for all , ..." was what that read like.
+                  detail=t("engine.peak.proved" if floor else
+                           "engine.peak.proved_none", value=str(out["value"]) or "0",
                            argmax=str(out["argmax"]) or "0", floor=floor),
                   meta={"value": str(out["value"]) or "0",
                         "argmax": str(out["argmax"]) or "0",
@@ -1764,6 +1784,12 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                       detail=t("engine.ideal.not_polynomial", detail=str(e)))
 
     target = claim if claim is not None else Poly.const(variables, 1)
+    if not gs:
+        # No equations: the ideal is {0}. A claim is in it exactly when it IS
+        # the zero polynomial -- an identity, certified by expanding it, and
+        # what users were faking with an unused `anchor = 0`. It used to die
+        # on an IndexError.
+        return _ideal_identity(spec, variables, claim, t0, spec_path)
     try:
         hs, in_ideal = cofactors(target, gs, max_pairs=spec.max_pairs)
     except Budget as e:
@@ -1795,6 +1821,40 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         meta={"cofactors": {str(i): str(h) for i, h in enumerate(hs) if h},
               "equations": len(gs), "degree": target.degree},
     )
+
+
+def _ideal_identity(spec, variables, claim, t0, spec_path):
+    """The empty ideal: an identity, or the point where it fails."""
+    from itertools import product as _product
+
+    from ..parametric import evaluate
+
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    if claim is None:
+        return Result("ideal", Status.SAT, Verdict.REFUTED, ENGINE_IDEAL, ms(),
+                      None, detail=t("engine.ideal.consistent"))
+    if not claim.terms:
+        cert = ideal_certificate(
+            variables=variables, equations=[], claim=claim.serialize(),
+            cofactors=[], inconsistent=False, title=spec.title,
+        ).stamp(spec_path or None)
+        return Result("ideal", Status.UNSAT, Verdict.PROVED, ENGINE_IDEAL, ms(),
+                      cert, detail=t("engine.ideal.identity"),
+                      meta={"equations": 0, "degree": 0})
+    # A non-zero polynomial of degree d is non-zero somewhere on any grid of
+    # d + 1 points per variable: the point is the refutation, exactly.
+    d = claim.degree
+    point = None
+    for pt in _product(range(d + 1), repeat=len(variables)):
+        at = dict(zip(variables, pt))
+        if evaluate(claim, at):
+            point = at
+            break
+    return Result("ideal", Status.SAT, Verdict.REFUTED, ENGINE_IDEAL, ms(), None,
+                  detail=t("engine.ideal.not_identity", poly=str(claim)),
+                  meta={"point": {k: str(v) for k, v in (point or {}).items()},
+                        "value": None if point is None
+                        else str(evaluate(claim, point))})
 
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,7 @@ def scope_note(res: Result):
 # ---------------------------------------------------------------------------
 
 
-_HIDDEN_META = ("trace", "errors", "describe", "counterexamples", "solution",
+_HIDDEN_META = ("self_check", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
                 "counterexample", "hint", "lemmas", "used", "unused", "bridges", "lo", "hi",
@@ -106,6 +106,11 @@ def _as_json(res, args) -> dict:
     for keeping.
     """
     out = res.to_dict()
+    if res.meta.get("self_check") == "FAILED":
+        # What the engine claimed is kept, under its own name; the verdict a
+        # reader acts on is that there is none.
+        out["candidate_verdict"] = out["verdict"]
+        out["verdict"] = "invalid"
     if res.certificate is not None and res.certificate.kind == "model":
         from . import explain
 
@@ -157,10 +162,19 @@ def emit(res: Result, args) -> int:
     if res.certificate is not None:
         res.certificate.stamp(getattr(args, "spec", None))
 
+    # Self-verification, BEFORE anything is printed. A certificate that fails
+    # its own checker is a bug in certo, never a result -- and it used to run
+    # after the JSON was out, so a pipeline reading stdout saw `proved` beside
+    # an exit code of 1 and a SELF-CHECK FAILED on stderr.
+    selfcheck = _self_check(res, args)
+
     if getattr(args, "json", False):
         print(json.dumps(_as_json(res, args), indent=2, ensure_ascii=False))
     else:
-        print("{}  [{}]".format(banner(res), res.status.value))
+        head = banner(res)
+        if selfcheck is False:
+            head = t("cli.selfcheck.banner", verdict=head)
+        print("{}  [{}]".format(head, res.status.value))
         if res.detail:
             print("  " + res.detail)
 
@@ -210,11 +224,6 @@ def emit(res: Result, args) -> int:
         else:
             print("  " + t("cli.certificate.none"))
         print("  " + t("cli.engine", engine=res.engine, ms=res.elapsed_ms))
-
-    # Self-verification. A certificate that fails its own checker is a bug in
-    # certo, never a result, and saying so here is the difference between
-    # finding that out now and finding it out in somebody's audit.
-    selfcheck = _self_check(res, args)
 
     out = getattr(args, "cert", None)
     if out and res.certificate is not None:
@@ -1429,7 +1438,8 @@ def cmd_peak(args):
     res = algebra.peak(spec, limits_from(args), spec_path=args.spec)
     rc = emit(res, args)
     if not args.json and res.meta.get("value"):
-        print("  " + t("cli.peak.scope", floor=res.meta["floor"]))
+        print("  " + t("cli.peak.scope" if res.meta.get("floor")
+                       else "cli.peak.scope_none", floor=res.meta["floor"]))
     return rc
 
 
@@ -1728,12 +1738,7 @@ def cmd_opt(args):
 
         return _explored(args, explore.lp("opt", spec, limits_from(args),
                                           target=args.target))
-    direction = None
-    if getattr(args, "dual_direction", None):
-        direction = {}
-        for part in args.dual_direction.split(","):
-            name, _, w = part.partition("=")
-            direction[name.strip()] = w.strip() or "1"
+    direction = lp.direction_from(getattr(args, "dual_direction", None))
     res = lp.opt(spec, limits_from(args), use_exact=not args.no_exact,
                  target=args.target, dual_direction=direction,
                  round=getattr(args, "round", False),
@@ -1742,11 +1747,26 @@ def cmd_opt(args):
     if not args.json:
         sol = res.meta.get("solution") or {}
         nz = [(k, v) for k, v in sol.items() if not _is_zero(v)]
-        print("  " + t("cli.solution", total=len(sol), nonzero=len(nz)))
-        for name, val in nz[:args.top]:
+        integer = bool(res.meta.get("integer"))
+        if integer and res.meta.get("bound") is not None:
+            # An integer program has TWO numbers and they are not the same
+            # number: the integral point found, and the bound the dual
+            # certifies on the relaxation. Printed apart, each with what it is.
+            print("  " + t("cli.opt.two_numbers"))
+            print("    " + t("cli.opt.integral_point",
+                             value=res.meta.get("objective")))
+            print("    " + t("cli.opt.relaxation_bound",
+                             value=res.meta["bound"]))
+            if res.meta.get("rounded") is not None:
+                print("    " + t("cli.opt.rounded_bound",
+                                 value=res.meta["rounded"]))
+        top = len(nz) if args.top <= 0 else args.top
+        print("  " + t("cli.solution.integral" if integer else "cli.solution",
+                       total=len(sol), nonzero=len(nz)))
+        for name, val in nz[:top]:
             print("    {} = {}".format(name, val))
-        if len(nz) > args.top:
-            print("    " + t("cli.solution.more", n=len(nz) - args.top))
+        if len(nz) > top:
+            print("    " + t("cli.solution.more.top", n=len(nz) - top))
         if res.meta.get("target") is not None:
             met = res.meta.get("meets_target")
             print("  " + t("cli.opt.target.met" if met else
@@ -1761,21 +1781,10 @@ def _opt_gap(args, packing):
     """nu against mu*, as one artefact rather than two runs to subtract."""
     from . import packing as pk
 
-    cert, meta = pk.gap(packing, limits_from(args), target=args.target)
-    if cert is None:
-        return emit(meta, args)
-    # A target that was not reached REFUTES only when the integer optimum is
-    # global. Below that, `nu` is a point somebody found, and "we did not get
-    # there" is not "it cannot be got to" -- which is the distinction the
-    # whole tool is built around, and it does not stop at the engines.
-    verdict = Verdict.SATISFIABLE
-    if meta.get("reached") is False:
-        verdict = (Verdict.REFUTED
-                   if meta.get("integral_level") == "global_optimum"
-                   else Verdict.INCONCLUSIVE)
-    res = Result("opt", Status.SAT, verdict, "certo/gap", 0.0,
-                 cert, detail=t("engine.opt.gap", mu=meta["mu"], nu=meta["nu"],
-                                gap=meta["gap"]), meta=meta)
+    res = pk.gap_result(packing, limits_from(args), target=args.target)
+    if res.certificate is None:
+        return emit(res, args)
+    meta = res.meta
     rc = emit(res, args)
     if not args.json:
         print("  " + t("cli.opt.gap.tight", n=meta["tight"]))
@@ -2780,7 +2789,8 @@ def build_parser():
                     help="skip rational reconstruction; leaves a floating-point "
                          "certificate (faster, NOT citable)")
     sp.add_argument("--top", type=int, default=10, metavar="K",
-                    help="how many non-zero variables to show (default 10)")
+                    help="how many non-zero variables to show (default 10; "
+                         "0 shows them all -- the whole witness)")
     sp.add_argument("--target", metavar="VALUE",
                     help="certify objective >= VALUE rather than only "
                          "reporting the optimum. For an existence proof the "

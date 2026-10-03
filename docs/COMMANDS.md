@@ -532,6 +532,10 @@ VALID  lp_dual certificate (verified without a solver)
   EXACT rational arithmetic, no tolerances
 ```
 
+On an integer program the output labels its two numbers apart -- the
+integral point found and the relaxation bound the dual certifies -- and
+`--top 0` prints the whole integral point.
+
 `--no-exact` skips the reconstruction; the certificate stays in floating point
 and `verify` flags it as **not citable**.
 
@@ -1387,6 +1391,14 @@ arithmetic. It is sufficient, not necessary -- `(x-1)^2 + 1` on `[0, +inf)`
 keeps a negative coefficient -- so what it misses is INCONCLUSIVE, and says
 so; from `x >= 1` the same polynomial is shown. `(None, hi)` is refused:
 substitute `v -> -v`.
+
+Rays and bounded sides mix in one box, and the ceilings are used:
+
+    R = Poly.var(("R", "x"), "R"); x = Poly.var(("R", "x"), "x")
+    NonnegSpec(poly=R * (1 - x + x*x), box={"R": (0, None), "x": (0, 1)})
+
+`meta["method"]` says which test ran -- `bernstein` or `shift` -- for a
+client that should not parse it out of the detail.
 
 ### `certo pin`
 

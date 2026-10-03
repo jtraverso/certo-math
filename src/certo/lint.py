@@ -87,26 +87,37 @@ def lint(path, limits=None) -> dict:
     name = type(spec).__name__
     checker = CHECKS.get(name)
     if checker is None:
-        return _report(path, name, [_f(NOTE, "unknown_kind", kind=name)])
+        # LOADED is not CHECKED. `ok` alone read as a validation to every
+        # pipeline that stopped on `ok=false`, for a type with no rules at all.
+        return _report(path, name, [_f(NOTE, "unknown_kind", kind=name)],
+                       checked=False, spec=spec)
 
     findings = list(checker(spec, limits))
     if not getattr(spec, "title", ""):
         # `status` reads titles; a directory of untitled certificates is a
         # directory of filenames, which is what this is trying to prevent.
         findings.append(_f(NOTE, "no_title"))
-    return _report(path, name, findings)
+    return _report(path, name, findings, spec=spec)
 
 
-def _report(path, kind, findings) -> dict:
+def _report(path, kind, findings, checked=None, spec=None) -> dict:
     by = {lvl: [f for f in findings if f["level"] == lvl]
           for lvl in (ERROR, WARN, NOTE)}
+    command = COMMANDS.get(kind or "", "")
+    if not command and spec is not None:
+        from .routing import command_for
+
+        command = command_for(spec) or ""
     return {
         "spec": str(path), "kind": kind,
-        "command": COMMANDS.get(kind or "", ""),
+        "command": command,
         "findings": by[ERROR] + by[WARN] + by[NOTE],
         "errors": len(by[ERROR]), "warnings": len(by[WARN]),
         "notes": len(by[NOTE]),
         "ok": not by[ERROR] and not by[WARN],
+        # Whether rules for this spec type RAN. False with `ok` true means
+        # only that the file loaded; None when it did not even load.
+        "checked": (kind is not None) if checked is None else checked,
     }
 
 
@@ -590,6 +601,21 @@ def _check_matrix(spec, limits):
     elif isinstance(source, dict) and "entries" in source:
         source = source["entries"]
 
+    question = getattr(spec, "question", "hermite")
+    if question in ("inertia", "psd"):
+        # Rational and symmetric, not integer: the engine reads it with
+        # `inertia.parse`, and lint must accept exactly what the engine does.
+        from . import inertia as inr
+
+        try:
+            inr.parse(source)
+        except inr.NotSymmetric as exc:
+            yield _f(ERROR, "matrix.not_a_matrix", error=str(exc))
+        rows, cols = getattr(spec, "rows", None), getattr(spec, "cols", None)
+        if rows is not None and cols is not None and list(rows) != list(cols):
+            yield _f(ERROR, "matrix.principal_only")
+        return
+
     try:
         A = parse(source)
     except NotAnIntegerMatrix as exc:
@@ -598,7 +624,6 @@ def _check_matrix(spec, limits):
 
     n, m = len(A), len(A[0])
 
-    question = getattr(spec, "question", "hermite")
     if question not in ("det", "determinant", "rank", "hermite", "smith"):
         yield _f(ERROR, "matrix.unknown_question", question=question)
     elif question in ("det", "determinant"):
@@ -723,7 +748,11 @@ def _check_parametric(spec, limits):
              params=", ".join("{} >= {}".format(k, v)
                               for k, v in spec.parameters.items()))
     if not any(dual.get(n) for n in names):
-        yield _f(WARN, "param.all_zero")
+        # A NOTE, not a warning: with y = 0 the bound is 0 and the content,
+        # if any, is in the dual FEASIBILITY residuals -- `max -P(t) w`,
+        # 0 <= w <= 1, certifies P(t) >= 0 on the whole domain exactly that
+        # way. A warning made `ok` false for a certificate that verified.
+        yield _f(NOTE, "param.all_zero")
 
 
 def _check_eliminate(spec, limits):
@@ -759,8 +788,13 @@ def _check_eliminate(spec, limits):
 
 
 def _check_ideal(spec, limits):
-    if not spec.equations:
+    # With a claim and no equations the question is an identity -- is the
+    # claim the zero polynomial? -- which `ideal` answers. With neither,
+    # there is no question.
+    if not spec.equations and getattr(spec, "claim", None) is None:
         yield _f(ERROR, "ideal.no_equations")
+    elif not spec.equations:
+        yield _f(NOTE, "ideal.identity")
     if not spec.variables:
         yield _f(ERROR, "ideal.no_variables")
 
@@ -841,6 +875,78 @@ def _check_cnf(spec, limits):
         yield _f(NOTE, "cnf.cardinality")
 
 
+def _check_nonneg(spec, limits):
+    """The box read the way `nonneg` reads it, and which test will run."""
+    from fractions import Fraction
+
+    box = getattr(spec, "box", None) or {}
+    if not box:
+        yield _f(ERROR, "nonneg.no_box")
+        return
+    open_end = False
+    for name, ends in box.items():
+        try:
+            lo, hi = ends
+        except (TypeError, ValueError):
+            yield _f(ERROR, "nonneg.box_shape", name=name)
+            continue
+        if lo is None:
+            yield _f(ERROR, "nonneg.no_floor", name=name)
+            continue
+        try:
+            lo = Fraction(lo)
+            hi = None if hi is None else Fraction(hi)
+        except (TypeError, ValueError):
+            yield _f(ERROR, "nonneg.box_shape", name=name)
+            continue
+        if hi is None:
+            open_end = True
+        elif hi < lo:
+            yield _f(ERROR, "nonneg.empty_side", name=name, lo=lo, hi=hi)
+    poly = getattr(spec, "poly", None)
+    ring = getattr(poly, "vars", None)
+    if ring is not None and tuple(ring) != tuple(box):
+        yield _f(ERROR, "nonneg.ring", ring=", ".join(ring),
+                 box=", ".join(box))
+    if open_end:
+        yield _f(NOTE, "nonneg.ray")
+    elif int(getattr(spec, "subdivide", 0) or 0) < 0:
+        yield _f(ERROR, "nonneg.subdivide")
+
+
+def _check_cover(spec, limits):
+    """The structure of a cover, without deciding it."""
+    universe = list(getattr(spec, "universe", None) or [])
+    parts = list(getattr(spec, "parts", None) or [])
+    if not universe:
+        yield _f(ERROR, "cover.no_universe")
+    if not parts:
+        yield _f(ERROR, "cover.no_parts")
+        return
+    if getattr(spec, "cliques", False):
+        small = [i for i, p in enumerate(parts) if len(set(p)) < 2]
+        if small:
+            yield _f(ERROR, "cover.small_clique", n=len(small), first=small[0])
+        return
+    known = set(map(_hashable, universe))
+    if len(known) != len(universe):
+        yield _f(WARN, "cover.universe_repeats")
+    stray = [x for p in parts for x in p if _hashable(x) not in known]
+    if stray:
+        yield _f(ERROR, "cover.outside", n=len(stray), first=repr(stray[0])[:40])
+    empty = [i for i, p in enumerate(parts) if not list(p)]
+    if empty:
+        yield _f(WARN, "cover.empty_part", n=len(empty), first=empty[0])
+
+
+def _hashable(x):
+    try:
+        hash(x)
+        return x
+    except TypeError:
+        return repr(x)
+
+
 CHECKS = {
     "Spec": _check_spec, "MultiSpec": _check_multi, "SweepSpec": _check_sweep,
     "DomainSpec": _check_domain, "LPSpec": _check_lp, "ProofSpec": _check_proof,
@@ -851,4 +957,5 @@ CHECKS = {
     "PackingSpec": _check_packing, "EliminateSpec": _check_eliminate,
     "ParametricSpec": _check_parametric,
     "MatrixSpec": _check_matrix,
+    "NonnegSpec": _check_nonneg, "CoverSpec": _check_cover,
 }

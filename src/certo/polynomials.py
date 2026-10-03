@@ -235,7 +235,10 @@ class Poly:
         variables = tuple(variables)
         terms = {}
         for k, v in data.items():
-            e = tuple(int(x) for x in k.split(" "))
+            # `split()`, not `split(" ")`: a ring with no variables writes its
+            # constant under the key "", and `"".split(" ")` is `[""]` -- a
+            # PeakSpec with no parameters could not be read back.
+            e = tuple(int(x) for x in k.split())
             if len(e) != len(variables):
                 raise ValueError(t("poly.exponent_length", got=len(e),
                                    want=len(variables)))
@@ -359,9 +362,11 @@ def cofactors(f: Poly, gens, **budget):
     return coeffs, True
 
 
-def combination(hs, gs) -> Poly:
-    """sum h_i g_i. The check, in one line of arithmetic."""
-    out = Poly(gs[0].vars)
+def combination(hs, gs, variables=None) -> Poly:
+    """sum h_i g_i. The check, in one line of arithmetic. With no equations
+    it is the zero polynomial of `variables` -- an empty ideal, not an
+    `IndexError`."""
+    out = Poly(gs[0].vars if gs else tuple(variables or ()))
     for h, g in zip(hs, gs):
         out = out + h * g
     return out

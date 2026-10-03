@@ -544,6 +544,10 @@ VÁLIDO  certificado lp_dual (verificado sin solver)
   aritmética racional EXACTA, sin tolerancias
 ```
 
+En un programa entero la salida rotula aparte sus dos números -- el punto
+entero hallado y la cota de la relajación que certifica el dual -- y
+`--top 0` imprime el punto entero completo.
+
 `--no-exact` salta la reconstrucción; el certificado queda en punto flotante y
 `verify` lo marca como **no citable**.
 
@@ -1413,6 +1417,14 @@ región y de los techos que la caja sí tiene (`hi - v >= 0`), rederivado por
 `[0, +inf)` conserva un coeficiente negativo -- así que lo que no alcanza es
 INCONCLUSO, y lo dice; desde `x >= 1` el mismo polinomio queda demostrado.
 `(None, hi)` se rechaza: sustituye `v -> -v`.
+
+Rayos y lados acotados se mezclan en una misma caja, y se usan los techos:
+
+    R = Poly.var(("R", "x"), "R"); x = Poly.var(("R", "x"), "x")
+    NonnegSpec(poly=R * (1 - x + x*x), box={"R": (0, None), "x": (0, 1)})
+
+`meta["method"]` dice qué test corrió -- `bernstein` o `shift` -- para un
+cliente que no debería sacarlo del texto del detalle.
 
 ### `certo pin`
 

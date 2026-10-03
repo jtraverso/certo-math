@@ -110,6 +110,18 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P2** | `export --lean` for `ideal`: the cofactor identity as `linear_combination`, with the ring and any denominators recorded -- an identity over QQ is not silently one over every ring | **M** | med | med | user feedback (an algebraic-geometry formalisation): the cofactors are there and the export is refused; the semigroup exporter compiled unchanged against their Mathlib |
+| **P2** | Structural correspondence for an exported semigroup: generators, coordinate order, grading, separators and the integer inverse compared with the definition the project uses | **M** | med | med | user feedback: compiling the exported data does not show it is the paper's cone, and the exporter said it had no linear rows to compare |
+| **P2** | `bind` reading the ELABORATED type of the Lean declaration (and its axioms), hashed; `user_asserted` and `kernel_checked` correspondence kept apart | **M-L** | med | med | user feedback: `provides` is a transcription the user writes, and `bind` does not read the declaration |
+| **P2** | `cover` relative to a partition received: the owners withdrawn, the pieces inserted, frozen owners kept, the same resource covered, the balance declared | **M** | high | med | user feedback, with acceptance criteria: a valid final cover that replaced a frozen owner must be refused; today an own auditor does it |
+| **P2** | `compose` reading a `polynomial_nonneg` certificate as an obligation: variables, box, rays and region, matched against the use -- `[0,1]` must not be reused for `x >= 0` | **M** | med | med | user feedback: `obligations_of` translates `unsat_core` and `farkas` only; the link is by hand |
+| **P2** | `ideal`: linear definitions eliminated first, traceably (each substitution recorded and checked), and Groebner progress -- pairs, sizes, why it stopped | **M** | med | low | user feedback: identities with many implicit relations ran out of a 60 s budget until the definitions were substituted by hand |
+| **P2** | The scope beside the success: a restricted column family, a box, an open coverage obligation -- on the result line, not only in `partial`, `assumed` and the warnings | **S-M** | med | low | user feedback: the information exists and is not where the success is read |
+| **P3** | The remaining MCP gaps the parity test declares CLI-only: `reduce --parametric`, `shrink --from-cert/--item/--objective`, `sweep --witnesses/--worst`, `status --verify/--expect` | **S-M** | high | low | 0.24.1 closed `opt`, `mixed` and `cover`; `run` reaches the engines' options meanwhile |
+| **P3** | `lint` rules for the kinds that still have none (`PeakSpec` first) | **S** | high | low | `checked: false` says so now; a rule set is the rest |
+| **P3** | An isomorphism certificate for localised quotients: the ideal each way, both compositions, the domains, denominators kept before cancelling | **M-L** | **low** | med | user feedback (same formalisation); a typed cocycle certificate and descent obligations in `status` follow it |
+| **P3** | Bernstein data with a small Lean checker against a pinned Mathlib, before any automatic export of `polynomial_nonneg` | **L** | **low** | med | user feedback: no `sorry`, no heuristic tactic -- the kernel checks the identities and signs of the data |
+| **P3** | A weighted combinatorial transport as a parametric certificate, with the bridge from single classes to the reduced model | **L** | **low** | med | user feedback, still loosely specified: a replacement rule preserving every edge demand, legality, non-negativity and cost for any number of classes |
 | **P3** | `divisibility`: the incidence matrix pieces x edges built for you, and "Q yes / Z no" with the obstruction -- a thin entry point over `solve` | **S-M** | med | low | user feedback: the Smith-normal-form step is what divisibility arguments need, and `solve` already does it once the matrix is written |
 | **P3** | `farkas_ray` tied to the program it is about when it travels alone (a spec digest, or the LP's own rows by name) | **S** | med | low | a standalone ray is about the system in its payload, which is true and checked; nothing says which user program that system is |
 | **P2** | Piecewise programs in `atlas`: a DECLARED piecewise definition (region k -> program k), each piece checked against the program declared for its region, the statement about that declared function | **M** | med | med | user feedback (a piecewise phi): one program for the whole domain forced a reformulation as a max of lines, which is not always possible. Declared, not inferred from the pieces -- otherwise the atlas would define the function it claims to bound |
@@ -1048,7 +1060,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.24.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.24.1**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

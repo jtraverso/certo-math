@@ -6,6 +6,61 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.24.1] — 2026-10-03
+
+**Corrections from four reports on 0.24.0.** No new commands (58) or kinds
+(55); the schema stays 5. None of the four found a forged certificate
+accepted -- every rejection held. What they found is below.
+
+### Fixed
+
+- **A polynomial with no variables could not be read back.**
+  `Poly.const((), c)` was written under the key `""`, and reading it did
+  `int('')`: a `PeakSpec` with no parameters self-checked as FAILED, and had
+  since 0.22. The detail no longer reads "for all , ...".
+- **The JSON said `proved` after a failed self-check.** The check ran after
+  the JSON was printed; it runs first now, and a failure is
+  `"verdict": "invalid"`, with what the engine claimed kept as
+  `candidate_verdict` and `meta.self_check: "FAILED"`. The exit code (1) and
+  stderr were already right.
+- **`ideal` with `equations=[]` died on an `IndexError`.** The ideal is
+  {0}, so the question is an identity: PROVED when the claim expands to the
+  zero polynomial, REFUTED with a point where it is non-zero otherwise.
+  `lint` accepts it with a claim, and says so.
+- **`lint` refused `MatrixSpec(question="inertia")`**, which the engine
+  answers and `verify` checks completely; it reads the matrix the way the
+  engine does now (rational, symmetric).
+- **A rejected `lp_dual` said `optimum = 153/2`** -- the objective of the
+  tampered vectors, not the certified 149/2. A rejection says "the primal
+  objective recomputed", never "optimum".
+- **`find` did not know `PackingSpec`** (or `CNFSpec`): only `spec.py` was
+  indexed. Every exported spec class is now, "packing" no longer stems to
+  the `pack` command, and Spanish ("empaquetamiento de triángulos") finds it.
+
+### Changed
+
+- **`lint` says whether it checked**: `checked: false` for a type with no
+  rules, where `ok: true` meant only that the file loaded. `NonnegSpec` and
+  `CoverSpec` have rules now (the box and which test it selects; the parts
+  against the universe), and `command` is filled for every routed type.
+- **A zero dual in a `ParametricSpec` is a note, not a warning**: with
+  `y = 0` the content is in the dual feasibility residuals -- `c(p) <= 0` on
+  the whole domain -- which is how a sign certificate is written, and the
+  warning made `ok` false for certificates that verified.
+- **The MCP tools take what the commands take**: `opt` gained `gap` (both
+  optima of a packing, one certificate), `target`, `no_exact` and
+  `dual_direction`; `mixed` gained `prove_optimal`, `max_nodes`,
+  `wall_timeout_ms` and `freeze`, and takes a `PackingSpec` as the command
+  did; `cover` gained `optimize` and `prove_optimal`. A test now fails when a
+  command's option is on neither its tool nor a declared CLI-only list.
+- **`opt` on an integer program prints both numbers, labelled**: the
+  integral point found and the relaxation bound the dual certifies (and the
+  rounded bound with `--round`). The point is called the integral point, and
+  `--top 0` prints all of it.
+- **`nonneg` says which test ran** in `meta["method"]` -- `bernstein` or
+  `shift` -- and the documentation and `dsl_guide` show a box mixing a ray
+  with bounded sides.
+
 ## [0.24.0] — 2026-10-02
 
 **Discoverable: what certo can do, found by what you need.** One new command
