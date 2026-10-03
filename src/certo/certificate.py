@@ -6038,19 +6038,30 @@ def _verify_cnf_model(cert, limits) -> VerifyReport:
     from .cnf import CNF
 
     p = cert.payload
-    cnf = CNF.from_dimacs(p["dimacs"])
+    try:
+        cnf = CNF.from_dimacs(p["dimacs"])
+    except ValueError as e:
+        return VerifyReport(False, "cnf_model", True, checks=[(
+            t("verify.cnf.readable"), False, str(e))])
     true = set(p["true_vars"])
 
     def lit_true(l):
         return (abs(l) in true) == (l > 0)
 
+    # An EMPTY clause is never satisfied (`any` of nothing is False), which
+    # is right -- once the reader keeps it, which it did not before 0.25.1.
     bad = [c for c in cnf.clauses if not any(lit_true(l) for l in c)]
-    ok = not bad
+    checks = [(t("verify.cnf.header"), cnf.matches_header(),
+               t("verify.cnf.header_detail",
+                 declared=getattr(cnf, "declared", None),
+                 read=getattr(cnf, "read", len(cnf.clauses))))]
+    checks.append((t("verify.cnf.satisfies", n=len(cnf.clauses)), not bad,
+                   t("verify.cnf.unsatisfied", n=len(bad))))
+    ok = all(c[1] for c in checks)
     return VerifyReport(
-        ok, "cnf_model", True,
-        checks=[(t("verify.cnf.satisfies", n=len(cnf.clauses)), ok,
-                 t("verify.cnf.unsatisfied", n=len(bad)))],
-        detail="" if ok else t("verify.cnf.first_failure", clause=bad[0]),
+        ok, "cnf_model", True, checks=checks,
+        detail="" if ok else (t("verify.cnf.first_failure", clause=bad[0])
+                              if bad else checks[0][2]),
     )
 
 
@@ -6061,10 +6072,14 @@ def _verify_drat(cert, limits) -> VerifyReport:
 
     lim = limits or Limits()
     p = cert.payload
-    cnf = CNF.from_dimacs(p["dimacs"])
+    try:
+        cnf = CNF.from_dimacs(p["dimacs"])
+    except ValueError as e:
+        return VerifyReport(False, "drat", True, checks=[(
+            t("verify.cnf.readable"), False, str(e))])
     checks = [(
         t("verify.drat.formula", n=p["nclauses"]),
-        len(cnf.clauses) == p["nclauses"],
+        len(cnf.clauses) == p["nclauses"] and cnf.matches_header(),
         "read {}".format(len(cnf.clauses)),
     )]
     rep = drup.check(cnf.clauses, p["proof"],

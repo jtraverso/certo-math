@@ -170,6 +170,20 @@ class Poly:
 
     __rmul__ = __mul__
 
+    def __truediv__(self, other):
+        """Division by a NUMBER is multiplication by its exact inverse;
+        `T*T/1` in a spec used to die with an unsupported-operand error.
+        Division by a polynomial is not a polynomial and is refused by name."""
+        if isinstance(other, Poly):
+            raise TypeError(t("poly.divide_by_poly"))
+        try:
+            c = Fraction(other)
+        except (TypeError, ValueError):
+            return NotImplemented
+        if c == 0:
+            raise ZeroDivisionError(t("poly.divide_by_zero"))
+        return self.scaled(1 / c)
+
     def scaled(self, c):
         c = Fraction(c)
         return Poly(self.vars, {} if not c

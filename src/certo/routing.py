@@ -133,7 +133,13 @@ def table() -> dict:
                 "question": _t(question),
                 "command": command,
                 "spec": SPEC_OF.get(base),
+                # True means ALWAYS. `opt` read `false` beside a continuous LP
+                # whose `lp_dual` re-checks by rational arithmetic, and that
+                # was taken for "always needs a solver". Route on the
+                # three-state answer: yes, depends (on the flag or the
+                # result), no.
                 "certificate_rechecks_without_a_solver": base in SOLVER_FREE,
+                "rechecks_without_a_solver": TIER.get(base),
             })
         groups.append({"group": _t(group), "rows": out})
     return {"header": _t("commands.header"), "groups": groups,

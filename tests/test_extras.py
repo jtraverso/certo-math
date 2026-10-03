@@ -7433,6 +7433,70 @@ def test_an_ideal_certificate_goes_to_lean_as_a_linear_combination():
     assert leanexport.lean_name("x_1") == "x_1"
 
 
+def test_an_empty_dimacs_clause_is_kept_and_no_model_satisfies_it():
+    """SOUNDNESS, from a user's report on 0.24.0 and 0.25.0: `p cnf 1 1` /
+    `0` is the empty clause, unsatisfiable. The reader dropped the line, the
+    formula had no clauses, and a model of nothing verified as a model of
+    it. Two clauses on one line became one clause with a literal 0, and a
+    header that lied about the count went unnoticed. A DRAT line with a 0
+    inside is malformed, not a lemma."""
+    from certo import Limits, drup
+    from certo.certificate import cnf_model_certificate, drat_certificate, verify
+    from certo.cnf import CNF, CNFSpec
+    from certo.engines import sat
+
+    assert CNF.from_dimacs("p cnf 1 1\n0\n").clauses == [[]]
+    assert not verify(cnf_model_certificate("p cnf 1 1\n0\n", [])).ok
+    assert not verify(cnf_model_certificate("p cnf 2 2\n1 0\n0\n", [1])).ok
+    assert CNF.from_dimacs("p cnf 2 2\n1 0 2 0\n").clauses == [[1], [2]]
+    assert CNF.from_dimacs("p cnf 2 1\n1\n2 0\n").clauses == [[1, 2]]
+    assert not verify(cnf_model_certificate("p cnf 1 2\n1 0\n", [1])).ok
+    assert not verify(cnf_model_certificate("p cnf 1 1\n2 0\n", [2])).ok
+    assert verify(cnf_model_certificate("p cnf 2 2\n1 0\n-2 0\n", [1])).ok
+    assert verify(cnf_model_certificate("p cnf 0 0\n", [])).ok
+    try:
+        CNF.from_dimacs("p cnf 1 1\n1\n")
+        raise AssertionError("an unterminated clause was read")
+    except ValueError:
+        pass
+
+    # the empty clause round-trips, and the engine refutes the formula
+    c = CNF.from_dimacs("p cnf 2 3\n1 2 0\n0\n-1 0\n")
+    assert CNF.from_dimacs(c.to_dimacs()).clauses == c.clauses
+    res = sat.cases(CNFSpec(cnf=c, title="t"), Limits())
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+
+    assert drup.check([[1], [-1]], ["0"]).ok
+    assert not drup.check([[1, 2]], ["1 0 2 0"]).ok
+    forged = drat_certificate("p cnf 2 1\n1 2 0\n", ["0"], 2, 1)
+    assert not verify(forged).ok
+
+
+def test_three_papercuts_from_the_0_25_reports():
+    """`T*T/1` in a spec died on an unsupported operand; `api.options` on a
+    spec's name listed the commands without saying which one; the catalogue
+    said `opt` never re-checks without a solver, beside an `lp_dual` that
+    does."""
+    from certo import api, routing
+    from certo.polynomials import Poly
+
+    T = Poly.var(("T",), "T")
+    assert T * T / 1 == T * T and (T + 1) / 3 == (T + 1).scaled(Fraction(1, 3))
+    for bad in (lambda: T / T, lambda: T / 0):
+        try:
+            bad()
+            raise AssertionError("divided")
+        except (TypeError, ZeroDivisionError):
+            pass
+    try:
+        api.options("packing")
+    except ValueError as e:
+        assert "runs with `opt`" in str(e)
+    rows = {r["command"]: r for g in routing.table()["groups"] for r in g["rows"]}
+    assert rows["opt"]["rechecks_without_a_solver"] == "depends"
+    assert rows["farkas"]["rechecks_without_a_solver"] == "yes"
+
+
 def test_the_json_of_a_failed_self_check_does_not_say_proved():
     """The self-check ran AFTER the JSON was printed: stdout said the
     engine's verdict, the exit code 1 and stderr said not to trust it. The

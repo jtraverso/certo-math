@@ -410,6 +410,15 @@ def _trim(meta: dict) -> dict:
     return out
 
 
+def _runtime() -> dict:
+    import sys
+    from pathlib import Path
+
+    from . import __file__ as pkg
+
+    return {"python": sys.executable, "certo": str(Path(pkg).parent)}
+
+
 def _scope(res) -> list:
     from .scope import scope_of
 
@@ -441,6 +450,11 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
         # keeps the old code until the client reconnects, and results from
         # two versions mixed silently; now every answer says which one.
         "certo_version": __version__,
+        # WHICH certo answered: the interpreter and the package it imported.
+        # A user's PATH and MCP server ran 0.24.0 while PyPI had 0.25.0, and
+        # another interpreter on the same machine imported older code; the
+        # version alone does not say where it came from.
+        "runtime": _runtime(),
         "command": res.command,
         "verdict": res.verdict.value,
         "status": res.status.value,

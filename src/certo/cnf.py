@@ -181,8 +181,22 @@ class CNF:
 
     @classmethod
     def from_dimacs(cls, text: str) -> "CNF":
+        """DIMACS as a STREAM of literals, each clause ended by `0`.
+
+        It was read line by line, dropping a line with no literal before its
+        `0` -- and that line is the EMPTY CLAUSE, which makes the formula
+        unsatisfiable. `p cnf 1 1` / `0` read as no clauses at all, and a
+        model of nothing verified as a model of an unsatisfiable formula.
+        Two clauses on one line (`1 0 2 0`) became one clause with a literal
+        0 in it. Now a `0` closes a clause wherever it is, an empty one
+        included, and the header is recorded so a verifier can refuse a file
+        that is not what it declares (`declared`, `read`).
+        """
         c = cls()
         names: dict = {}
+        current: list = []
+        read = 0
+        c.declared = None
         for line in text.splitlines():
             line = line.strip()
             if not line:
@@ -197,19 +211,43 @@ class CNF:
                     c.title = line[1:].strip()
                 continue
             if line.startswith("p"):
-                nv = int(line.split()[2])
+                head = line.split()
+                if len(head) != 4 or head[1] != "cnf":
+                    raise ValueError("not a DIMACS CNF header: " + line)
+                nv, nc = int(head[2]), int(head[3])
+                c.declared = (nv, nc)
                 for v in range(1, nv + 1):
                     c.var(names.get(v, "x{}".format(v)))
                 continue
-            lits = [int(t) for t in line.split()]
-            if lits and lits[-1] == 0:
-                lits.pop()
-            if lits:
-                for l in lits:
-                    while c.nvars < abs(l):
-                        c.var("x{}".format(c.nvars + 1))
-                c.add(*lits)
+            if line.startswith("%"):
+                break                      # the SATLIB end marker
+            for tok in line.split():
+                lit = int(tok)
+                if lit == 0:
+                    for l in current:
+                        while c.nvars < abs(l):
+                            c.var("x{}".format(c.nvars + 1))
+                    c.add(*current)        # [] is the empty clause: kept
+                    read += 1
+                    current = []
+                else:
+                    current.append(lit)
+        if current:
+            raise ValueError("the last clause is not ended by 0: "
+                             + " ".join(map(str, current)))
+        c.read = read
         return c
+
+    def matches_header(self) -> bool:
+        """Did the file hold the clauses its `p cnf V C` line declares? A
+        tautology the reader drops still counts as read. True when there was
+        no header to compare."""
+        declared = getattr(self, "declared", None)
+        if declared is None:
+            return True
+        nv, nc = declared
+        top = max((abs(l) for cl in self.clauses for l in cl), default=0)
+        return getattr(self, "read", len(self.clauses)) == nc and top <= nv
 
     def decode(self, true_vars) -> dict:
         """{nombre: bool} legible, saltando las auxiliares."""

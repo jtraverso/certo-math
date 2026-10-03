@@ -121,8 +121,17 @@ def _entry(command: str, spec):
             raise ValueError(
                 "`{}` does not run a spec. Use certo.verify for a stored "
                 "certificate, or the CLI for the rest.".format(command))
-        raise ValueError("no such command: {}. Runnable: {}".format(
-            command, ", ".join(runnable())))
+        # A spec's name is not a command: `PackingSpec` runs under `opt`.
+        # Say which, when the name is one -- a user asked for "packing".
+        low = command.lower()
+        names = {s.lower() for s in (low, low + "spec")}
+        wanted = sorted({c for c, s in routing.SPEC_OF.items()
+                         if s and s != "*" and s.lower() in names}
+                        | {c for s, c in routing.ALSO.items() if s.lower() in names})
+        hint = " (a {} spec runs with `{}`)".format(command, "`, `".join(wanted)) \
+            if wanted else ""
+        raise ValueError("no such command: {}{}. Runnable: {}".format(
+            command, hint, ", ".join(runnable())))
     return getattr(importlib.import_module(where[0]), where[1])
 
 

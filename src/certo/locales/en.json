@@ -1988,5 +1988,10 @@
   "lean.ideal.doc_member": "The claim is in the ideal of the hypotheses: it is their combination with the certificate's cofactors, an identity {ring}. `linear_combination` checks it with `ring1`; nothing is searched.",
   "lean.ideal.doc_inconsistent": "The hypotheses are inconsistent: 1 is their combination with the certificate's cofactors, an identity {ring}. `linear_combination` checks it with `ring1`; nothing is searched.",
   "lean.ideal.ring_any": "in every commutative ring (the coefficients are integers)",
-  "lean.ideal.ring_field": "in every field of characteristic zero (the coefficients have denominators)"
+  "lean.ideal.ring_field": "in every field of characteristic zero (the coefficients have denominators)",
+  "verify.cnf.readable": "the DIMACS text can be read",
+  "verify.cnf.header": "the file holds the clauses its `p cnf` header declares",
+  "verify.cnf.header_detail": "declared {declared}, read {read}",
+  "poly.divide_by_poly": "a polynomial divided by a polynomial is not a polynomial; multiply through by the denominator instead",
+  "poly.divide_by_zero": "division of a polynomial by zero"
 }

@@ -110,6 +110,13 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | `AssignmentSpec`: items, the receivers each may go to, capacities, a target -- an integral assignment, or a Hall witness `U` with value `cap(U) + |items not confined to U|`, both inequalities counted by the verifier, no solver | **M** | high | med | user feedback with acceptance criteria: the assignment matrix was rebuilt and checked outside certo, and an exact optimum of the WRONG matrix is still exact |
+| **P2** | `opt` with exactness REQUIRED: no floating-point certificate when the reconstruction fails, the step that failed named, and a rational primal supplied by the user certified directly | **S-M** | high | med | user feedback, reproduced over five sessions: `use_exact=True` returned a `partial` float certificate on a 15-row LP with a tiny centre |
+| **P2** | Case splits in `compose`, made visible: `p.case(name, when=H, proves=...)`, the exhaustiveness of the `H`s checked in the final step (it already is, implicitly) | **S-M** | med | med | user feedback in three sessions: the branches were certified and their coverage audited by hand |
+| **P2** | `ideal` refuting: the reduced residue in the answer -- it would have named the factor a user had dropped | **S** | high | low | user feedback |
+| **P2** | `opt`: `optimality_certified` beside `SATISFIABLE`; engine time and self-check time apart in the result | **S** | high | low | user feedback: a generic consumer reads SATISFIABLE as merely feasible |
+| **P2** | A SEQUENCE of repairs in `cover`: each step checked against the partition the previous one left | **S-M** | med | low | user feedback: promotions applied one after another, owners tracked through all of them |
+| **P3** | Conditional channels and moment laws with an explicit domain; Cramer by intervals; positivity of formal series; comparing algebraic roots by signs; a Bernstein tensor imported with its change of variables | **L** | **low** | med | user feedback across sessions 25-33; research-shaped, each one an engine before it is a checker |
 | **P2** | `bind` reading the ELABORATED type of the Lean declaration (and its axioms), hashed; `user_asserted` and `kernel_checked` correspondence kept apart | **M-L** | med | med | user feedback: `provides` is a transcription the user writes, and `bind` does not read the declaration |
 | **P2** | `ideal`: linear definitions eliminated first, traceably (each substitution recorded and checked), and Groebner progress -- pairs, sizes, why it stopped | **M** | med | low | user feedback: identities with many implicit relations ran out of a 60 s budget until the definitions were substituted by hand |
 | **P3** | An isomorphism certificate for localised quotients: the ideal each way, both compositions, the domains, denominators kept before cancelling | **M-L** | **low** | med | user feedback (same formalisation); a typed cocycle certificate and descent obligations in `status` follow it |
@@ -1060,7 +1067,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.25.0**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.25.1**, with **55 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

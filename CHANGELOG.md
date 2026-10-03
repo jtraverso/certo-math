@@ -6,6 +6,38 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.25.1] — 2026-10-03
+
+**A soundness fix in the DIMACS reader, from a user's report.** No new
+commands (58) or kinds (55); the schema stays 5.
+
+### Soundness
+
+- **An empty DIMACS clause was dropped, and a model of nothing verified.**
+  `p cnf 1 1` / `0` is the empty clause, unsatisfiable. The reader went line
+  by line and dropped a line with no literal before its `0`, so the formula
+  read as having no clauses and `verify` accepted a `cnf_model` for it --
+  reproduced on 0.24.0 and 0.25.0. The reader is a stream of literals now:
+  a `0` closes a clause wherever it is, an empty one included; two clauses on
+  one line are two clauses (they were one, with a literal 0 in it); an
+  unterminated last clause is refused; and `cnf_model` and `drat` check the
+  file holds what its `p cnf V C` line declares. A DRAT proof line with a 0
+  inside is malformed rather than a lemma. No certificate produced by certo's
+  own engines carries an empty clause it did not have, but a stored file
+  could be read as another formula, and was.
+
+### Fixed
+
+- `Poly / number` multiplies by the exact inverse (`T*T/1` died on an
+  unsupported operand); `Poly / Poly` is refused by name.
+- `api.options("packing")` says a packing spec runs with `opt`.
+- The routing table adds `rechecks_without_a_solver` -- `yes`, `depends`,
+  `no` -- beside the boolean, which means ALWAYS: `opt` read `false` beside an
+  `lp_dual` that re-checks by rational arithmetic.
+- Every MCP response carries `runtime`: the interpreter and the certo
+  package that answered. A user's PATH and MCP ran 0.24.0 while PyPI had
+  0.25.0; the version alone did not say where the code came from.
+
 ## [0.25.0] — 2026-10-03
 
 **Bridges: from a certificate to the proof that uses it.** No new commands

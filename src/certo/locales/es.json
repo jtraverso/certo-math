@@ -1988,5 +1988,10 @@
   "lean.ideal.doc_member": "La afirmación está en el ideal de las hipótesis: es su combinación con los cofactores del certificado, una identidad {ring}. `linear_combination` la comprueba con `ring1`; no se busca nada.",
   "lean.ideal.doc_inconsistent": "Las hipótesis son inconsistentes: 1 es su combinación con los cofactores del certificado, una identidad {ring}. `linear_combination` la comprueba con `ring1`; no se busca nada.",
   "lean.ideal.ring_any": "en todo anillo conmutativo (los coeficientes son enteros)",
-  "lean.ideal.ring_field": "en todo cuerpo de característica cero (los coeficientes tienen denominadores)"
+  "lean.ideal.ring_field": "en todo cuerpo de característica cero (los coeficientes tienen denominadores)",
+  "verify.cnf.readable": "el texto DIMACS se puede leer",
+  "verify.cnf.header": "el archivo contiene las cláusulas que declara su encabezado `p cnf`",
+  "verify.cnf.header_detail": "declaradas {declared}, leídas {read}",
+  "poly.divide_by_poly": "un polinomio dividido por un polinomio no es un polinomio; multiplica por el denominador en su lugar",
+  "poly.divide_by_zero": "división de un polinomio por cero"
 }

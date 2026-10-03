@@ -58,6 +58,11 @@ def parse_proof(lines):
         lits = [int(t) for t in s.split()]
         if lits and lits[-1] == 0:
             lits.pop()
+        if 0 in lits:
+            # One lemma per line, ended by 0. A 0 INSIDE a line is not a
+            # literal, and reading `1 0 2 0` as the clause {1, 0, 2} would
+            # hand the propagation a variable that does not exist.
+            raise ValueError("malformed DRAT line (a 0 before its end): " + raw.strip())
         ops.append((kind, lits))
     return ops
 
@@ -174,7 +179,11 @@ def _is_rat(F: _Formula, clause) -> bool:
 def check(clauses, proof_lines, timeout_s: float = 60.0) -> DratReport:
     """Verifica la prueba hacia adelante. Sin solver, solo propagacion."""
     t0 = time.perf_counter()
-    ops = parse_proof(proof_lines)
+    try:
+        ops = parse_proof(proof_lines)
+    except ValueError as e:
+        return DratReport(False, "drup-python", 0, 0, 0, 0, False, str(e),
+                          (time.perf_counter() - t0) * 1000)
     F = _Formula(clauses)
     rup = rat = dels = 0
     derived_empty = False
