@@ -274,6 +274,23 @@ class VerifyReport:
         }
 
 
+def _rejection_summary(rep) -> str:
+    """The summary of a certificate that did NOT verify: what failed first,
+    with its detail, then what the certificate claimed."""
+    failed = [(name, d) for name, ok, d in rep.checks if not ok]
+    head = t("verify.inconclusive_head" if rep.timed_out else "verify.invalid_head")
+    if failed:
+        name, d = failed[0]
+        what = "{}{}".format(name, " ({})".format(d) if d else "")
+        more = (" " + t("verify.invalid_more", n=len(failed) - 1)
+                if len(failed) > 1 else "")
+    else:
+        what, more = t("verify.invalid_unnamed"), ""
+    claimed = (" -- " + t("verify.invalid_claimed", claim=rep.detail)
+               if rep.detail else "")
+    return "{}: {}{}{}".format(head, what, more, claimed)
+
+
 def _provenance_warnings(cert: Certificate) -> list:
     """Provenance does not invalidate the mathematics, but a mismatch matters.
 
@@ -1981,6 +1998,14 @@ def verify(cert, limits=None) -> VerifyReport:
             detail=t("verify.sense_known"))
     try:
         rep = fn(cert, limits)
+        if not rep.ok:
+            # NO INVALID CERTIFICATE KEEPS AN AFFIRMATIVE SUMMARY. Verifiers
+            # build `detail` from the payload's own declarations -- "7 parts
+            # covering 20 elements exactly once each", "the claim vanishes on
+            # every common root" -- and a rejected certificate kept saying it.
+            # The summary is now the first check that failed, and the old one
+            # survives only as what the certificate CLAIMED.
+            rep.detail = _rejection_summary(rep)
         rep.warnings = _provenance_warnings(cert) + list(rep.warnings)
         if cert.schema > SCHEMA_VERSION:
             rep.warnings.insert(0, t("verify.schema.newer", schema=cert.schema,
@@ -2819,6 +2844,15 @@ def _verify_linear_system(cert, limits) -> VerifyReport:
         return VerifyReport(False, "linear_system", True, checks=[(
             t("verify.solve.shapes"), False,
             "{} x {} / {}".format(len(A), m, len(b)))])
+    # The domain and the status are KNOWN, before any branch reads them. The
+    # `none` branch treated every domain but "rational" as the integers, so a
+    # certificate edited to say "2x = 1 has no REAL solution" verified, with
+    # its integer argument -- and x = 1/2 is one.
+    if (p.get("domain") not in ("rational", "integer")
+            or p.get("status") not in (linsolve.NONE, linsolve.UNIQUE, linsolve.MANY)):
+        return VerifyReport(False, "linear_system", True, checks=[(
+            t("verify.solve.status"), False,
+            "{} / {}".format(p.get("status"), p.get("domain")))])
 
     if p["status"] == linsolve.NONE:
         # WHICH argument is required is decided by the DOMAIN, not by which
@@ -5758,10 +5792,12 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
 
     checks = split_checks + selection_checks + [
         (t("verify.lp.primal_nonneg"), rep["primal_nonneg"], ""),
-        (t("verify.lp.primal_feasible"), rep["primal_feasible"], ""),
+        (t("verify.lp.primal_feasible"), rep["primal_feasible"],
+         "" if rep["primal_feasible"] else _row_violation(A, b, x, p.get("names"))),
         (t("verify.lp.dual_nonneg"), rep["dual_nonneg"],
          "min(y)={}".format(exact.serialize(min(y)) if y else "-")),
-        (t("verify.lp.dual_feasible"), rep["dual_feasible"], ""),
+        (t("verify.lp.dual_feasible"), rep["dual_feasible"],
+         "" if rep["dual_feasible"] else _column_violation(A, c, y, p.get("var_names"))),
         (t("verify.lp.strong"), rep["strong_duality"],
          "c.x={} | b.y={}".format(exact.serialize(rep["objective"]),
                                   exact.serialize(rep["dual_bound"]))),
@@ -5919,7 +5955,9 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
     # "optimum" only for a certificate that verified: on a rejected one the
     # value is the objective of the vectors as given, and reading it as the
     # optimum is the one thing a rejection must not invite.
-    detail = (t("verify.lp.invalid.detail", value=value) if not ok
+    # A rejected certificate gets NO summary of its own: `verify` builds it
+    # from the first failed check, the same way for every kind.
+    detail = ("" if not ok
               else t("verify.lp.exact.detail", value=value)
               if not p.get("integer")
               else t("verify.lp.ilp.detail",
@@ -5931,6 +5969,54 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
         ok, "lp_dual", True, checks=checks,
         warnings=warnings, detail=detail,
     )
+
+
+def _row_violation(A, b, x, names) -> str:
+    """The row a primal breaks most, NAMED as the user wrote it: a `>=` row
+    is stored negated as `name_geq`, an equality as `name_le` / `name_ge`,
+    and a rejection that said only "A x <= b" sent users counting rows by
+    hand -- the request repeated most in one report."""
+    from . import exact
+
+    worst = None
+    for i, row in enumerate(A):
+        load = sum((a * v for a, v in zip(row, x)), exact.to_fraction(0))
+        excess = load - b[i]
+        if excess > 0 and (worst is None or excess > worst[0]):
+            worst = (excess, i, load)
+    if worst is None:
+        return ""
+    excess, i, load = worst
+    name = (names or [])[i] if i < len(names or []) else "row {}".format(i)
+    if name.endswith("_geq"):
+        return t("verify.lp.row_violation_geq", name=name[:-4],
+                 load=exact.serialize(-load), bound=exact.serialize(-b[i]),
+                 excess=exact.serialize(excess))
+    for suf, rel in (("_le", "="), ("_ge", "=")):
+        if name.endswith(suf):
+            return t("verify.lp.row_violation_eq", name=name[:-len(suf)],
+                     load=exact.serialize(load if suf == "_le" else -load),
+                     bound=exact.serialize(b[i] if suf == "_le" else -b[i]))
+    return t("verify.lp.row_violation", name=name, load=exact.serialize(load),
+             bound=exact.serialize(b[i]), excess=exact.serialize(excess))
+
+
+def _column_violation(A, c, y, var_names) -> str:
+    """The variable whose dual constraint `(A^T y)_j >= c_j` fails most."""
+    from . import exact
+
+    worst = None
+    for j in range(len(c)):
+        got = sum((A[i][j] * y[i] for i in range(len(A))), exact.to_fraction(0))
+        short = c[j] - got
+        if short > 0 and (worst is None or short > worst[0]):
+            worst = (short, j, got)
+    if worst is None:
+        return ""
+    short, j, got = worst
+    name = (var_names or [])[j] if j < len(var_names or []) else "column {}".format(j)
+    return t("verify.lp.column_violation", name=name, got=exact.serialize(got),
+             need=exact.serialize(c[j]), short=exact.serialize(short))
 
 
 def _check_packing_map(p, A):

@@ -536,6 +536,12 @@ On an integer program the output labels its two numbers apart -- the
 integral point found and the relaxation bound the dual certifies -- and
 `--top 0` prints the whole integral point.
 
+A minimisation is stored as the maximisation of `-c.x`: the payload's
+`objective` is that internal maximum (`-51/4` for a cost of `51/4`), and the
+result's `meta.objective` is the declared one. The time budget covers the
+exact reconstruction too: past it, the answer is the floating-point one,
+said so -- or, with `--exact-required`, a TIMEOUT.
+
 `--exact-required` refuses the floating-point fallback: when the rational
 reconstruction fails, the answer is INCONCLUSIVE with the exact check that
 failed named, and no certificate is written. `--primal a=2/3,b=7/9` (or a JSON

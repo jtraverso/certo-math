@@ -180,7 +180,7 @@ class CNF:
         return "\n".join(out) + "\n"
 
     @classmethod
-    def from_dimacs(cls, text: str) -> "CNF":
+    def from_dimacs(cls, text: str, strict: bool = False) -> "CNF":
         """DIMACS as a STREAM of literals, each clause ended by `0`.
 
         It was read line by line, dropping a line with no literal before its
@@ -191,6 +191,11 @@ class CNF:
         0 in it. Now a `0` closes a clause wherever it is, an empty one
         included, and the header is recorded so a verifier can refuse a file
         that is not what it declares (`declared`, `read`).
+
+        PERMISSIVE by default: a header that disagrees with the clauses is
+        recorded, not refused, and the verifiers refuse it (`matches_header`).
+        `strict=True` refuses at reading: a second header, a clause count or
+        a literal outside what the header declares, a negative count.
         """
         c = cls()
         names: dict = {}
@@ -215,6 +220,9 @@ class CNF:
                 if len(head) != 4 or head[1] != "cnf":
                     raise ValueError("not a DIMACS CNF header: " + line)
                 nv, nc = int(head[2]), int(head[3])
+                if strict and (c.declared is not None or nv < 0 or nc < 0):
+                    raise ValueError("strict DIMACS: a second header, or a "
+                                     "negative count: " + line)
                 c.declared = (nv, nc)
                 for v in range(1, nv + 1):
                     c.var(names.get(v, "x{}".format(v)))
@@ -236,6 +244,10 @@ class CNF:
             raise ValueError("the last clause is not ended by 0: "
                              + " ".join(map(str, current)))
         c.read = read
+        if strict and not c.matches_header():
+            raise ValueError("strict DIMACS: the clauses are not what the "
+                             "header declares ({} read, declared {})".format(
+                                 read, c.declared))
         return c
 
     def matches_header(self) -> bool:

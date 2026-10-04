@@ -53,10 +53,14 @@ def _pivot(T, basis, row, col):
     basis[row] = col
 
 
-def _solve(T, basis, n_cols, budget):
+def _solve(T, basis, n_cols, budget, deadline=None):
     """Phase 2: pivot until no reduced cost is negative. Bland's rule."""
+    import time
+
     m = len(T)
     while True:
+        if deadline is not None and time.monotonic() > deadline:
+            raise SimplexLimit("deadline")
         col = next((j for j in range(n_cols) if T[-1][j] < 0), None)
         if col is None:
             return
@@ -76,7 +80,7 @@ def _solve(T, basis, n_cols, budget):
         _pivot(T, basis, row, col)
 
 
-def minimise(A, b, c):
+def minimise(A, b, c, deadline=None):
     """`min b.y` subject to `A^T y >= c`, `y >= 0`, exactly.
 
     Takes the PRIMAL data and solves that primal's dual, because that is the
@@ -125,7 +129,7 @@ def minimise(A, b, c):
     T.append(cost)
 
     budget = [MAX_PIVOTS]
-    _solve(T, basis, width, budget)
+    _solve(T, basis, width, budget, deadline)
     if -T[-1][-1] != 0:
         raise SimplexLimit("the dual is infeasible")
 

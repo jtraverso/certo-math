@@ -110,6 +110,13 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | One CLOCK across every engine: the deadline `ideal` and the exact LP reconstruction now keep, propagated to every search, with the phase and the elapsed time on a stop; the MCP watchdog and `--deadline` that ends children join it | **M** | med | med | three reports: budgets bounded a phase, not the call. 0.26.1 fixed `ideal` and the LP reconstruction |
+| **P2** | The exact LP reconstruction on large quotients: a 4130 x 44 program does not close in 20 s where a 4146 x 34 one closes in 4 s -- find what differs | **M** | med | med | user feedback with the instance; the time budget is kept since 0.26.1, the reconstruction itself is the cost |
+| **P1** | `ideal`: progress events (pairs, basis size, terms), cofactors SUPPLIED in the spec and only checked, linear definitions eliminated with each substitution recorded, cleared denominators with their non-vanishing and sign obligations | **M** | med | med | user feedback (erdos_1017), one row of acceptance criteria each |
+| **P1** | Contracts across a construction (Tuza split): resources transported from a parent graph to a child, catalogue coverage by extensions (one omitted extension invalidates it), joint rational credit with owners and a common cut distribution, assignment with physical conflicts (a matching per host) | **L** | med | high | user feedback with acceptance criteria; the user asks for ONE vertical example first, not more commands |
+| **P2** | Parametric feasibility certificates: a family of bases with rational formulas and regions, `A(t) w(t) = d(t)`, `w(t) >= 0`, the regions covering the domain and their frontiers | **L** | low | med | user feedback (erdos_1017): the crux after the cost identities |
+| **P2** | One provenance report across CLI, API, MCP and packs: interpreter, package path, producing and verifying versions, schema, hashes, external obligations | **S-M** | high | low | user feedback (two reports) |
+| **P3** | Jacobian as a PROPOSER: its witnesses (linear systems, Smith/Hermite, inertia, cofactors, isomorphism maps, root intervals) checked by certo's verifiers; what certo cannot check enters `compose` as a cited lemma with Jacobian's operation, version and digest | **S-M** | med | med | the user's question; 1791 operations in Jacobian 0.23, exact but not certificates |
 | **P2** | MCP robustness over a long life: each tool call under a WALL-CLOCK and memory watchdog in a worker process, cancelled cleanly without taking the server down or freezing the client, and a circuit breaker after repeated timeouts | **M** | med | med | external suggestion. Today: `timeout_ms` and `--deadline` per call, errors returned as data by `_guard`; a runaway search inside an engine (or a `geng`/`cbc` child) can still hold the process. Joins the `--deadline` children row |
 | **P3** | Signed certificates (Ed25519 / JWS, detached, over the digest): WHO produced a certificate, for a chain of custody | **M** | med | low | external suggestion. A signature attests provenance, never correctness: `verify` re-derives the mathematics whoever signed, and an edited certificate already fails it unless the edit is itself a valid certificate. Keys are the user's; optional, and never a substitute for `verify` |
 | **P2** | No code from a spec is evaluated where a model wrote it -- an AST-checked or declarative notation instead of `exec` | **(the declarative notation row)** | | | external suggestion, merged into the declarative spec notation row above. Today: specs are Python by design and run on load; `CERTO_NO_EXEC=1` and the ten JSON spec types run nothing, and the MCP confines paths -- not a sandbox, and `SECURITY.md` says so |
@@ -1070,7 +1077,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.26.0**, with **56 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.26.1**, with **56 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

@@ -6,6 +6,43 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.26.1] — 2026-10-04
+
+**A soundness fix and honest rejections, from three reports on 0.26.0.**
+No new commands (59) or kinds (56); the schema stays 5.
+
+### Soundness
+
+- **A `none` linear system accepted any domain.** Edited to say "2x = 1
+  has no REAL solution", it verified by the INTEGER argument -- the branch
+  read every domain but "rational" as the integers. The domain and the
+  status are validated before any branch now.
+
+### Fixed
+
+- **No rejected certificate keeps an affirmative summary.** A rejected
+  `ideal` said "the claim vanishes on every common root", a rejected cover
+  "7 parts covering 20 elements exactly once each" -- built from the
+  payload's declarations. `verify` writes the summary of every rejection from
+  the first check that failed, and labels what the certificate CLAIMED.
+- **`ideal` keeps its time budget.** `max_pairs` bounded the steps, not
+  what a step cost: a 3-second ideal ran ten minutes. The clock is checked
+  inside the reductions; past it, TIMEOUT (`stopped_by: time`), told apart
+  from the pairs budget.
+- **The exact LP reconstruction keeps the time budget.** It bounded only
+  the floating-point solve: a 4130-column quotient ran past a 60 s budget by
+  more than a minute. One clock now covers the call; past it the answer is
+  the floating-point one, said so (`stopped_by: time`), or with
+  `--exact-required` a TIMEOUT with no certificate.
+- **A rejected `lp_dual` names the row**: "row cap: load 3 > bound 2, excess
+  1", a `>=` row in its own orientation and name (not `name_geq`), and for
+  the dual the variable that falls short -- the request repeated most in one
+  report.
+- `invalid sense` lists the senses; `CNF.from_dimacs(strict=True)` refuses
+  at reading what the verifiers refuse later (a header that disagrees, a
+  second header, a negative count); the docs say how a minimisation's
+  objective is stored.
+
 ## [0.26.0] — 2026-10-03
 
 **What this week's users asked for.** One new command (59) and one new kind

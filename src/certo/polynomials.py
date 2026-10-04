@@ -23,6 +23,7 @@ write-up; a budget stops the run and says so rather than grinding.
 """
 from __future__ import annotations
 
+import time
 from fractions import Fraction
 from itertools import combinations
 
@@ -31,6 +32,23 @@ from .i18n import t
 
 class Budget(RuntimeError):
     """Buchberger ran past its budget. Says so; does not guess."""
+
+
+class TimeBudget(Budget):
+    """The CLOCK ran out -- a different budget from the pairs or the terms,
+    and said apart, so a caller knows whether more time or a smaller ideal
+    is what would help."""
+
+
+def _check_clock(deadline, every=[0]):
+    """Raise TimeBudget once `time.monotonic()` passes `deadline`. Cheap
+    enough to call inside the reduction loops: the clock is read one call in
+    sixty-four."""
+    if deadline is None:
+        return
+    every[0] += 1
+    if every[0] % 64 == 0 and time.monotonic() > deadline:
+        raise TimeBudget(t("poly.budget.time"))
 
 
 class Poly:
@@ -273,7 +291,7 @@ def _lcm(a, b):
     return tuple(max(x, y) for x, y in zip(a, b))
 
 
-def divide(f: Poly, gs, track=None):
+def divide(f: Poly, gs, track=None, deadline=None):
     """Multivariate division: f = sum q_i g_i + r.
 
     `track` carries, for each divisor, how that divisor is written in terms of
@@ -288,6 +306,9 @@ def divide(f: Poly, gs, track=None):
     cur = f
 
     while cur:
+        # Inside the reduction, not only between pairs: one reduction of a
+        # large S-polynomial was where a run spent minutes past its budget.
+        _check_clock(deadline)
         le, lc = cur.lead()
         for i, g in enumerate(gs):
             ge, gc = g.lead()
@@ -316,7 +337,7 @@ def spoly(f: Poly, g: Poly):
     return mf * f - mg * g, mf, mg
 
 
-def groebner(gens, max_pairs=20_000, max_terms=20_000):
+def groebner(gens, max_pairs=20_000, max_terms=20_000, deadline=None):
     """Buchberger, keeping each basis element written in the generators.
 
     The tracking is the reason this is not a call to a library. Knowing that
@@ -344,10 +365,12 @@ def groebner(gens, max_pairs=20_000, max_terms=20_000):
         seen += 1
         if seen > max_pairs:
             raise Budget(t("poly.budget.pairs", n=max_pairs))
+        if deadline is not None and time.monotonic() > deadline:
+            raise TimeBudget(t("poly.budget.time"))
         s, mf, mg = spoly(basis[i], basis[j])
         if not s:
             continue
-        _, rem, coeffs = divide(s, basis, track)
+        _, rem, coeffs = divide(s, basis, track, deadline)
         if not rem:
             continue
         if len(rem.terms) > max_terms:
@@ -370,7 +393,7 @@ def cofactors(f: Poly, gens, **budget):
     basis, track = groebner(list(gens), **budget)
     if not basis:
         return None, not f
-    _, rem, coeffs = divide(f, basis, track)
+    _, rem, coeffs = divide(f, basis, track, budget.get("deadline"))
     if rem:
         return None, False
     return coeffs, True
@@ -383,7 +406,7 @@ def normal_form(f: Poly, gens, **budget) -> Poly:
     basis, track = groebner(list(gens), **budget)
     if not basis:
         return f
-    _, rem, _coeffs = divide(f, basis, track)
+    _, rem, _coeffs = divide(f, basis, track, budget.get("deadline"))
     return rem
 
 

@@ -548,6 +548,12 @@ En un programa entero la salida rotula aparte sus dos números -- el punto
 entero hallado y la cota de la relajación que certifica el dual -- y
 `--top 0` imprime el punto entero completo.
 
+Una minimización se guarda como la maximización de `-c.x`: el `objective`
+del payload es ese máximo interno (`-51/4` para un costo de `51/4`), y el
+`meta.objective` del resultado es el declarado. El presupuesto de tiempo
+cubre también la reconstrucción exacta: pasado él, la respuesta es la de
+punto flotante, dicho así -- o, con `--exact-required`, un TIMEOUT.
+
 `--exact-required` rechaza la vuelta a punto flotante: cuando la
 reconstrucción racional falla, la respuesta es INCONCLUSA con la comprobación
 exacta que falló nombrada, y no se escribe certificado. `--primal a=2/3,b=7/9`

@@ -400,7 +400,20 @@ def support_candidates(P, x_float, y_float, y_alts=(), tol=1e-7):
                 yield None, y
 
 
-def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
+class Deadline(RuntimeError):
+    """The reconstruction ran past the caller's clock. Nothing was found
+    wrong; nothing exact was produced either."""
+
+
+def _late(deadline):
+    import time
+
+    if deadline is not None and time.monotonic() > deadline:
+        raise Deadline("deadline")
+
+
+def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
+            deadline=None):
     """Reconstruct and verify. Returns (x, y, report, denom) or (None, ...).
 
     Three passes, cheapest first, and every one of them ends at the same
@@ -418,6 +431,11 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
 
     Pass 1 runs first so nothing that already worked changes, digests
     included.
+
+    `deadline` (a `time.monotonic()` value) is checked between every
+    candidate and inside the exact simplex: past it, `Deadline` is raised.
+    A 4130-column reconstruction ran past a 60 s budget by more than a
+    minute, because the budget bounded only the floating-point solve.
 
     `y_alts` are further float duals to try at the SAME rung -- CBC does not
     fix the sign, so the caller hands in the negated and absolute versions.
@@ -445,8 +463,10 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
         return dense[0]
 
     for denom in ladder:
+        _late(deadline)
         x = reconstruct(x_float, denom)
         for y_try in (y_float, *y_alts):
+            _late(deadline)
             y = reconstruct(y_try, denom)
             rep = check_lp(P, b, c, x, y)
             last = rep
@@ -468,6 +488,7 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     # here they are enumerated, and the exact check picks.
     for dx, x in primals:
         for y in dual_candidates(P, b, c, x):
+            _late(deadline)
             rep = check_lp(P, b, c, x, y)
             if rep["ok"]:
                 return x, y, rep, dx
@@ -476,6 +497,7 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     # 2b. Read which columns and rows are in play off the float solution, and
     # solve for the vertex and its dual exactly on that support.
     for x, y in support_candidates(P, x_float, y_float, y_alts):
+        _late(deadline)
         if x is None:
             x = primal_from_dual(A_dense(), b, c, y)
             if x is None:
@@ -501,9 +523,14 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=()):
     # the argument for lifting the call out.
     from .simplex import SimplexLimit, minimise
 
+    _late(deadline)
     try:
-        y = minimise(A_dense(), b, c)
-    except (SimplexLimit, ZeroDivisionError):
+        y = minimise(A_dense(), b, c, deadline=deadline)
+    except SimplexLimit as e:
+        if str(e) == "deadline":
+            raise Deadline("deadline") from None
+        return None, None, last, None
+    except ZeroDivisionError:
         return None, None, last, None
 
     for dx, x in primals:

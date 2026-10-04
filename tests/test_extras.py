@@ -7472,6 +7472,134 @@ def test_an_empty_dimacs_clause_is_kept_and_no_model_satisfies_it():
     assert not verify(forged).ok
 
 
+def test_0_26_1_a_none_certificate_names_a_known_domain():
+    """SOUNDNESS, from a user's QA on 0.26.0: a `none` linear system with its
+    domain edited to "real" verified by the INTEGER argument -- "2x = 1 has
+    no real solution", and x = 1/2 is one."""
+    from copy import deepcopy
+
+    from certo.certificate import Certificate, verify
+    from certo.engines import algebra
+    from certo.spec import LinearSystemSpec
+
+    for dom in ("integer", "rational"):
+        c = algebra.linear_system(LinearSystemSpec(matrix=[[2]], rhs=[1],
+                                                   domain=dom), LIM).certificate
+        assert verify(c).ok
+    base = algebra.linear_system(LinearSystemSpec(matrix=[[2]], rhs=[1],
+                                                  domain="integer"), LIM).certificate
+    for dom in ("real", "unexpected-domain", None):
+        d = deepcopy(base.to_dict())
+        d["payload"]["domain"] = dom
+        assert not verify(Certificate.from_dict(d)).ok, dom
+    d = deepcopy(base.to_dict())
+    d["payload"]["status"] = "maybe"
+    assert not verify(Certificate.from_dict(d)).ok
+
+
+def test_0_26_1_no_rejected_certificate_keeps_an_affirmative_summary():
+    """A rejected `ideal` said "the claim vanishes on every common root", a
+    rejected cover "3 parts covering 3 elements exactly once each". The
+    summary is the first failed check now; what was claimed is labelled so;
+    and an infeasible LP primal names its row, load, bound and excess."""
+    from copy import deepcopy
+
+    from certo import LPSpec
+    from certo.certificate import Certificate, ideal_certificate, verify
+    from certo.engines import algebra, lp
+    from certo.polynomials import Poly
+    from certo.spec import CoverSpec
+
+    R = ("x", "y")
+    x, y = Poly.var(R, "x"), Poly.var(R, "y")
+    bad = ideal_certificate(variables=list(R), equations=[(x + y).serialize()],
+                            claim=(x * x - y * y).serialize(),
+                            cofactors=[(x + y + 1).serialize()], inconsistent=False)
+    rep = verify(bad)
+    assert not rep.ok and rep.detail.startswith("NOT VALID")
+    assert "left over" in rep.detail and "CLAIMED" in rep.detail
+
+    c = algebra.cover(CoverSpec(universe=[1, 2, 3], parts=[[1], [2], [3]]), LIM)
+    d = c.certificate.to_dict()
+    d["payload"]["parts"] = d["payload"]["parts"][:-1]
+    rep = verify(Certificate.from_dict(d))
+    assert rep.detail.startswith("NOT VALID") and "missed" in rep.detail
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.variable("b", 0, None)
+    m.objective({"a": 1, "b": 1})
+    m.constraint({"a": 1}, "<=", 2, name="cap")
+    m.constraint({"a": 1, "b": 1}, "<=", 3, name="both")
+    m.constraint({"b": 1}, ">=", 1, name="floor")
+    d = deepcopy(lp.opt(m, LIM).certificate.to_dict())
+    d["payload"]["primal"] = ["3", "0"]
+    rep = verify(Certificate.from_dict(d))
+    assert "row cap: load 3 > bound 2, excess 1" in rep.detail
+    d["payload"]["primal"] = ["2", "1/2"]
+    rep = verify(Certificate.from_dict(d))
+    assert "floor (>=)" in rep.detail and "short by 1/2" in rep.detail
+
+
+def test_0_26_1_ideal_and_the_exact_lp_keep_their_time_budget():
+    """`ideal` with a 3 s budget ran ten minutes; the exact LP reconstruction
+    ran past a 60 s budget by more than a minute. Both stop at the clock now,
+    INCONCLUSIVE and saying which budget, never with a complete certificate."""
+    import time
+
+    import z3
+
+    from certo import IdealSpec, LPSpec, Limits, exact
+    from certo.engines import algebra, lp
+
+    a, b, c, d, e, f = z3.Reals("a b c d e f")
+    hard = IdealSpec(variables=list("abcdef"),
+                     equations=[a * b * c - d * e * f - 1, a * a * b - c * c * d + e,
+                                b * b * c - d * d * e + f * a, c * c * a - e * e * f + b],
+                     claim=a * b * c * d * e * f - 1)
+    t0 = time.monotonic()
+    res = algebra.ideal(hard, Limits(timeout_ms=1500))
+    assert time.monotonic() - t0 < 15
+    assert res.status is Status.TIMEOUT and res.meta["stopped_by"] == "time"
+
+    m = LPSpec(sense="max")
+    m.variable("a", 0, None)
+    m.objective({"a": 1})
+    m.constraint({"a": 1}, "<=", 2, name="cap")
+    real = exact.certify
+
+    def slow(*args, **kw):
+        raise exact.Deadline("deadline")
+
+    exact.certify = slow
+    try:
+        loose = lp.opt(m, LIM)
+        strict = lp.opt(m, LIM, exact_required=True)
+    finally:
+        exact.certify = real
+    assert loose.meta["exact"] is False and loose.meta["stopped_by"] == "time"
+    assert "stopped at" in loose.detail
+    assert strict.status is Status.TIMEOUT and strict.certificate is None
+
+
+def test_0_26_1_strict_dimacs_and_the_sense_message():
+    from certo import LPSpec
+    from certo.cnf import CNF
+
+    for text in ("p cnf 1 2\n1 0\n", "p cnf 1 1\n2 0\n",
+                 "p cnf 1 1\np cnf 1 1\n1 0\n", "p cnf -1 0\n"):
+        try:
+            CNF.from_dimacs(text, strict=True)
+            raise AssertionError("strict accepted " + repr(text))
+        except ValueError:
+            pass
+    assert CNF.from_dimacs("p cnf 1 2\n1 0\n").clauses == [[1]]   # permissive
+    try:
+        LPSpec().constraint({"a": 1}, "=", 1)
+    except ValueError as e:
+        assert "'=='" in str(e)
+
+
 def test_a_proof_by_cases_carries_its_exhaustiveness():
     """Branches were certified one by one and their coverage audited by hand.
     `p.case(...)` records each condition; `compose` proves the cases exhaust

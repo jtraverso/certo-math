@@ -43,7 +43,7 @@ ENGINE_COLGEN = "certo/column-generation"
 ENGINE_ATLAS = "certo/atlas"
 ENGINE_NONNEG = "certo/bernstein"
 ENGINE_PIN = "certo/pin"
-from ..polynomials import Budget, Poly, cofactors
+from ..polynomials import Budget, Poly, TimeBudget, cofactors
 from ..status import Result, Status, Verdict
 
 ENGINE_IDEAL = "certo/groebner"
@@ -1869,6 +1869,9 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                       detail=t("engine.ideal.not_polynomial", detail=str(e)))
 
     target = claim if claim is not None else Poly.const(variables, 1)
+    # The time budget, honoured INSIDE the search: `max_pairs` bounds the
+    # steps, not what one step costs, and a 3-second ideal ran ten minutes.
+    deadline = time.monotonic() + lim.timeout_ms / 1000 if lim.timeout_ms else None
     if not gs:
         # No equations: the ideal is {0}. A claim is in it exactly when it IS
         # the zero polynomial -- an identity, certified by expanding it, and
@@ -1876,11 +1879,18 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         # on an IndexError.
         return _ideal_identity(spec, variables, claim, t0, spec_path)
     try:
-        hs, in_ideal = cofactors(target, gs, max_pairs=spec.max_pairs)
+        hs, in_ideal = cofactors(target, gs, max_pairs=spec.max_pairs,
+                                 deadline=deadline)
+    except TimeBudget:
+        return Result("ideal", Status.TIMEOUT, Verdict.INCONCLUSIVE,
+                      ENGINE_IDEAL, (time.perf_counter() - t0) * 1000, None,
+                      detail=t("engine.ideal.timeout", ms=lim.timeout_ms),
+                      meta={"stopped_by": "time"})
     except Budget as e:
         return Result("ideal", Status.RESOURCE_EXHAUSTED, Verdict.INCONCLUSIVE,
                       ENGINE_IDEAL, (time.perf_counter() - t0) * 1000, None,
-                      detail=t("engine.ideal.budget", detail=str(e)))
+                      detail=t("engine.ideal.budget", detail=str(e)),
+                      meta={"stopped_by": "pairs_or_terms"})
 
     ms = (time.perf_counter() - t0) * 1000
     if not in_ideal:
@@ -1895,7 +1905,8 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             from ..polynomials import normal_form
 
             try:
-                residue = normal_form(claim, gs, max_pairs=spec.max_pairs)
+                residue = normal_form(claim, gs, max_pairs=spec.max_pairs,
+                                      deadline=deadline)
                 meta["residue"] = str(residue)
                 detail = detail.rstrip(". ") + ". " + t(
                     "engine.ideal.residue", residue=str(residue)[:300])

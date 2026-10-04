@@ -431,8 +431,13 @@ def _opt_vectors(spec, lim, t0):
     y_float = [0.0 if v is None else v for v in raw]
     alts = ([[-v for v in y_float], [abs(v) for v in y_float]] if have else [])
     P = exact.Prepared.from_sparse(rows, b, c)
-    x_ex, y_ex, rep, denom = exact.certify(P, b, c, x_float, y_float,
-                                           y_alts=alts)
+    try:
+        x_ex, y_ex, rep, denom = exact.certify(
+            P, b, c, x_float, y_float, y_alts=alts,
+            deadline=(time.monotonic() + lim.timeout_ms / 1000
+                      if lim and lim.timeout_ms else None))
+    except exact.Deadline:
+        x_ex = y_ex = rep = denom = None
     if x_ex is None:
         return Result("opt", Status.SAT, Verdict.SATISFIABLE, engine, ms(),
                       None, detail=t("engine.opt.unverifiable",
@@ -577,6 +582,9 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     simplex, and `check_lp` deciding. Continuous programs only."""
     lim = limits or Limits()
     t0 = time.perf_counter()
+    # ONE clock for the whole call, the exact reconstruction included: the
+    # budget used to bound only the floating-point solve.
+    deadline = time.monotonic() + lim.timeout_ms / 1000 if lim.timeout_ms else None
 
     # `cuts="clique"`: the conflict graph's clique cuts, derived from the
     # rows and added, each recorded with the row that forces every pair --
@@ -712,6 +720,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
 
     # ---- certificacion exacta ------------------------------------------
     exact_ok, x_ex, y_ex, rep, denom = False, None, None, None, None
+    exact_stopped = False
     if use_exact:
         # CBC no fija el signo del dual; deja que la comprobacion exacta
         # decida. Van en la misma llamada porque solo la pasada 1 los lee: las
@@ -720,12 +729,24 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         alts = ([[-v for v in dual_float], [abs(v) for v in dual_float]]
                 if have_duals else [])
         _progress(loud, t0, "engine.opt.progress.exact")
-        x_ex, y_ex, rep, denom = exact.certify(A, b, c, relax_x, dual_float,
-                                               y_alts=alts)
+        try:
+            x_ex, y_ex, rep, denom = exact.certify(A, b, c, relax_x, dual_float,
+                                                   y_alts=alts, deadline=deadline)
+        except exact.Deadline:
+            x_ex, y_ex, rep, denom = None, None, None, None
+            exact_stopped = True
         exact_ok = x_ex is not None
         _progress(loud, t0, "engine.opt.progress.exact_done" if exact_ok
+                  else "engine.opt.progress.exact_stopped" if exact_stopped
                   else "engine.opt.progress.exact_failed")
 
+    if use_exact and exact_required and exact_stopped and not _vectors_only:
+        return Result("opt", Status.TIMEOUT, Verdict.INCONCLUSIVE, engine(), ms(),
+                      None, detail=t("engine.opt.exact_timeout_required",
+                                     ms=lim.timeout_ms),
+                      meta={"exact": False, "stopped_by": "time",
+                            "phase": "exact reconstruction",
+                            "lp_solver": engine()})
     if use_exact and exact_required and not exact_ok and not _vectors_only:
         # REQUIRED means no fallback: the float route below would hand back a
         # certificate that verifies only as `partial`, and a pipeline reading
@@ -829,7 +850,9 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         # The verdict stays SATISFIABLE because CBC did exhibit a feasible
         # point; it is the OPTIMALITY claim that lives in the certificate, and
         # `mixed` depends on this step for its skeleton and nothing else.
-        why = "" if not use_exact else t("engine.opt.float.why")
+        why = ("" if not use_exact else
+               t("engine.opt.exact_timeout", ms=lim.timeout_ms) if exact_stopped
+               else t("engine.opt.float.why"))
         if not have_duals:
             cert, detail = None, t("engine.opt.no_dual", value=repr(objective))
         else:
@@ -892,6 +915,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
                   (-1 if spec.sense == "min" else 1) * rep["objective"])
                   if exact_ok and discrete else None),
               "exact": exact_ok, "solution": meta_sol,
+              "stopped_by": "time" if exact_stopped else None,
               # Beside SATISFIABLE, which a generic reader took for "merely
               # feasible": the optimum is CERTIFIED when the exact dual closes
               # it -- a continuous program, or an integral point that meets
