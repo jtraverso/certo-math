@@ -1,4 +1,4 @@
-# certo
+# certo-math
 
 **Between having a mathematical idea and having a proof of it there is a lot
 of work that is not proving.** certo does that work — find the object, break
