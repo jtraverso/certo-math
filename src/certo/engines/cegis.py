@@ -33,6 +33,14 @@ def _remaining_ms(deadline):
     return max(1, int((deadline - time.perf_counter()) * 1000))
 
 
+def _no_helper_saves(behav, corr, helper_vars):
+    """`behav AND forall helpers . NOT corr` -- or, with no helpers, the
+    plain `behav AND NOT corr`."""
+    if not helper_vars:
+        return z3.And(behav, z3.Not(corr))
+    return z3.And(behav, z3.ForAll(list(helper_vars), z3.Not(corr)))
+
+
 def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     lim = limits or Limits()
     t0 = time.perf_counter()
@@ -48,7 +56,14 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     for s in (impl_solver, ce_solver):
         lim.apply_to(s)
     impl_solver.add(impl_cons)
-    ce_solver.add(z3.And(behav, z3.Not(corr)))
+    # A COUNTEREXAMPLE IS AN INPUT NO HELPER SAVES. The contract is
+    # exists impl . forall input . exists helper; with the helpers left free
+    # in `behav AND NOT corr` the search found an input where SOME helper
+    # failed -- a bad helper, not a bad input -- and a valid formula
+    # (h = x) never converged. Sound either way, since "no input fails for
+    # any helper" is the stronger statement; complete only with the order
+    # of the quantifiers kept.
+    ce_solver.add(_no_helper_saves(behav, corr, helper_vars))
 
     counterexamples = []
     trace = []
@@ -104,7 +119,9 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             r2 = ce_solver.check()
 
             if r2 == z3.unsat:
-                cert = cegis_certificate(impl_assign, counterexamples, spec_smt2, k + 1)
+                cert = cegis_certificate(impl_assign, counterexamples, spec_smt2, k + 1,
+                                         helpers=[[str(h), z3util.sort_name(h)]
+                                                  for h in helper_vars])
                 return done(Status.SAT, Verdict.PROVED,
                             t("engine.synth.found", rounds=k + 1,
                               ces=len(counterexamples)),
@@ -183,7 +200,11 @@ def universal_spec(spec, impl_assign):
                 for n, (srt, v) in impl_assign.items()]
         uspec = Spec(title="obligacion universal")
         uspec.assume("dominio_universal", spec.universal_behavior)
-        uspec.claim(z3.substitute(corr, *subs))
+        claim = z3.substitute(corr, *subs)
+        # The helpers stay EXISTENTIAL in the general statement too: proving
+        # the correctness for EVERY helper value claimed more than the spec.
+        helpers = list(getattr(spec, "helper_vars", []) or [])
+        uspec.claim(z3.Exists(helpers, claim) if helpers else claim)
     else:
         raise ValueError(t("engine.synth.no_universal"))
     return uspec

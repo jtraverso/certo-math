@@ -7582,6 +7582,49 @@ def test_0_26_1_ideal_and_the_exact_lp_keep_their_time_budget():
     assert strict.status is Status.TIMEOUT and strict.certificate is None
 
 
+def test_0_26_1_cegis_keeps_the_helpers_existential():
+    """exists impl . forall input . exists helper. The counterexample search
+    left the helpers free -- an input where SOME helper failed -- and the
+    valid `h = x` never converged; the verifier and `prove_candidate` read
+    the helpers universally too. A user's probe, and the cases it asked for."""
+    import copy
+
+    import z3
+
+    from certo import Limits, SynthSpec
+    from certo.certificate import Certificate, verify
+    from certo.engines import cegis
+
+    a, x, h, g = z3.Ints("a x h g")
+    common = dict(impl_vars=[a], input_vars=[x],
+                  impl_constraints=z3.And(a >= 0, a <= 1),
+                  behavior=z3.And(x >= 0, x <= 1))
+    lim = Limits(timeout_ms=5000, max_iterations=3)
+
+    res = cegis.synth(SynthSpec(**common, helper_vars=[h], correctness=h == x), lim)
+    assert res.verdict is Verdict.PROVED and verify(res.certificate).ok
+    assert res.certificate.payload["helpers"] == [["h", "Int"]]
+    explicit = cegis.synth(SynthSpec(**common, correctness=z3.Exists([h], h == x)), lim)
+    assert explicit.verdict is Verdict.PROVED
+
+    # no integer helper for x = 1: refused, not proved
+    none = cegis.synth(SynthSpec(**common, helper_vars=[h], correctness=2 * h == x), lim)
+    assert none.verdict is not Verdict.PROVED
+
+    # a helper tied to the implementation: only a = 1 works
+    dep = cegis.synth(SynthSpec(**common, helper_vars=[h],
+                                correctness=z3.And(h == x + a, h >= 1)), lim)
+    assert dep.verdict is Verdict.PROVED and dep.meta["implementation"]["a"] == 1
+    d = copy.deepcopy(dep.certificate.to_dict())
+    d["payload"]["implementation"]["a"] = ["Int", 0]
+    assert not verify(Certificate.from_dict(d)).ok
+
+    # two helpers
+    two = cegis.synth(SynthSpec(**common, helper_vars=[h, g],
+                                correctness=z3.And(h + g == x, h >= 0, g >= 0)), lim)
+    assert two.verdict is Verdict.PROVED and verify(two.certificate).ok
+
+
 def test_0_26_1_strict_dimacs_and_the_sense_message():
     from certo import LPSpec
     from certo.cnf import CNF

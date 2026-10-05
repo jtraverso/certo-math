@@ -1037,7 +1037,7 @@ class CoverSpec:
     # {owner: part}, "withdraw": [owners], "insert": {owner: part}, "frozen":
     # [owners], "new": [resources added], "balance": insert - withdraw}.
     # `parts` is then derived (kept, then inserted) and may be left empty.
-    repair: dict = None
+    repair: object = None            # a dict, or a LIST of steps
 
     def to_lp(self, integral: bool = False):
         """The exact-cover LP: choose the fewest candidates covering everything.

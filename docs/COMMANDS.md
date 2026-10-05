@@ -1918,6 +1918,15 @@ because the edge is in the graph. On K4, `abc, ad, bd, cd -> abd, ac, bc, cd`
 is refused with `abc` frozen and accepted with `cd` frozen; `verify`
 re-derives the whole change from the certificate.
 
+`repair=` is a dict for one change or a LIST for a sequence: the first step
+carries `before`, each later one starts from the partition the previous left
+(owners as they were renamed there), and an owner frozen at any step stays
+frozen for every later one -- a freeze for one step only is another contract.
+A refused change is REFUTED **without a certificate**: the detail names the
+step, the edge and the owner (`cover.repair.takes_other`), or the balance
+(`cover.repair.balance`), and `meta.repair_problems` lists the keys -- a
+rejection of the data, not a certificate of inadmissibility.
+
 ---
 
 ## Build it, assemble it, keep it

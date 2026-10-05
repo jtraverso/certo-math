@@ -8,7 +8,7 @@ payload — each such change says so and what still reads the old shape.
 
 ## [0.26.1] — 2026-10-04
 
-**A soundness fix and honest rejections, from three reports on 0.26.0.**
+**A soundness fix and honest rejections, from four reports on 0.26.0.**
 No new commands (59) or kinds (56); the schema stays 5.
 
 ### Soundness
@@ -38,6 +38,13 @@ No new commands (59) or kinds (56); the schema stays 5.
   1", a `>=` row in its own orientation and name (not `name_geq`), and for
   the dual the variable that falls short -- the request repeated most in one
   report.
+- **CEGIS keeps the helpers existential.** The contract is exists impl .
+  forall input . exists helper; the counterexample search left the helpers
+  free -- an input where SOME helper failed -- so `h = x` never converged
+  (a user's probe). Never a false PROVED: "no input fails for any helper" is
+  the stronger statement. The search, `verify` (with the helpers recorded in
+  the certificate, optional field `helpers`) and `prove_candidate` now
+  quantify them as the contract reads.
 - `invalid sense` lists the senses; `CNF.from_dimacs(strict=True)` refuses
   at reading what the verifiers refuse later (a header that disagrees, a
   second header, a negative count); the docs say how a minimisation's

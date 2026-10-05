@@ -464,18 +464,20 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
     )
 
 
-def cegis_certificate(impl, counterexamples, smt2, iterations) -> Certificate:
-    return Certificate(
-        kind="cegis",
-        solver_free=False,
-        payload={
-            "implementation": impl,
-            "counterexamples": counterexamples,
-            "smt2": smt2,
-            "iterations": iterations,
-        },
-        note_key="cert.note.cegis",
-    )
+def cegis_certificate(impl, counterexamples, smt2, iterations,
+                      helpers=None) -> Certificate:
+    payload = {
+        "implementation": impl,
+        "counterexamples": counterexamples,
+        "smt2": smt2,
+        "iterations": iterations,
+    }
+    if helpers:
+        # Optional: the existential helpers, by name and sort, so `verify`
+        # quantifies them the way the contract does.
+        payload["helpers"] = helpers
+    return Certificate(kind="cegis", solver_free=False, payload=payload,
+                       note_key="cert.note.cegis")
 
 
 def cnf_model_certificate(dimacs: str, true_vars) -> Certificate:
@@ -6192,9 +6194,15 @@ def _verify_cegis(cert, limits) -> VerifyReport:
     ok1 = r1 == z3.sat
     checks.append((t("verify.cegis.impl_ok"), ok1, str(r1)))
 
+    # No input that NO helper saves: the helpers recorded are quantified
+    # universally inside the negation, as the contract reads. A certificate
+    # without them is checked the old way -- for every helper value, which is
+    # the stronger statement and still a proof of the weaker one.
+    helpers = [_const(z3, n, srt) for n, srt in (p.get("helpers") or [])]
     s = z3.Solver()
     lim.apply_to(s)
-    s.add(behav, z3.Not(corr), *fix)
+    s.add(behav, (z3.ForAll(helpers, z3.Not(corr)) if helpers else z3.Not(corr)),
+          *fix)
     r2 = s.check()
     ok2 = r2 == z3.unsat
     checks.append((t("verify.cegis.no_ce"), ok2, str(r2)))

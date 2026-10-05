@@ -1961,6 +1961,16 @@ propietario no retirado solo porque la arista está en el grafo. En K4,
 acepta con `cd` congelado; `verify` rederiva el cambio completo desde el
 certificado.
 
+`repair=` es un dict para un cambio o una LISTA para una secuencia: el primer
+paso lleva `before`, cada uno de los siguientes parte de la partición que dejó
+el anterior (con los propietarios como quedaron nombrados ahí), y un
+propietario congelado en algún paso queda congelado en todos los siguientes --
+una congelación de un solo paso es otro contrato. Un cambio rechazado es
+REFUTADO **sin certificado**: el detalle nombra el paso, la arista y el
+propietario (`cover.repair.takes_other`), o el saldo (`cover.repair.balance`),
+y `meta.repair_problems` lista las claves -- un rechazo de los datos, no un
+certificado de inadmisibilidad.
+
 ---
 
 ## Construir, ensamblar, conservar
