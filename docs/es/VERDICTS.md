@@ -54,6 +54,9 @@ búsqueda suele venir con lo que la búsqueda sabía al parar: ver
 `0` concluyente, `2` no concluyente, `1` un certificado que falla su propia
 comprobación, `3` error. `lint` es distinto: `0` limpio o solo notas, `1`
 errores, `2` avisos. Los scripts deben decidir por estos, no por el texto.
+Un `0` concluyente es cualquiera de las dos respuestas: `--oneline` imprime el
+veredicto como primer campo separado por tabuladores (`proved`, `refuted`,
+`satisfiable`...; en `verify`, `valid` o `invalid`).
 
 `--deadline` detiene una corrida con `2`, tras imprimir la pila de cada hilo.
 Cualquier OTRO código no es de certo: `-1073741819` (`0xC0000005`) o

@@ -60,7 +60,7 @@ def scope_note(res: Result):
 _HIDDEN_META = ("self_check", "self_check_ms", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
-                "counterexample", "hint", "lemmas", "used", "unused", "bridges", "lo", "hi",
+                "counterexample", "hint", "hints", "lemmas", "used", "unused", "bridges", "lo", "hi",
                 "width", "ladder", "lo_float", "hi_float", "vacuous",
                 "banner_key", "level", "orbits", "spot_checks",
                 "by_orbit", "evaluated", "inferred", "cofactors", "squares",
@@ -161,6 +161,15 @@ def _print_explained(cert, md=False) -> None:
         print("    " + line)
 
 
+def oneline(*fields) -> str:
+    """One line, TAB-separated, `-` for what is absent: what a script reads
+    without a JSON parser. `--brief` still printed a page."""
+    def clean(x):
+        return "-" if x in (None, "") else " ".join(str(x).split())
+
+    return "\t".join(clean(x) for x in fields)
+
+
 def emit(res: Result, args) -> int:
     # Provenance: tie the certificate to the spec and version that made it.
     if res.certificate is not None:
@@ -172,8 +181,16 @@ def emit(res: Result, args) -> int:
     # an exit code of 1 and a SELF-CHECK FAILED on stderr.
     selfcheck = _self_check(res, args)
 
+    quiet = getattr(args, "json", False) or getattr(args, "oneline", False)
     if getattr(args, "json", False):
         print(json.dumps(_as_json(res, args), indent=2, ensure_ascii=False))
+    elif getattr(args, "oneline", False):
+        c = res.certificate
+        print(oneline("invalid" if selfcheck is False else res.verdict.value,
+                      res.status.value, c.kind if c is not None else None,
+                      c.digest() if c is not None else None,
+                      getattr(args, "cert", None) if c is not None else None,
+                      res.detail))
     else:
         head = banner(res)
         if selfcheck is False:
@@ -204,6 +221,8 @@ def emit(res: Result, args) -> int:
             for k, v in sorted(ce.items()):
                 print("    {} = {}".format(k, v))
             _print_explained(res.certificate)
+        for h in res.meta.get("hints") or []:
+            print("  -> " + h)
 
         for k, v in sorted(res.meta.items()):
             if k in _HIDDEN_META:
@@ -239,7 +258,7 @@ def emit(res: Result, args) -> int:
         from . import store
 
         store.write_certificate(res.certificate, out)
-        if not getattr(args, "json", False):
+        if not quiet:
             print("  " + t("cli.cert.written", path=out))
 
     log = getattr(args, "log", None)
@@ -250,7 +269,7 @@ def emit(res: Result, args) -> int:
         ledger.append(path, res, cert_path=out, spec_path=getattr(args, "spec", None),
                       note=getattr(args, "note", "") or "",
                       tags=getattr(args, "tag", None))
-        if not getattr(args, "json", False):
+        if not quiet:
             print("  " + t("cli.ledger.logged", path=path))
 
     # A question certo could not settle is the raw material of a coverage
@@ -258,7 +277,7 @@ def emit(res: Result, args) -> int:
     # never fatal, and `CERTO_NO_COVERAGE=1` turns it off.
     from . import coverage
 
-    if coverage.record(res, "cli") and not getattr(args, "json", False):
+    if coverage.record(res, "cli") and not quiet:
         _announce_coverage()
 
     if selfcheck is False:
@@ -594,6 +613,8 @@ def cmd_find(args):
     if args.json:
         print(json.dumps(rows, indent=2, ensure_ascii=False, default=str))
         return 0 if rows else 2
+    for note in discovery.notes(query):
+        print("  !! " + note)
     if not rows:
         print("  " + t("cli.find.none", query=query))
         return 2
@@ -697,7 +718,7 @@ def cmd_mcp(args):
     stop = []
     if args.action == "restart":
         stop = [r["pid"] for r in st["servers"]
-                if getattr(args, "all", False) or r["stale"]]
+                if getattr(args, "all", False) or r["stale"] or r.get("orphan")]
     stopped = mcpctl.stop(stop) if stop and getattr(args, "yes", False) else []
     if getattr(args, "json", False):
         print(json.dumps(dict(st, would_stop=stop,
@@ -712,6 +733,7 @@ def cmd_mcp(args):
     for r in st["servers"]:
         print("  {:>7}  {}  {}  {}".format(
             r["pid"], r["started_iso"] or "?",
+            t("cli.mcp.orphan") if r.get("orphan") else
             t("cli.mcp.stale") if r["stale"] else t("cli.mcp.current"),
             r["cmd"][:90]))
     if args.action == "restart":
@@ -1206,6 +1228,7 @@ def cmd_doctor(args):
     rep = doctor.report()
     if args.json:
         rep["mcp"] = doctor.mcp_status()
+        rep["mcp"]["servers"] = doctor.mcp_servers()
         if args.register_mcp:
             rep["registration"] = doctor.register_mcp(
                 getattr(args, "mcp_path", None), getattr(args, "mcp_venv", None))
@@ -1258,6 +1281,13 @@ def cmd_doctor(args):
         print("    " + t("doctor.mcp.not_registered"))
     print("    " + (t("doctor.mcp.starts") if m["starts"]
                     else t("doctor.mcp.fails", detail=m["detail"])))
+    sv = doctor.mcp_servers()
+    if sv["n"] and (sv["stale"] or sv["orphan"]):
+        print("    !! " + t("doctor.mcp.servers", n=sv["n"], stale=sv["stale"],
+                            orphan=sv["orphan"], version=sv["installed"] or "?"))
+    elif sv["n"]:
+        print("    " + t("doctor.mcp.servers_ok", n=sv["n"],
+                         version=sv["installed"] or "?"))
 
     print()
     cov = rep.get("coverage") or {}
@@ -2235,7 +2265,7 @@ def cmd_verify(args):
                     was=(cert.provenance or {}).get("spec_path") or "?",
                     want=want[:16], got=got[:16]), file=sys.stderr)
             return 1
-        if not args.json:
+        if not args.json and not getattr(args, "oneline", False):
             print("  " + t("cli.verify.spec_matches", path=args.spec))
 
     if getattr(args, "tamper", False):
@@ -2254,6 +2284,9 @@ def cmd_verify(args):
         if rows:
             out["explained"] = rows
         print(json.dumps(out, indent=2, ensure_ascii=False))
+    elif getattr(args, "oneline", False):
+        print(oneline("valid" if rep.ok else "invalid", rep.degree, rep.kind,
+                      cert.digest(), args.certificate, rep.detail))
     else:
         print(t("cli.verify.header",
                 state=t("cli.verify.valid" if rep.ok else "cli.verify.invalid"),
@@ -2714,6 +2747,11 @@ def build_parser():
     common.add_argument("--brief", action="store_true",
                         help="with --json: the certificate as kind, digest "
                              "and size instead of its whole payload")
+    common.add_argument("--oneline", action="store_true",
+                        help="ONE tab-separated line: verdict, status, "
+                             "certificate kind, digest, certificate path, "
+                             "detail (`-` when absent). On verify: valid or "
+                             "invalid, degree, kind, digest, path, detail")
     common.add_argument("--lang", choices=available(),
                         help="output language (default: en, or $CERTO_LANG)")
     common.add_argument("--cert", metavar="FILE", help="write the certificate there")
@@ -3090,8 +3128,8 @@ def build_parser():
                     "code; `restart --yes` stops the stale ones so the client "
                     "starts fresh")
     sp.add_argument("action", choices=["status", "restart"],
-                    help="status: list them. restart: stop the stale ones "
-                         "(only with --yes)")
+                    help="status: list them. restart: stop the stale and "
+                         "the orphaned ones (only with --yes)")
     sp.add_argument("--yes", action="store_true",
                     help="with restart: actually stop them")
     sp.add_argument("--all", action="store_true",

@@ -110,6 +110,10 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P2** | Hypergraph matching and transversal, triangle packing and covering of a graph, as native commands: certified branch and bound with the LP dual, and a data spec (`{"hypergraph": ...}`) instead of generated `.py` files | **M-L** | med | med | user feedback (0.26.1): what Jacobian refuses past 20 edges. Joins the branch-and-bound rows below. 0.26.2 points `find` to the 0-1 program |
+| **P2** | Non-vacuity in the regime that matters: `check --hypotheses-only` with extra conditions (integers, `l >= 6`), not only "satisfiable over the reals" | **S** | high | low | user feedback (0.26.1): a non-empty real regime was empty for the integers that mattered |
+| **P2** | A certificate's ROLE on its first line: consumer or existence, and which link of a reduction chain it touches -- declared in the spec, carried by `scope` | **S-M** | med | low | user feedback (0.26.1): with dozens of PASS certificates, volume is easy to mistake for progress |
+| **P3** | On a refutation, the best constant computed: `range` run inside `prove` when the claim bounds a variable linearly | **S-M** | med | low | user feedback (0.26.1); 0.26.2 names the command beside the counterexample |
 | **P2** | A refused repair as a small CERTIFICATE of inadmissibility (step, edge, owner, balance), so negatives seal like positives; a synthesised decision linked to its repair id, certificate and literal resource; the first context that does not pay when a domain grows | **S-M** | med | low | user feedback (b0): negatives are REFUTED without a certificate today, which is right but cannot be sealed |
 | **P2** | Solver-free certificates for recurrence tables over masks: the clique domain (K2/K3/K4), the one-edge transition, the values and the reconstruction -- optimality and exhaustiveness, which covers alone do not give | **M** | med | med | user feedback (b0): lower bounds checked with Z3 and a second exact auditor |
 | **P1** | One CLOCK across every engine: the deadline `ideal` and the exact LP reconstruction now keep, propagated to every search, with the phase and the elapsed time on a stop; the MCP watchdog and `--deadline` that ends children join it | **M** | med | med | three reports: budgets bounded a phase, not the call. 0.26.1 fixed `ideal` and the LP reconstruction |
@@ -183,6 +187,14 @@ of reports, and exists.
   certificate: the incumbent, the unopened nodes, and the bound they give.
 - **A stable in-process API.** `certo.api.run(command, spec)` runs any command
   without a new interpreter; `api.options(command)` lists what each takes.
+- **A certificate used as a hypothesis, with its link checked.**
+  `ProofSpec.lemma(name, certificate="lemma.json")` re-verifies it and checks
+  that what it closes entails the statement used (`compose`).
+- **A warning when the MCP server is older than the install.** Since 0.26.1
+  every answer says so; `certo mcp status` lists them. A server started on
+  0.24 cannot warn: it predates the warning.
+- **Exit codes per outcome**, documented in `docs/VERDICTS.md`; 0.26.2 adds
+  `--oneline` for the verdict itself.
 - **Branch and bound needs no large thread stack.** It keeps its own stack of
   nodes and does not recurse, so the depth of the tree is not a Python limit.
 
@@ -1079,7 +1091,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.26.1**, with **56 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.26.2**, with **56 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1088,7 +1100,8 @@ field, or a command that emits no certificate. Among the optional fields added u
 lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
-`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`.
+`ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`; in 0.26.1 `helpers`
+(`cegis`); in 0.26.2 `citations` (`unsat_core`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

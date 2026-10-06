@@ -93,9 +93,16 @@ def servers():
     me = os.getpid()
     rows = []
     if os.name == "nt":
-        ps = ("Get-CimInstance Win32_Process | Where-Object { $_.CommandLine "
-              "-match 'certo[._-]mcp' } | Select-Object ProcessId, "
+        # Every process, once: a server's parent is alive when its pid is
+        # still running AND started before the server -- a pid reused by a
+        # later process is not the parent.
+        ps = ("$all = Get-CimInstance Win32_Process; $live = @{}; "
+              "foreach ($p in $all) { $live[[int]$p.ProcessId] = $p.CreationDate }; "
+              "$all | Where-Object { $_.CommandLine -match 'certo[._-]mcp' } | "
+              "Select-Object ProcessId, ParentProcessId, "
               "@{n='Start';e={$_.CreationDate.ToUniversalTime().ToString('o')}}, "
+              "@{n='ParentAlive';e={ $c = $live[[int]$_.ParentProcessId]; "
+              "[bool]($c -and $c -le $_.CreationDate) }}, "
               "CommandLine | ConvertTo-Json -Compress")
         try:
             out = subprocess.run(["powershell", "-NoProfile", "-Command", ps],
@@ -111,24 +118,31 @@ def servers():
             except (KeyError, TypeError, ValueError, AttributeError):
                 started = None
             rows.append({"pid": int(d["ProcessId"]), "started": started,
+                         "ppid": d.get("ParentProcessId"),
+                         "parent_alive": d.get("ParentAlive"),
                          "cmd": d.get("CommandLine") or ""})
     else:
         try:
-            out = subprocess.run(["ps", "-eo", "pid=,lstart=,args="],
+            out = subprocess.run(["ps", "-eo", "pid=,ppid=,lstart=,args="],
                                  capture_output=True, text=True, timeout=30).stdout
         except (OSError, subprocess.SubprocessError):
             out = ""
+        pids = set()
         for line in out.splitlines():
-            parts = line.split(None, 6)
-            if len(parts) < 7:
+            parts = line.split(None, 7)
+            if len(parts) < 8:
                 continue
+            pids.add(int(parts[0]))
             try:
-                started = time.mktime(time.strptime(" ".join(parts[1:6]),
+                started = time.mktime(time.strptime(" ".join(parts[2:7]),
                                                     "%a %b %d %H:%M:%S %Y"))
             except ValueError:
                 started = None
             rows.append({"pid": int(parts[0]), "started": started,
-                         "cmd": parts[6]})
+                         "ppid": int(parts[1]), "cmd": parts[7]})
+        # Re-parented to init (or a subreaper's 1) means the parent is gone.
+        for r in rows:
+            r["parent_alive"] = r["ppid"] > 1 and r["ppid"] in pids
     return [r for r in rows if r["pid"] != me and _SERVER.search(r["cmd"])
             and " mcp status" not in r["cmd"] and " mcp restart" not in r["cmd"]]
 
@@ -141,6 +155,9 @@ def status() -> dict:
     for r in servers():
         r = dict(r)
         r["stale"] = bool(when and r["started"] and r["started"] < when)
+        # ORPHANED: its client is gone, so nobody can talk to it again.
+        # Unknown (None) is not orphaned.
+        r["orphan"] = r.get("parent_alive") is False
         r["started_iso"] = (datetime.fromtimestamp(r["started"], timezone.utc)
                             .isoformat(timespec="seconds")
                             if r["started"] else None)

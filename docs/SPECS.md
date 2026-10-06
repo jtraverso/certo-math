@@ -25,6 +25,17 @@ def spec():
 Name every hypothesis. The name is what `core`, `audit` and `farkas` report
 back, and an unnamed hypothesis is one you cannot be told about.
 
+A hypothesis that is a published result can carry its source:
+`s.assume("mu_max", mu <= Fraction(28, 15), cite="Author 2016, Thm 3")`. The
+certificate lists the cited hypotheses the proof USED, and `verify` names each
+as external and not audited -- the implication from it is checked, the result
+itself is not.
+
+**Integers are not the default.** `z3.Reals` makes every quantity real, which
+is a weaker claim when the quantities are counts, floors or residues, and its
+counterexamples can be spurious (`nu = -1/2`). Declare them with `z3.Int` /
+`z3.Ints`; `prove` says so when a counterexample is not integral.
+
 ## Which type for which command
 
 | Type | Commands |
@@ -75,6 +86,11 @@ Coefficients accept `int`, `Fraction`, the string `"7/12"` or `float`:
 lp.objective({"x": Fraction(7, 12), "y": "1/3"})
 lp.constraint({"x": 1, "y": 1}, "<=", Fraction(1, 2), name="cap")
 ```
+
+A variable's kind is `continuous`, `integer` or `binary`:
+`lp.variable("x", kind="binary")`. A binary is 0..1 however it was declared,
+`kinds["x"] = "binary"` included. An integer needs an upper bound for
+`mixed --prove-optimal`: `lp.variable("n", 0, 10, kind="integer")`.
 
 Prefer `Fraction` or the string form. A float that arrives as data is a float
 in the certificate, and `verify` will tell you it is not citable. In
@@ -328,6 +344,7 @@ Common options go **after** the subcommand:
 | Option | Does |
 |---|---|
 | `--json` | machine-readable result on stdout |
+| `--oneline` | one tab-separated line: verdict, status, kind, digest, certificate path, detail (`-` when absent); on `verify`: valid or invalid, degree, kind, digest, path, detail |
 | `--cert FILE` | write the certificate here |
 | `--lang` | `en` or `es`; or set `CERTO_LANG` |
 | `--timeout-ms` | wall clock, a backstop rather than the budget |

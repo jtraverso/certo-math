@@ -25,6 +25,18 @@ def spec():
 Nombra cada hipótesis. El nombre es lo que `core`, `audit` y `farkas` te
 devuelven, y una hipótesis sin nombre es una sobre la que no te pueden avisar.
 
+Una hipótesis que es un resultado publicado puede llevar su fuente:
+`s.assume("mu_max", mu <= Fraction(28, 15), cite="Autor 2016, Thm 3")`. El
+certificado lista las hipótesis citadas que la prueba USÓ, y `verify` nombra
+cada una como externa y no auditada -- se comprueba la implicación a partir de
+ella, no el resultado en sí.
+
+**Los enteros no son el valor por defecto.** `z3.Reals` hace real cada
+cantidad, que es un enunciado más débil cuando las cantidades son recuentos,
+pisos o residuos, y sus contraejemplos pueden ser espurios (`nu = -1/2`).
+Decláralas con `z3.Int` / `z3.Ints`; `prove` lo dice cuando un contraejemplo no
+es entero.
+
 ## Qué tipo para qué comando
 
 | Tipo | Comandos |
@@ -75,6 +87,11 @@ Los coeficientes aceptan `int`, `Fraction`, la cadena `"7/12"` o `float`:
 lp.objective({"x": Fraction(7, 12), "y": "1/3"})
 lp.constraint({"x": 1, "y": 1}, "<=", Fraction(1, 2), name="cap")
 ```
+
+El tipo de una variable es `continuous`, `integer` o `binary`:
+`lp.variable("x", kind="binary")`. Una binaria es 0..1 se declare como se
+declare, `kinds["x"] = "binary"` incluido. Una entera necesita cota superior
+para `mixed --prove-optimal`: `lp.variable("n", 0, 10, kind="integer")`.
 
 Prefiere `Fraction` o la forma de cadena. Un flotante que llega como dato es un
 flotante en el certificado, y `verify` te dirá que no es citable. En un
@@ -335,6 +352,7 @@ Las opciones comunes van **después** del subcomando:
 | Opción | Hace |
 |---|---|
 | `--json` | resultado legible por máquina en stdout |
+| `--oneline` | una línea separada por tabuladores: veredicto, estado, tipo, digest, ruta del certificado, detalle (`-` si falta); en `verify`: valid o invalid, grado, tipo, digest, ruta, detalle |
 | `--cert FILE` | escribe aquí el certificado |
 | `--lang` | `en` o `es`; o pon `CERTO_LANG` |
 | `--timeout-ms` | reloj de pared, un tope y no el presupuesto |

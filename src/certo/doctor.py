@@ -654,6 +654,23 @@ def report() -> dict:
 # ---------------------------------------------------------------------------
 
 
+def mcp_servers() -> dict:
+    """How many certo MCP servers run, how many on old code, how many with
+    their client gone. A launcher and the server it started count once."""
+    from . import mcpctl
+
+    try:
+        st = mcpctl.status()
+    except Exception:  # noqa: BLE001 -- a listing is never worth a crash
+        return {"n": 0, "stale": 0, "orphan": 0, "installed": None}
+    pids = {r["pid"] for r in st["servers"]}
+    roots = [r for r in st["servers"] if r.get("ppid") not in pids]
+    return {"n": len(roots),
+            "stale": sum(1 for r in roots if r["stale"]),
+            "orphan": sum(1 for r in roots if r.get("orphan")),
+            "installed": st["installed"]}
+
+
 def mcp_status(workspace=None) -> dict:
     """Is the server registered, and does it actually start?
 

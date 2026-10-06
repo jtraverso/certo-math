@@ -2412,7 +2412,7 @@ procesos.
 
     certo mcp status
     certo mcp restart          # muestra qué detendría
-    certo mcp restart --yes    # detiene los viejos; --all, todos
+    certo mcp restart --yes    # detiene los viejos y los huérfanos; --all, todos
 
 Un servidor MCP lo arranca su cliente y conserva el código que cargó. Después
 de un `pip install` sigue respondiendo como la versión vieja, y se mezclaron
@@ -2423,6 +2423,13 @@ Desktop. Listar es lo que hace por defecto, porque detener un servidor corta la
 sesión de ese cliente con él. Y cada respuesta MCP trae `certo_version`, más
 `stale: true` con un aviso cuando el código del servidor es más viejo que el
 paquete instalado.
+
+Un servidor **huérfano** es uno cuyo cliente ya no existe: nadie podrá volver a
+hablarle. Desde 0.26.2 un servidor termina cuando termina su padre (un padre que
+termina en los primeros segundos es un lanzador y no se vigila;
+`CERTO_MCP_NO_PARENT_WATCH=1` apaga la vigilancia), `status` marca los
+huérfanos de versiones anteriores, `restart --yes` los detiene, y `certo
+doctor` cuenta los servidores en marcha, viejos y huérfanos.
 
 ### `certo repro`
 

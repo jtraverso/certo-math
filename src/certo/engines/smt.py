@@ -185,6 +185,7 @@ def prove(spec, limits: Limits | None = None) -> Result:
             unsat_core_certificate(
                 z3util.smt2(*[formulas[n] for n in core]), core, dropped,
                 vacuous=vacuous, clash=clash,
+                citations=_cited(spec, core),
             ), formulas, core, lim)
         used = [n for n in core if n != "__goal__"]
         # When the proof is vacuous that IS the headline; "proved using 2 of
@@ -204,11 +205,14 @@ def prove(spec, limits: Limits | None = None) -> Result:
         # The values ARE the answer. They were in the certificate and nowhere
         # on screen, so refuting a claim meant opening a JSON file to find out
         # what refuted it.
+        meta = {"counterexample": {k: v[1] for k, v
+                                   in cert.payload["assignment"].items()}}
+        hints = refutation_hints(spec, s.model())
+        if hints:
+            meta["hints"] = hints
         return Result(
             "prove", st, Verdict.REFUTED, ENGINE, ms, cert,
-            detail=t("engine.prove.refuted"),
-            meta={"counterexample": {k: v[1] for k, v
-                                     in cert.payload["assignment"].items()}},
+            detail=t("engine.prove.refuted"), meta=meta,
         )
 
     return Result(
@@ -216,6 +220,57 @@ def prove(spec, limits: Limits | None = None) -> Result:
         detail=t("engine.inconclusive", status=st.value,
                  reason=readable_reason(s.reason_unknown())),
     )
+
+
+def _cited(spec, core) -> dict:
+    """The sources of the cited hypotheses the core USED."""
+    cites = getattr(spec, "citations", None) or {}
+    return {n: cites[n] for n in core if n in cites}
+
+
+def refutation_hints(spec, model) -> list:
+    """What a counterexample suggests about the SPEC, said next to it.
+
+    Two readings a user had to make alone. A value like `nu = -1/2` for a
+    quantity that is a count: the variables were declared real, the claim was
+    weaker than meant, and the counterexample may be spurious. And a claim
+    that bounds a quantity by a constant, refuted: the constant was wrong, and
+    `range` finds the best one -- which existed, and was found late.
+    """
+    hints = []
+    frac = []
+    for d in model.decls():
+        if d.arity() != 0 or d.range() != z3.RealSort():
+            continue
+        v = model[d]
+        if z3.is_rational_value(v):
+            if v.denominator_as_long() != 1:
+                frac.append("{} = {}".format(d.name(), v.as_fraction()))
+        elif z3.is_algebraic_value(v):
+            frac.append("{} = {}".format(d.name(), v.approx(6)))
+    if frac:
+        hints.append(t("engine.prove.hint.nonintegral",
+                       values=", ".join(sorted(frac)[:4])))
+    goal = getattr(spec, "goal", None)
+    if goal is not None and z3.is_app(goal) and goal.num_args() == 2 and (
+            z3.is_le(goal) or z3.is_lt(goal) or z3.is_ge(goal) or z3.is_gt(goal)):
+        a, b = goal.arg(0), goal.arg(1)
+
+        def number(e):
+            return z3.is_int_value(e) or z3.is_rational_value(e) \
+                or z3.is_algebraic_value(e)
+
+        def variable(e):
+            return z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED
+
+        side = b if number(a) else a if number(b) else None
+        if side is not None:
+            if variable(side):
+                hints.append(t("engine.prove.hint.range_var", var=str(side)))
+            else:
+                hints.append(t("engine.prove.hint.range_expr",
+                               expr=str(side)[:60]))
+    return hints
 
 
 def _constant_goal(goal):

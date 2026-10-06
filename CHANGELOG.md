@@ -6,6 +6,46 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.26.2] — 2026-10-06
+
+**From a user's report on 0.26.1: one fix and the frictions around it.**
+No new commands (59) or kinds (56); the schema stays 5, with one optional
+field (`citations` on `unsat_core`).
+
+### Fixed
+
+- **A binary is 0..1 however it was declared.** `variable(kind="binary")`
+  set the bound, but `kinds[v] = "binary"` written into the dict left it at
+  `(0, None)`: `mixed --prove-optimal` answered "no upper bound" for a 0-1
+  variable, and the relaxation was of an unbounded program. The bound is
+  settled wherever a search or a certificate reads it, and an integer with
+  no bound says how to give it one.
+
+### New
+
+- **A refutation says what it suggests about the spec.** A counterexample
+  that is not integral, for variables declared real, says so and how to
+  declare integers (a value like `nu = -1/2` for a count is often spurious);
+  a refuted claim that bounds a quantity by a constant points to `certo
+  range`, which gives the best constant with its certificate.
+- **`assume(name, expr, cite="...")`.** A hypothesis that is a published
+  result carries its source. The certificate lists the cited hypotheses it
+  used (optional field `citations`), and `verify` names each as external and
+  not audited. The degree is unchanged: it is about the implication, which
+  is checked.
+- **`--oneline`**: one tab-separated line -- verdict, status, kind, digest,
+  certificate path, detail -- for scripts, on every command and on `verify`.
+- **Orphaned MCP servers.** A server now exits when the client that started
+  it is gone (a parent that exits in the first seconds is a launcher, and is
+  not watched; `CERTO_MCP_NO_PARENT_WATCH=1` turns it off). `certo mcp
+  status` marks the orphaned ones, `restart --yes` stops them with the stale
+  ones, and `certo doctor` counts the servers running, stale and orphaned.
+  A user found 28 alive at once.
+- **`find` says what `cover` is not.** A search for a hitting set,
+  transversal, vertex cover or set cover is told that `cover` partitions a
+  graph into cliques, and how to write those as a 0-1 program for `mixed
+  --prove-optimal` or `opt`.
+
 ## [0.26.1] — 2026-10-04
 
 **A soundness fix and honest rejections, from four reports on 0.26.0.**

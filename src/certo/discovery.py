@@ -339,6 +339,23 @@ TYPE_WEIGHT = {"command": 1.0, "flag": 0.95, "spec": 0.8, "spec_field": 0.75,
                "api": 0.75, "kind": 0.7}
 
 
+#: Questions whose words lead to the WRONG entry, and what to say instead.
+#: "cubierta" is `cover` to the index, and `cover` partitions a graph into
+#: cliques: a user looking for a hitting set took that detour.
+NOTES = [
+    (re.compile(r"hitting|transversal|set[ -]?cover|vertex[ -]?cover|"
+                r"cubierta (por|de) (conjuntos|vertices)|"
+                r"cubrimiento (por|de) (conjuntos|vertices)|"
+                r"conjunto de impacto"), "find.note.hitting_set"),
+]
+
+
+def notes(query) -> list:
+    """What to know before reading the ranking: a word that leads astray."""
+    q = _fold(query)
+    return [t(key) for pattern, key in NOTES if pattern.search(q)]
+
+
 def find(query, n=8, types=None) -> list:
     """The `n` entries that best match `query`, best first."""
     docs, toks, df = _index()

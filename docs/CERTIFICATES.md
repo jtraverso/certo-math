@@ -31,7 +31,7 @@ answers"*. The table below is the map; the header is the territory.
 |---|---|---|
 | `model` | a `prove` counterexample, or a non-empty regime | **yes**, substitute and simplify |
 | `cnf_model` | an assignment satisfies the CNF | **yes**, evaluation |
-| `unsat_core` | the hypotheses are contradictory | **yes** when the core is linear (Farkas multipliers travel); otherwise re-solves the core alone |
+| `unsat_core` | the hypotheses are contradictory; the CITED ones it used (`citations`) are named as external, not checked | **yes** when the core is linear (Farkas multipliers travel); otherwise re-solves the core alone |
 | `mus` | unsatisfiability **and** minimality | **yes** |
 | `core_matrix` | one core per goal, and that the table says what the cores say | as `unsat_core`, per goal |
 | `farkas` | a combination of the hypotheses that closes the system | **yes**, adding fractions |

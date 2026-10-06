@@ -2086,8 +2086,12 @@ async def find(query: str = "", exact: str | None = None, n: int = 8) -> dict:
                     "near": [e["id"] for e in discovery.find(exact.replace(".", " "), n=5)]}
         return {"ok": True, "contract": got}
     rows = discovery.find(query, n=n)
-    return {"ok": bool(rows), "query": query,
-            "results": [{k: v for k, v in e.items() if k != "text"} for e in rows]}
+    out = {"ok": bool(rows), "query": query,
+           "results": [{k: v for k, v in e.items() if k != "text"} for e in rows]}
+    said = discovery.notes(query)
+    if said:
+        out["notes"] = said
+    return out
 
 
 @mcp.tool(description=(
@@ -2609,11 +2613,61 @@ def compact() -> list:
     return gone
 
 
+def _watch_parent(grace_s=10.0):
+    """Exit when the client that started this server is gone.
+
+    A user found 28 servers alive at once: a server lives as long as its
+    stdin stays open, and a dead client does not always close it -- a
+    process it started may still hold the pipe. The parent dying is the
+    signal that nobody can talk to this server again.
+
+    A parent that dies within `grace_s` of the start was a LAUNCHER (a shim
+    that starts the server and exits), not the client: then the watch is
+    dropped rather than the server. `CERTO_MCP_NO_PARENT_WATCH=1` turns it
+    off.
+    """
+    import os
+    import threading
+    import time
+
+    if os.environ.get("CERTO_MCP_NO_PARENT_WATCH"):
+        return None
+    ppid = os.getppid()
+    if ppid <= 1:
+        return None
+    t0 = time.monotonic()
+
+    if os.name == "nt":
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x00100000, False, ppid)   # SYNCHRONIZE
+        if not handle:
+            return None
+
+        def gone():
+            return k32.WaitForSingleObject(handle, 0xFFFFFFFF) == 0
+    else:
+        def gone():
+            while os.getppid() == ppid:
+                time.sleep(5)
+            return True
+
+    def watch():
+        if gone() and time.monotonic() - t0 > grace_s:
+            os._exit(0)
+
+    th = threading.Thread(target=watch, daemon=True, name="certo-parent-watch")
+    th.start()
+    return th
+
+
 def main(argv=None) -> None:
     import os
     import sys
 
     argv = sys.argv[1:] if argv is None else argv
+    _watch_parent()
     if "--compact" in argv or os.environ.get("CERTO_MCP_COMPACT"):
         compact()
     mcp.run(transport="stdio")

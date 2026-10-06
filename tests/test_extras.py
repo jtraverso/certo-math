@@ -15903,6 +15903,192 @@ def test_an_empty_regime_carries_the_combination_that_shows_it():
     assert rep.ok and rep.degree == "partial"
 
 
+def test_0_26_2_a_binary_is_bounded_however_it_was_declared():
+    """`kinds[v] = "binary"` written into the dict left the bound at None,
+    and `mixed --prove-optimal` answered "no upper bound" for a 0-1 variable."""
+    from certo import LPSpec
+    from certo.certificate import verify
+    from certo.engines import bb
+
+    lp = LPSpec(sense="max")
+    for v in "abc":
+        lp.variable(v)
+        lp.kinds[v] = "binary"
+    lp.objective({"a": 1, "b": 1, "c": 1})
+    lp.constraint({"a": 1, "b": 1}, "<=", 1)
+    lp.constraint({"b": 1, "c": 1}, "<=", 1)
+    res = bb.prove_optimal(lp)
+    assert res.verdict is Verdict.PROVED, res.detail
+    assert "OPTIMUM 2" in res.detail
+    assert verify(res.certificate).ok
+    assert all(lp.bounds[v][1] == 1 for v in "abc")
+    # the RELAXATION is of the 0-1 program too, not of an unbounded one
+    rows, b, _c, names = lp.as_leq_sparse()
+    assert {"bound_a_hi", "bound_b_hi", "bound_c_hi"} <= set(names)
+
+    # an integer with no bound still has no tree -- and says how to give one
+    n = LPSpec(sense="max")
+    n.variable("n", kind="integer")
+    n.objective({"n": 1})
+    n.constraint({"n": 2}, "<=", 7)
+    res = bb.prove_optimal(n)
+    assert res.status is Status.OUT_OF_THEORY
+    assert 'bounds["n"]' in res.detail
+
+
+def test_0_26_2_a_refutation_says_what_it_suggests_about_the_spec():
+    """A non-integral counterexample for real variables, and a refuted
+    constant bound: both readings the user had to make alone."""
+    import z3
+
+    from certo import Spec
+    from certo.engines import smt
+
+    nu, l = z3.Reals("nu l")
+    s = Spec()
+    s.assume("l_ge", l >= 2)
+    s.assume("nu_rel", 2 * nu + 1 == 0)
+    s.claim(l <= 5)
+    res = smt.prove(s)
+    assert res.verdict is Verdict.REFUTED
+    hints = res.meta["hints"]
+    assert any("nu = -1/2" in h and "z3.Int" in h for h in hints), hints
+    assert any("certo range" in h and "--var l" in h for h in hints), hints
+
+    # integers: no integrality hint; an expression: name it first
+    x, y = z3.Ints("x y")
+    s = Spec()
+    s.assume("pos", x >= 0)
+    s.claim(x + y <= 3)
+    hints = smt.prove(s).meta["hints"]
+    assert not any("z3.Int" in h for h in hints), hints
+    assert any("t == " in h for h in hints), hints
+
+    # a claim that is not a constant bound gets no range hint
+    s = Spec()
+    s.assume("pos", x >= 0)
+    s.claim(x == y)
+    assert "hints" not in smt.prove(s).meta
+
+
+def test_0_26_2_a_cited_hypothesis_travels_with_the_certificate():
+    """`assume(..., cite=...)`: the certificate lists the cited hypotheses it
+    USED, and `verify` names each as external and not audited -- without
+    changing the degree, which is about the implication."""
+    import z3
+
+    from certo import MultiSpec, Spec
+    from certo.certificate import verify
+    from certo.engines import smt
+
+    x, y = z3.Ints("x y")
+    s = Spec()
+    s.assume("mu_max", x <= 28, cite="Author 2016, Thm 3")
+    s.assume("other", y >= 0)
+    s.assume("unused", y <= 100, cite="Somebody 2020")
+    s.claim(x <= 30)
+    res = smt.prove(s)
+    assert res.certificate.payload["citations"] == {"mu_max": "Author 2016, Thm 3"}
+    rep = verify(res.certificate)
+    assert rep.ok and rep.degree == "complete"
+    said = " ".join(map(str, rep.warnings))
+    assert "mu_max" in said and "Author 2016, Thm 3" in said
+    assert "Somebody" not in said
+
+    # without a citation the payload is what it always was
+    plain = Spec()
+    plain.assume("mu_max", x <= 28)
+    plain.claim(x <= 30)
+    assert "citations" not in smt.prove(plain).certificate.payload
+
+    m = MultiSpec()
+    m.assume("mu_max", x <= 28, cite="Author 2016")
+    m.claim("g", x <= 30)
+    assert m.single("g").citations == {"mu_max": "Author 2016"}
+
+
+def test_0_26_2_oneline_is_one_tab_separated_line():
+    import io
+    import tempfile
+    from contextlib import redirect_stdout
+
+    from certo.cli import main
+
+    d = pathlib.Path(tempfile.mkdtemp(prefix="certo_oneline_"))
+    f = d / "spec.py"
+    f.write_text("import z3\nfrom certo import Spec\nx = z3.Int('x')\n"
+                 "def spec():\n    s = Spec()\n    s.assume('h', x >= 3)\n"
+                 "    s.claim(x >= 1)\n    return s\n", encoding="utf-8")
+    cert = d / "c.json"
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["prove", str(f), "--oneline", "--cert", str(cert)])
+    lines = buf.getvalue().splitlines()
+    assert rc == 0 and len(lines) == 1, lines
+    fields = lines[0].split("\t")
+    assert fields[:3] == ["proved", "unsat", "unsat_core"], fields
+    assert fields[4] == str(cert) and len(fields) == 6
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["verify", str(cert), "--oneline"])
+    lines = buf.getvalue().splitlines()
+    assert rc == 0 and len(lines) == 1, lines
+    assert lines[0].split("\t")[:3] == ["valid", "complete", "unsat_core"]
+
+
+def test_0_26_2_find_says_cover_is_not_a_set_cover():
+    from certo import discovery
+
+    for q in ("hitting set of a hypergraph", "cubierta por conjuntos",
+              "minimum transversal", "vertex cover"):
+        said = discovery.notes(q)
+        assert said and "cliques" in said[0], q
+    assert discovery.notes("partition a graph into cliques") == []
+
+
+def test_0_26_2_orphaned_mcp_servers_are_named_and_counted():
+    """A server whose client is gone can never be talked to again: `mcp
+    status` says so, `restart --yes` stops it, `doctor` counts it. A
+    launcher and the server it started count once."""
+    from certo import doctor, mcpctl
+
+    rows = [
+        {"pid": 10, "started": 1.0, "ppid": 1, "parent_alive": False,
+         "cmd": "certo-mcp.exe"},
+        {"pid": 11, "started": 1.0, "ppid": 10, "parent_alive": True,
+         "cmd": "python -m certo.mcp_server"},
+        {"pid": 20, "started": 1.0, "ppid": 5, "parent_alive": True,
+         "cmd": "python -m certo.mcp_server --compact"},
+        {"pid": 30, "started": 1.0, "ppid": None, "parent_alive": None,
+         "cmd": "python -m certo.mcp_server"},
+    ]
+    real = mcpctl.servers
+    mcpctl.servers = lambda: [dict(r) for r in rows]
+    try:
+        st = mcpctl.status()
+        orphan = {r["pid"]: r["orphan"] for r in st["servers"]}
+        assert orphan == {10: True, 11: False, 20: False, 30: False}
+        count = doctor.mcp_servers()
+        assert count["n"] == 3 and count["orphan"] == 1, count
+    finally:
+        mcpctl.servers = real
+
+
+def test_0_26_2_the_parent_watch_can_be_turned_off():
+    from certo import mcp_server
+
+    old = os.environ.get("CERTO_MCP_NO_PARENT_WATCH")
+    os.environ["CERTO_MCP_NO_PARENT_WATCH"] = "1"
+    try:
+        assert mcp_server._watch_parent() is None
+    finally:
+        if old is None:
+            os.environ.pop("CERTO_MCP_NO_PARENT_WATCH", None)
+        else:
+            os.environ["CERTO_MCP_NO_PARENT_WATCH"] = old
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

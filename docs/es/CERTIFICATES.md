@@ -31,7 +31,7 @@ abajo es el mapa; la cabecera es el territorio.
 |---|---|---|
 | `model` | un contraejemplo de `prove`, o un régimen no vacío | **sí**, sustituir y simplificar |
 | `cnf_model` | una asignación satisface el CNF | **sí**, evaluación |
-| `unsat_core` | las hipótesis se contradicen | **sí** cuando el núcleo es lineal (viajan los multiplicadores de Farkas); si no, vuelve a resolver solo el núcleo |
+| `unsat_core` | las hipótesis se contradicen; las CITADAS que usó (`citations`) se nombran como externas, sin comprobar | **sí** cuando el núcleo es lineal (viajan los multiplicadores de Farkas); si no, vuelve a resolver solo el núcleo |
 | `mus` | insatisfacibilidad **y** minimalidad | **sí** |
 | `core_matrix` | un núcleo por objetivo, y que la tabla dice lo que dicen los núcleos | como `unsat_core`, por objetivo |
 | `farkas` | una combinación de las hipótesis que cierra el sistema | **sí**, sumar fracciones |

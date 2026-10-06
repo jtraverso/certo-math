@@ -623,7 +623,7 @@
   "cert.note.branch_bound": "The optimum, and the account of every design not taken. Each node is closed by a certificate -- an exact dual bounding its subtree below the incumbent, a Farkas ray showing it is empty, or the residual LP of a fully fixed design -- and the tree is checked to COVER the integer domain node by node. A tree with a missing child reads exactly like a complete one.",
   "engine.bb.no_discrete": "no discrete variables: `opt` already gives the optimum exactly",
   "engine.bb.only_max": "--prove-optimal handles maximisation; negate the objective for a minimisation",
-  "engine.bb.unbounded": "{var} has no upper bound, so its branch has infinitely many children and there is no tree to exhibit",
+  "engine.bb.unbounded": "{var} has no upper bound, so its branch has infinitely many children and there is no tree to exhibit. Give it one: lp.variable(\"{var}\", 0, HI, kind=\"integer\"), or bounds[\"{var}\"] = (0, HI); a binary is 0..1 by itself",
   "engine.bb.no_incumbent": "no starting design was found, so there is nothing to prune against: {detail}",
   "engine.bb.inexact": "a node's LP did not certify exactly, so its bound would not be citable",
   "engine.bb.budget": "the search passed {n} nodes without closing. The best design found is {value}, and it is NOT proved optimal -- branch and bound is exponential and this one did not finish",
@@ -2054,5 +2054,13 @@
   "verify.lp.row_violation": "row {name}: load {load} > bound {bound}, excess {excess}",
   "verify.lp.row_violation_geq": "row {name} (>=): value {load} < required {bound}, short by {excess}",
   "verify.lp.row_violation_eq": "row {name} (=): value {load}, required {bound}",
-  "verify.lp.column_violation": "variable {name}: A^T y gives {got} < objective coefficient {need}, short by {short}"
+  "verify.lp.column_violation": "variable {name}: A^T y gives {got} < objective coefficient {need}, short by {short}",
+  "verify.core.cited": "`{name}` is a CITED result, external and not audited here: {source}. The implication from it is checked; the result itself is not",
+  "engine.prove.hint.nonintegral": "the counterexample is not integral ({values}). If these quantities are integers, declare them with z3.Int / z3.Ints: over the reals the claim is weaker than meant, and a counterexample like this one can be spurious",
+  "engine.prove.hint.range_var": "the claim bounds {var} by a constant. `certo range SPEC --var {var}` gives the exact best bound over the hypotheses (linear ones), with its certificate",
+  "engine.prove.hint.range_expr": "the claim bounds `{expr}` by a constant. To find the best constant, name it -- assume t == that expression -- and run `certo range SPEC --var t` (linear hypotheses)",
+  "find.note.hitting_set": "`cover` is NOT a set cover: it partitions a graph into cliques. A hitting set, transversal, vertex cover or set cover is a 0-1 program -- an LPSpec with binary variables, minimise the sum, one `>= 1` row per edge -- run with `mixed --prove-optimal` (the exact optimum, by a certified branch and bound) or `opt` (the LP bound and its dual)",
+  "cli.mcp.orphan": "ORPHANED (its client is gone)",
+  "doctor.mcp.servers": "MCP servers running: {n} ({stale} on code older than the installed {version}, {orphan} orphaned). `certo mcp restart --yes` stops those",
+  "doctor.mcp.servers_ok": "MCP servers running: {n}, all on the installed {version}"
 }

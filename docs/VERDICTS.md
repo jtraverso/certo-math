@@ -51,7 +51,10 @@ search usually comes with what the search knew when it stopped -- see
 
 `0` conclusive, `2` inconclusive, `1` a certificate that fails its own
 check, `3` error. `lint` differs: `0` clean or notes only, `1` errors,
-`2` warnings. Scripts should branch on these, not on the text.
+`2` warnings. Scripts should branch on these, not on the text. A
+conclusive `0` is either answer: `--oneline` prints the verdict as the first
+tab-separated field (`proved`, `refuted`, `satisfiable`...; on `verify`,
+`valid` or `invalid`).
 
 `--deadline` stops a run with `2`, after printing every thread's stack. Any
 OTHER code is not certo's: `-1073741819` (`0xC0000005`) or `-1073740022`

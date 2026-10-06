@@ -28,16 +28,25 @@ class Spec:
         s = Spec()
         s.assume("positive", x > 0)
         s.claim(x*x >= 0)
+
+    A hypothesis that is a published result can say so:
+    `s.assume("mu_max", mu <= 28/15, cite="Author 2016, Thm 3")`. The proof
+    is unchanged -- a hypothesis is a hypothesis -- but the certificate lists
+    the cited ones it USED, and `verify` shows each as external and not
+    audited, so the dependencies a result rests on travel with it.
     """
 
     assumptions: list = field(default_factory=list)  # [(name, expr)]
     goal: object = None
     title: str = ""
+    citations: dict = field(default_factory=dict)    # name -> source
 
-    def assume(self, name: str, expr):
+    def assume(self, name: str, expr, cite: str = ""):
         if any(n == name for n, _ in self.assumptions):
             raise ValueError(t("spec.duplicate_hypothesis", name=name))
         self.assumptions.append((name, expr))
+        if str(cite or "").strip():
+            self.citations[name] = str(cite).strip()
         return self
 
     def claim(self, expr):
@@ -155,6 +164,18 @@ class LPSpec:
         self.kinds[name] = kind
         return self
 
+    def _binary_bounds(self):
+        """A BINARY IS 0..1 HOWEVER IT WAS DECLARED. `variable(kind="binary")`
+        set the bounds, but `kinds[v] = "binary"` written straight into the
+        dict left them at `(0, None)`: `mixed --prove-optimal` answered "no
+        upper bound" for a 0-1 variable, and the relaxation was the relaxation
+        of a different, unbounded program. Settled wherever the bounds are
+        read for a search or a certificate."""
+        for v in self.var_names:
+            if self.kinds.get(v) == "binary":
+                lo, hi = self.bounds.get(v, (0, None))
+                self.bounds[v] = (0 if lo is None else lo, 1 if hi is None else hi)
+
     def kind_of(self, name) -> str:
         """`integer=True` still means what it used to: all of them."""
         if self.integer:
@@ -163,6 +184,7 @@ class LPSpec:
 
     @property
     def discrete(self) -> list:
+        self._binary_bounds()
         return [v for v in self.var_names
                 if self.kind_of(v) in ("integer", "binary")]
 
@@ -233,6 +255,7 @@ class LPSpec:
         the certificate pricing them. Both used to be dropped here, found
         while auditing the same defect in `PackingSpec.restricted`.
         """
+        self._binary_bounds()
         out = LPSpec(sense=self.sense, title=self.title)
         for v in self.var_names:
             lo, hi = self.bounds[v]
@@ -297,6 +320,7 @@ class LPSpec:
         """
         from .exact import to_fraction
 
+        self._binary_bounds()
         # A name that is not declared would be dropped by `row_of` below --
         # silently, because a missing key is indistinguishable from a zero
         # coefficient once the row is built. That is how one typo turned a
@@ -698,11 +722,14 @@ class MultiSpec:
     assumptions: list = field(default_factory=list)   # [(name, expr)]
     goals: list = field(default_factory=list)         # [(name, expr)]
     title: str = ""
+    citations: dict = field(default_factory=dict)     # name -> source
 
-    def assume(self, name: str, expr):
+    def assume(self, name: str, expr, cite: str = ""):
         if any(n == name for n, _ in self.assumptions):
             raise ValueError(t("spec.duplicate_hypothesis", name=name))
         self.assumptions.append((name, expr))
+        if str(cite or "").strip():
+            self.citations[name] = str(cite).strip()
         return self
 
     def claim(self, name: str, expr):
@@ -715,7 +742,7 @@ class MultiSpec:
         """The Spec for one goal, so each column is an ordinary `core` run."""
         s = Spec(title="{} [{}]".format(self.title, goal_name))
         for n, f in self.assumptions:
-            s.assume(n, f)
+            s.assume(n, f, cite=self.citations.get(n, ""))
         for n, f in self.goals:
             if n == goal_name:
                 return s.claim(f)

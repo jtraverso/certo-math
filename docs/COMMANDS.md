@@ -2360,7 +2360,7 @@ table.
 
     certo mcp status
     certo mcp restart          # shows what it would stop
-    certo mcp restart --yes    # stops the stale ones; --all, every one
+    certo mcp restart --yes    # stops the stale and orphaned ones; --all, every one
 
 An MCP server is started by its client and keeps the code it loaded. After a
 `pip install` it goes on answering as the old version, and results from two
@@ -2370,6 +2370,13 @@ fresh ones: `/mcp` in Claude Code, or a restart of Claude Desktop. Listing is
 the default, because stopping a server ends that client's session with it.
 And every MCP answer carries `certo_version`, plus `stale: true` with a note
 when the server's code is older than the package installed.
+
+An **orphaned** server is one whose client is gone: nobody can talk to it
+again. Since 0.26.2 a server exits when its parent does (a parent that exits
+in the first seconds is a launcher and is not watched;
+`CERTO_MCP_NO_PARENT_WATCH=1` turns the watch off), `status` marks the orphans
+of older versions, `restart --yes` stops them, and `certo doctor` counts the
+servers running, stale and orphaned.
 
 ### `certo repro`
 

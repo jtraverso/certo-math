@@ -623,7 +623,7 @@
   "cert.note.branch_bound": "El óptimo, y la cuenta de todo diseño no tomado. Cada nodo se cierra con un certificado --un dual exacto que acota su subárbol por debajo del incumbente, un rayo de Farkas que muestra que está vacío, o el LP residual de un diseño totalmente fijado-- y se comprueba que el árbol CUBRE el dominio entero nodo a nodo. Un árbol al que le falta un hijo se lee igual que uno completo.",
   "engine.bb.no_discrete": "no hay variables discretas: `opt` ya da el óptimo exacto",
   "engine.bb.only_max": "--prove-optimal maneja maximización; niega el objetivo para minimizar",
-  "engine.bb.unbounded": "{var} no tiene cota superior, así que su rama tiene infinitos hijos y no hay árbol que exhibir",
+  "engine.bb.unbounded": "{var} no tiene cota superior, así que su rama tiene infinitos hijos y no hay árbol que exhibir. Dale una: lp.variable(\"{var}\", 0, HI, kind=\"integer\"), o bounds[\"{var}\"] = (0, HI); una binaria es 0..1 por sí sola",
   "engine.bb.no_incumbent": "no se encontró diseño de partida, así que no hay contra qué podar: {detail}",
   "engine.bb.inexact": "el LP de un nodo no certificó de forma exacta, así que su cota no sería citable",
   "engine.bb.budget": "la búsqueda pasó de {n} nodos sin cerrar. El mejor diseño encontrado es {value}, y NO está demostrado óptimo --branch and bound es exponencial y este no terminó",
@@ -2054,5 +2054,13 @@
   "verify.lp.row_violation": "fila {name}: carga {load} > cota {bound}, exceso {excess}",
   "verify.lp.row_violation_geq": "fila {name} (>=): valor {load} < requerido {bound}, falta {excess}",
   "verify.lp.row_violation_eq": "fila {name} (=): valor {load}, requerido {bound}",
-  "verify.lp.column_violation": "variable {name}: A^T y da {got} < coeficiente del objetivo {need}, falta {short}"
+  "verify.lp.column_violation": "variable {name}: A^T y da {got} < coeficiente del objetivo {need}, falta {short}",
+  "verify.core.cited": "`{name}` es un resultado CITADO, externo y no auditado aquí: {source}. Se comprueba la implicación a partir de él; el resultado en sí, no",
+  "engine.prove.hint.nonintegral": "el contraejemplo no es entero ({values}). Si estas cantidades son enteras, decláralas con z3.Int / z3.Ints: sobre los reales el enunciado es más débil de lo que se quería, y un contraejemplo como este puede ser espurio",
+  "engine.prove.hint.range_var": "el enunciado acota {var} por una constante. `certo range SPEC --var {var}` da la mejor cota exacta sobre las hipótesis (lineales), con su certificado",
+  "engine.prove.hint.range_expr": "el enunciado acota `{expr}` por una constante. Para hallar la mejor constante, nómbrala -- asume t == esa expresión -- y corre `certo range SPEC --var t` (hipótesis lineales)",
+  "find.note.hitting_set": "`cover` NO es una cubierta por conjuntos: particiona un grafo en cliques. Un hitting set, transversal, cubierta de vértices o cubierta por conjuntos es un programa 0-1 -- un LPSpec con variables binarias, minimizar la suma, una fila `>= 1` por arista -- que se corre con `mixed --prove-optimal` (el óptimo exacto, por branch and bound certificado) u `opt` (la cota del LP y su dual)",
+  "cli.mcp.orphan": "HUÉRFANO (su cliente ya no existe)",
+  "doctor.mcp.servers": "Servidores MCP en marcha: {n} ({stale} con código anterior al {version} instalado, {orphan} huérfanos). `certo mcp restart --yes` los detiene",
+  "doctor.mcp.servers_ok": "Servidores MCP en marcha: {n}, todos con el {version} instalado"
 }

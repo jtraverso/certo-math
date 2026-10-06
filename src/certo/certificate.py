@@ -327,7 +327,8 @@ def model_certificate(smt2: str, assignment: dict) -> Certificate:
 
 
 def unsat_core_certificate(core_smt2: str, names: list, dropped: list,
-                           vacuous: bool = False, clash=None) -> Certificate:
+                           vacuous: bool = False, clash=None,
+                           citations=None) -> Certificate:
     """`vacuous` means the hypotheses contradict each other.
 
     The proof is still valid -- anything follows from a contradiction -- so
@@ -335,15 +336,20 @@ def unsat_core_certificate(core_smt2: str, names: list, dropped: list,
     payload because it is exactly the kind of thing that looks like success
     and must keep being said out loud, long after the run.
     """
+    payload = {"core_smt2": core_smt2, "names": names, "dropped": dropped,
+               # `clash` is optional, which the frozen schema allows: a
+               # reader that does not know it simply ignores it.
+               "vacuous": bool(vacuous), "clash": clash or []}
+    if citations:
+        # Optional too: the USED hypotheses that are published results, with
+        # their source. Not checked -- a citation is not a proof -- but said.
+        payload["citations"] = dict(citations)
     return Certificate(
         kind="unsat_core",
         # Flipped to True by `_with_farkas` when multipliers are found: a core
         # with them is checkable by arithmetic, and one without is not.
         solver_free=False,
-        payload={"core_smt2": core_smt2, "names": names, "dropped": dropped,
-                 # `clash` is optional, which the frozen schema allows: a
-                 # reader that does not know it simply ignores it.
-                 "vacuous": bool(vacuous), "clash": clash or []},
+        payload=payload,
         note_key="cert.note.unsat_core",
     )
 
@@ -5704,10 +5710,19 @@ def _rows_match_smt2(rows, smt2: str) -> bool:
 
 
 def _core_warnings(cert) -> list:
+    out = []
     if cert.payload.get("clash"):
-        return [t("verify.core.vacuous_named",
-                  names=", ".join(cert.payload["clash"]))]
-    return [t("verify.core.vacuous")] if cert.payload.get("vacuous") else []
+        out.append(t("verify.core.vacuous_named",
+                     names=", ".join(cert.payload["clash"])))
+    elif cert.payload.get("vacuous"):
+        out.append(t("verify.core.vacuous"))
+    # Cited hypotheses are SAID, not graded: the certificate proves the
+    # implication from them, completely, and that is what its degree is
+    # about. Whether the cited result is true is outside it -- and has to be
+    # visible every time it is verified.
+    for name, source in sorted((cert.payload.get("citations") or {}).items()):
+        out.append(t("verify.core.cited", name=name, source=source))
+    return out
 
 
 def _verify_core_by_solver(cert, limits) -> VerifyReport:
