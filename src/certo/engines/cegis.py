@@ -45,6 +45,12 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     lim = limits or Limits()
     t0 = time.perf_counter()
     deadline = t0 + lim.timeout_ms / 1000.0
+    # The run's deadline too, on this loop's own clock (`perf_counter`).
+    from .. import clock
+
+    left = clock.remaining_s()
+    if left is not None:
+        deadline = min(deadline, t0 + left)
 
     impl_cons, behav, corr = spec.normalized()
     impl_vars = list(spec.impl_vars)

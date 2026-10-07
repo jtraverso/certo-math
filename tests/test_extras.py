@@ -16343,7 +16343,7 @@ def test_0_27_regimes_say_where_a_theorem_is_inhabited():
     s.regime("l_ge_7", l >= 7)
     res = smt.prove(s)
     assert res.verdict is Verdict.PROVED
-    got = {r["regime"]: r["status"] for r in res.meta["regimes"]}
+    got = {r["regime"]: r["status"] for r in res.meta["regime_report"]}
     # l = 6, nu = 1/2: inhabited with l an integer, EMPTY with nu one too
     assert got == {"l_ge_6": "inhabited", "l_ge_6_all_int": "EMPTY",
                    "l_ge_7": "EMPTY"}, got
@@ -16455,6 +16455,118 @@ def test_0_27_cliques_of_gives_every_clique():
     assert sorted(cliques_of(4, [(0, 1), (1, 2), (0, 2), (2, 3)],
                              as_vertices=True)) == \
         [[0, 1], [0, 1, 2], [0, 2], [1, 2], [2, 3]]
+
+
+def test_0_27_one_clock_caps_every_solver_call():
+    import time
+
+    from certo import Limits, clock
+
+    assert clock.deadline() is None and clock.cap_ms(5000) == 5000
+    with clock.run_deadline(2.0):
+        left = clock.cap_ms(10_000)
+        assert 1 <= left <= 2000, left
+        assert clock.cap(time.monotonic() + 100) <= time.monotonic() + 2.1
+        assert not clock.expired()
+    with clock.run_deadline(0.0):
+        time.sleep(0.01)
+        assert clock.expired() and clock.cap_ms(10_000) == 1
+    assert clock.deadline() is None
+    # Limits.apply_to reads it: a z3 call under an expired run is cut to 1 ms
+    import z3
+
+    s = z3.Solver()
+    with clock.run_deadline(0.0):
+        time.sleep(0.01)
+        Limits(timeout_ms=60_000).apply_to(s)
+
+
+def test_0_27_a_sweep_stops_at_the_run_deadline_with_what_it_had():
+    import time
+
+    from certo import DomainSpec, clock
+    from certo.engines import domain
+
+    def slow(p):
+        time.sleep(0.05)
+        return True
+
+    spec = DomainSpec(items=list(range(200)), predicate=slow, key=str)
+    t0 = time.monotonic()
+    with clock.run_deadline(0.5):
+        res = domain.sweep_domain(spec)
+    assert time.monotonic() - t0 < 3
+    assert res.verdict is Verdict.INCONCLUSIVE
+    counts = res.meta.get("counts") or res.certificate.payload["counts"]
+    assert counts["inconclusive"] > 0 and counts["failures"] == 0
+
+
+def test_0_27_branch_and_bound_stops_at_the_run_deadline_with_its_frontier():
+    from certo import LPSpec, clock
+    from certo.certificate import verify
+    from certo.engines import bb
+
+    lp = LPSpec(sense="max")
+    for i in range(12):
+        lp.variable("x{}".format(i), 0, 1, kind="integer")
+    lp.objective({"x{}".format(i): 1 for i in range(12)})
+    for i in range(12):
+        lp.constraint({"x{}".format(i): 2, "x{}".format((i + 1) % 12): 2}, "<=", 3)
+    # expired before anything: said as the deadline, not as a failed LP
+    with clock.run_deadline(0.0):
+        res = bb.prove_optimal(lp)
+    assert res.status is Status.TIMEOUT and res.meta["stopped_by"] == "deadline"
+
+    # expired DURING the search: stopped with the frontier certificate
+    calls = [0]
+    real = bb._clock.expired
+
+    def later():
+        calls[0] += 1
+        return calls[0] > 3
+
+    bb._clock.expired = later
+    try:
+        res = bb.prove_optimal(lp)
+    finally:
+        bb._clock.expired = real
+    assert res.verdict is Verdict.INCONCLUSIVE, res.detail
+    assert res.meta.get("stopped_by") == "deadline", res.meta
+    assert res.certificate is not None and res.certificate.kind == "branch_frontier"
+    assert verify(res.certificate).ok
+
+
+def test_0_27_the_mcp_watchdog_answers_and_the_breaker_opens():
+    import anyio
+
+    import certo.mcp_server as M
+
+    old = (M.CALL_GRACE_S, os.environ.get("CERTO_MCP_CALL_S"))
+    M.CALL_GRACE_S = 0.5
+    os.environ["CERTO_MCP_CALL_S"] = "0.5"
+    hang = ("import time\nfrom certo import DomainSpec\n"
+            "def spec():\n    def pred(p):\n        time.sleep(4)\n"
+            "        return True\n"
+            "    return DomainSpec(items=[1], predicate=pred, key=str)\n")
+    try:
+        async def go():
+            outs = []
+            for _ in range(3):
+                outs.append(await M.sweep(spec_source=hang))
+            return outs
+
+        a, b, c = anyio.run(go)
+        assert a.get("stopped_by") == "watchdog" and b.get("stopped_by") == "watchdog"
+        assert c.get("error_type") == "CircuitOpen", c
+    finally:
+        M.CALL_GRACE_S = old[0]
+        if old[1] is None:
+            os.environ.pop("CERTO_MCP_CALL_S", None)
+        else:
+            os.environ["CERTO_MCP_CALL_S"] = old[1]
+        import time
+        time.sleep(4.5)          # let the abandoned threads end
+        assert not M._abandoned_alive()
 
 
 if __name__ == "__main__":

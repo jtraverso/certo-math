@@ -2084,5 +2084,11 @@
   "engine.check.no_regime": "el spec no declara un régimen `{name}` (declarados: {known})",
   "cli.point": "un punto donde se cumple cada fórmula:",
   "cli.regime.integer_vars": " con {names} entero(s)",
-  "exists.too_many_cliques": "más de {n} cliques: demasiados candidatos para codificar; acótalos con max_size"
+  "exists.too_many_cliques": "más de {n} cliques: demasiados candidatos para codificar; acótalos con max_size",
+  "engine.bb.stopped_deadline": "DETENIDO en el plazo de la ejecución tras {nodes} nodos: incumbente {value}, mejor cota abierta {bound}, brecha {gap}. El certificado de frontera dice qué queda abierto",
+  "clock.not_reached": "no alcanzado: el plazo de la ejecución pasó antes",
+  "mcp.watchdog": "`{tool}` no respondió en {seconds} s, pasado el plazo de ejecución que leen todos los motores: se responde sin el resultado. Su hilo puede seguir corriendo; no se puede detener desde aquí",
+  "mcp.breaker": "{n} llamadas anteriores pasaron el vigilante y siguen corriendo en este servidor: se rechaza trabajo nuevo hasta que terminen",
+  "mcp.breaker.hint": "espera, o reinicia el servidor (`certo mcp restart --yes` y reconecta el cliente); baja timeout_ms o CERTO_MCP_CALL_S para detener antes",
+  "engine.bb.deadline_before_start": "TIEMPO AGOTADO: el plazo de la ejecución pasó antes de encontrar un diseño inicial. Inconcluso -- nada se buscó"
 }

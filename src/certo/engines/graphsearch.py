@@ -19,6 +19,8 @@ from __future__ import annotations
 import random
 import time
 
+from .. import clock as _clock
+
 from .. import exact
 from .. import orbits as orb
 from ..certificate import (graph_set_certificate, outcome_code,
@@ -132,6 +134,12 @@ def sweep(spec, limits: Limits | None = None, use_geng=True,
     failures, errors, unknowns, certs, values = [], [], [], [], []
     codes = []
     for pos, g in enumerate(graphs):
+        # The RUN's deadline: the items not reached are INCONCLUSIVE, by
+        # name, and the sweep says so -- never counted as examined.
+        if precomputed is None and _clock.expired():
+            for k in range(pos, len(graphs)):
+                unknowns.append({"id": ids[k], "detail": t("clock.not_reached")})
+            break
         out = precomputed[pos] if precomputed is not None else _evaluate(spec, g)
         g6 = ids[pos]
         codes.append(pre_codes[pos] if precomputed is not None

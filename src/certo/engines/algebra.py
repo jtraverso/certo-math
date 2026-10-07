@@ -919,8 +919,10 @@ def capacity_profile(spec, limits: Limits | None = None,
     lim = limits or Limits()
     # THE BUDGET IS KEPT. `limits` was taken and never read: a profile asked
     # for in one second ran until something outside killed it.
-    deadline = (time.monotonic() + lim.timeout_ms / 1000
-                if lim.timeout_ms else None)
+    from .. import clock
+
+    deadline = clock.cap(time.monotonic() + lim.timeout_ms / 1000
+                         if lim.timeout_ms else None)
 
     # NO SEGMENTS MEANS FIND THEM. The search proposes breakpoints, duals and
     # sources; `certify` then admits or refuses them on exactly the same terms
@@ -1882,7 +1884,10 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     target = claim if claim is not None else Poly.const(variables, 1)
     # The time budget, honoured INSIDE the search: `max_pairs` bounds the
     # steps, not what one step costs, and a 3-second ideal ran ten minutes.
-    deadline = time.monotonic() + lim.timeout_ms / 1000 if lim.timeout_ms else None
+    from .. import clock
+
+    deadline = clock.cap(time.monotonic() + lim.timeout_ms / 1000
+                         if lim.timeout_ms else None)
     if not gs:
         # No equations: the ideal is {0}. A claim is in it exactly when it IS
         # the zero polynomial -- an identity, certified by expanding it, and

@@ -60,7 +60,7 @@ def scope_note(res: Result):
 _HIDDEN_META = ("self_check", "self_check_ms", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
-                "counterexample", "hint", "hints", "regimes", "lemmas", "used", "unused", "bridges", "lo", "hi",
+                "counterexample", "hint", "hints", "regime_report", "lemmas", "used", "unused", "bridges", "lo", "hi",
                 "width", "ladder", "lo_float", "hi_float", "vacuous",
                 "banner_key", "level", "orbits", "spot_checks",
                 "by_orbit", "evaluated", "inferred", "cofactors", "squares",
@@ -223,7 +223,7 @@ def emit(res: Result, args) -> int:
             _print_explained(res.certificate)
         for h in res.meta.get("hints") or []:
             print("  -> " + h)
-        for r in res.meta.get("regimes") or []:
+        for r in res.meta.get("regime_report") or []:
             key = {"inhabited": "cli.regime.inhabited", "EMPTY": "cli.regime.empty"}.get(
                 r["status"], "cli.regime.unknown")
             print("  {}{}".format("!! " if r["status"] != "inhabited" else "",
@@ -332,6 +332,13 @@ def _self_check(res, args):
     if want is False:
         return None
     if want is None and not cert.solver_free:
+        return None
+    from . import clock
+
+    if clock.expired():
+        # The run is out of time: re-checking now would only be killed by the
+        # backstop. Said, not hidden -- `certo verify` checks it later.
+        res.meta["self_check"] = "skipped: the run's deadline had passed"
         return None
 
     t0 = time.perf_counter()

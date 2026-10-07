@@ -28,6 +28,8 @@ returning the incumbent as though it were the optimum.
 from __future__ import annotations
 
 import time
+
+from .. import clock as _clock
 from fractions import Fraction
 
 from .. import exact
@@ -189,6 +191,11 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
     start = mixed.mixed(spec, lim)
     if start.verdict not in (Verdict.SATISFIABLE, Verdict.REFUTED) \
             or start.certificate is None:
+        if _clock.expired():
+            # The run's deadline, not the residual LP: said as what it is.
+            return Result("bb", Status.TIMEOUT, Verdict.INCONCLUSIVE, ENGINE,
+                          ms(), None, detail=t("engine.bb.deadline_before_start"),
+                          meta={"stopped_by": "deadline"})
         return Result("bb", start.status, Verdict.INCONCLUSIVE, ENGINE, ms(),
                       None, detail=t("engine.bb.no_incumbent",
                                      detail=start.detail))
@@ -205,6 +212,11 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
         seen += 1
         over_nodes = seen > max_nodes
         over_clock = wall_ms is not None and ms() > wall_ms
+        # The RUN's deadline (`certo.clock`): stopped like the node budget,
+        # with the frontier certificate -- what is open and the bound it
+        # gives -- rather than killed with it.
+        over_run = not over_nodes and not over_clock and _clock.expired()
+        over_clock = over_clock or over_run
         if over_nodes or over_clock:
             part = _partial(nodes, seen - 1, incumbent, best_bound, minimising)
             # THE STACK IS THE FRONTIER, and it used to be dropped on the
@@ -218,7 +230,8 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
                                   spec_path)
             return Result("bb", Status.RESOURCE_EXHAUSTED,
                           Verdict.INCONCLUSIVE, ENGINE, ms(), cert,
-                          detail=t("engine.bb.stopped_clock" if over_clock
+                          detail=t("engine.bb.stopped_deadline" if over_run
+                                   else "engine.bb.stopped_clock" if over_clock
                                    else "engine.bb.stopped_nodes",
                                    limit=wall_ms if over_clock else max_nodes,
                                    value=part["incumbent"],
@@ -226,7 +239,10 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
                                    gap=part.get("gap", "?"),
                                    nodes=part["nodes_opened"]),
                           meta=dict(part, stopped=True,
-                                    frontier=len(frontier)))
+                                    frontier=len(frontier),
+                                    stopped_by=("deadline" if over_run else
+                                                "time" if over_clock else
+                                                "nodes")))
 
         node_spec, const = _node_lp(spec, fixed)
         res = lp.opt(node_spec, lim, _vectors_only=True)

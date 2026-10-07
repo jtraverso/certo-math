@@ -31,8 +31,12 @@ class Limits:
     max_output_mb: int = 64
 
     def apply_to(self, solver) -> None:
-        """Aplica los limites a un z3.Solver / z3.Optimize."""
-        solver.set("timeout", self.timeout_ms)
+        """Aplica los limites a un z3.Solver / z3.Optimize. The timeout is
+        cut to what is LEFT of the run when a run deadline is set
+        (`certo.clock`): forty solver calls share one run budget."""
+        from . import clock
+
+        solver.set("timeout", clock.cap_ms(self.timeout_ms))
         solver.set("rlimit", self.rlimit)
         try:
             solver.set("max_memory", self.max_memory_mb)

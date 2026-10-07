@@ -198,7 +198,7 @@ def prove(spec, limits: Limits | None = None) -> Result:
                 "vacuous": vacuous, "clash": clash}
         regimes = regime_report(spec, lim)
         if regimes:
-            meta["regimes"] = regimes
+            meta["regime_report"] = regimes
         return Result(
             "prove", st, Verdict.PROVED, ENGINE, ms, cert, detail=detail,
             meta=meta,
@@ -433,7 +433,7 @@ def _hypotheses_only(spec, lim, t0, integers=False, regime=None) -> Result:
                       detail=t("engine.check.regime_nonempty", n=len(names))
                       + (" " + t("engine.check.over_integers") if integers else ""),
                       meta={"hypotheses_only": True, "integers": integers,
-                            "regimes": regime_report(spec, lim),
+                            "regime_report": regime_report(spec, lim),
                             "counterexample": {
                                 k: v[1] for k, v
                                 in cert.payload["assignment"].items()}})

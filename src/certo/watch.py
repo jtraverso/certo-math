@@ -40,9 +40,97 @@ from contextlib import contextmanager
 #: never got the interpreter.
 GRACE_S = 10
 
+#: How long after the deadline the run has to stop ON ITS OWN -- every
+#: engine reads the run clock (`certo.clock`) and ends with TIMEOUT -- before
+#: the Python watchdog prints the stacks and exits.
+COOPERATE_S = 3
+
 #: The exit code of a run stopped by its deadline: inconclusive, like every
 #: other question certo could not settle.
 EXIT_DEADLINE = 2
+
+
+_JOB = []      # the Windows job handle, kept open for the life of the process
+
+
+def children_die_with_us() -> bool:
+    """Children END WITH CERTO -- a `geng`, `cbc`, `drat-trim` or `lake` --
+    instead of outliving a deadline. On Windows the process joins a job
+    object that kills every member when its last handle closes, which is
+    when certo exits, however it exits. Elsewhere the hard stop kills the
+    children itself (`_kill_children`). Best effort: a process already in a
+    job that forbids nesting stays as it was, and says nothing."""
+    if os.name != "nt" or _JOB:
+        return bool(_JOB)
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        # Typed, or the pseudo-handle -1 is truncated to 32 bits on a 64-bit
+        # Python and every call fails with ERROR_INVALID_HANDLE.
+        k32.CreateJobObjectW.restype = wintypes.HANDLE
+        k32.CreateJobObjectW.argtypes = [ctypes.c_void_p, wintypes.LPCWSTR]
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetInformationJobObject.argtypes = [wintypes.HANDLE, ctypes.c_int,
+                                                ctypes.c_void_p, wintypes.DWORD]
+        k32.AssignProcessToJobObject.argtypes = [wintypes.HANDLE, wintypes.HANDLE]
+        k32.CloseHandle.argtypes = [wintypes.HANDLE]
+
+        class IO(ctypes.Structure):
+            _fields_ = [(n, ctypes.c_ulonglong) for n in (
+                "ReadOperationCount", "WriteOperationCount",
+                "OtherOperationCount", "ReadTransferCount",
+                "WriteTransferCount", "OtherTransferCount")]
+
+        class Basic(ctypes.Structure):
+            _fields_ = [("PerProcessUserTimeLimit", ctypes.c_longlong),
+                        ("PerJobUserTimeLimit", ctypes.c_longlong),
+                        ("LimitFlags", wintypes.DWORD),
+                        ("MinimumWorkingSetSize", ctypes.c_size_t),
+                        ("MaximumWorkingSetSize", ctypes.c_size_t),
+                        ("ActiveProcessLimit", wintypes.DWORD),
+                        ("Affinity", ctypes.c_size_t),
+                        ("PriorityClass", wintypes.DWORD),
+                        ("SchedulingClass", wintypes.DWORD)]
+
+        class Extended(ctypes.Structure):
+            _fields_ = [("BasicLimitInformation", Basic), ("IoInfo", IO),
+                        ("ProcessMemoryLimit", ctypes.c_size_t),
+                        ("JobMemoryLimit", ctypes.c_size_t),
+                        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                        ("PeakJobMemoryUsed", ctypes.c_size_t)]
+
+        job = k32.CreateJobObjectW(None, None)
+        if not job:
+            return False
+        info = Extended()
+        info.BasicLimitInformation.LimitFlags = 0x2000   # KILL_ON_JOB_CLOSE
+        if not k32.SetInformationJobObject(job, 9, ctypes.byref(info),
+                                           ctypes.sizeof(info)):
+            k32.CloseHandle(job)
+            return False
+        if not k32.AssignProcessToJobObject(job, k32.GetCurrentProcess()):
+            k32.CloseHandle(job)
+            return False
+        _JOB.append(job)
+        return True
+    except Exception:  # noqa: BLE001 -- best effort, never a reason to fail
+        return False
+
+
+def _kill_children():
+    """POSIX: the direct children, killed at the hard stop. (On Windows the
+    job object does it when the process ends.)"""
+    if os.name == "nt":
+        return
+    try:
+        import subprocess
+
+        subprocess.run(["pkill", "-KILL", "-P", str(os.getpid())],
+                       capture_output=True, timeout=5)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def _seconds(value, env):
@@ -79,8 +167,15 @@ def watched(command="", deadline=None, heartbeat=None, out=None):
     threads = []
 
     if deadline is not None:
+        from . import clock
+
+        # The engines stop at the deadline themselves, with TIMEOUT and what
+        # they had; the hard stop below is for a call that never returns.
+        clock.set_process_deadline(deadline)
+        children_die_with_us()
+
         def expire():
-            if stop.wait(deadline):
+            if stop.wait(deadline + COOPERATE_S):
                 return
             try:
                 err.write(t("watch.deadline", seconds=_fmt(deadline),
@@ -90,13 +185,14 @@ def watched(command="", deadline=None, heartbeat=None, out=None):
                 err.flush()
                 sys.stdout.flush()
             finally:
+                _kill_children()
                 os._exit(EXIT_DEADLINE)
         th = threading.Thread(target=expire, name="certo-deadline", daemon=True)
         th.start()
         threads.append(th)
         try:
-            faulthandler.dump_traceback_later(deadline + GRACE_S, exit=True,
-                                              file=err)
+            faulthandler.dump_traceback_later(deadline + COOPERATE_S + GRACE_S,
+                                              exit=True, file=err)
         except Exception:  # noqa: BLE001
             pass
 
@@ -118,6 +214,9 @@ def watched(command="", deadline=None, heartbeat=None, out=None):
     finally:
         stop.set()
         if deadline is not None:
+            from . import clock
+
+            clock.set_process_deadline(None)
             try:
                 faulthandler.cancel_dump_traceback_later()
             except Exception:  # noqa: BLE001

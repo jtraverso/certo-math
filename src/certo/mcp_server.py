@@ -538,6 +538,24 @@ def _hint(e: Exception) -> str:
     return "see dsl_guide"
 
 
+import contextvars as _contextvars
+import time
+
+
+def _tr(key, **kw):
+    from .i18n import t as _t
+
+    return _t(key, **kw)
+
+
+#: The id of the `_off` call made by the tool running in this context.
+_CURRENT = _contextvars.ContextVar("certo_mcp_call", default=None)
+
+#: Tools that do no solving: answered even with the breaker open, so a
+#: client can still find out what is going on.
+_LIGHT = {"commands", "find", "dsl_guide", "doctor", "mcp", "status"}
+
+
 def _guard(fn):
     """Return the error as data, not as an exception.
 
@@ -547,17 +565,44 @@ def _guard(fn):
     """
     @functools.wraps(fn)
     async def wrapper(*a, **kw):
+        from . import clock
+
+        # THE CIRCUIT BREAKER. Calls the watchdog gave up on may still be
+        # running -- a thread cannot be stopped -- and past a few of them the
+        # server is spending its cores on answers nobody will read.
+        alive = _abandoned_alive()
+        if len(alive) >= BREAKER_AT and fn.__name__ not in _LIGHT:
+            return {"ok": False, "error_type": "CircuitOpen",
+                    "error": _tr("mcp.breaker", n=len(alive)),
+                    "hint": _tr("mcp.breaker.hint")}
         # Every spec any tool loads -- including one a certificate names in
         # its payload, several calls deep -- stays inside the workspace, for
         # the duration of the call.
         before = os.environ.get("CERTO_SPEC_ROOT")
         os.environ["CERTO_SPEC_ROOT"] = str(_workspace())
+        seconds = _call_seconds()
+        token = _CURRENT.set(None)
         try:
-            out = await fn(*a, **kw)
+            # THE WATCHDOG. The run deadline is in this call's context, so
+            # every engine stops at it; past it plus a grace, the client is
+            # answered without the result.
+            with clock.run_deadline(seconds):
+                out = None
+                with anyio.move_on_after(seconds + CALL_GRACE_S) as scope:
+                    out = await fn(*a, **kw)
+                if scope.cancelled_caught:
+                    cid = _CURRENT.get()
+                    if cid is not None and cid in _RUNNING:
+                        _ABANDONED.add(cid)
+                    out = {"ok": False, "status": "timeout",
+                           "stopped_by": "watchdog",
+                           "error": _tr("mcp.watchdog", tool=fn.__name__,
+                                        seconds=int(seconds + CALL_GRACE_S))}
         except Exception as e:  # noqa: BLE001
             out = {"ok": False, "error_type": type(e).__name__,
                    "error": str(e), "hint": _hint(e)}
         finally:
+            _CURRENT.reset(token)
             if before is None:
                 os.environ.pop("CERTO_SPEC_ROOT", None)
             else:
@@ -607,9 +652,57 @@ def _t_stale(**kw):
     return _t("mcp.stale_server", **kw)
 
 
+#: Seconds a tool call may take, all of it: the RUN deadline every engine
+#: reads (`certo.clock`), so a call ends with TIMEOUT and what it had rather
+#: than holding the client. `CERTO_MCP_CALL_S` changes it.
+CALL_S = 600.0
+
+#: After the deadline, how long the call has to come back on its own before
+#: the client is answered without it.
+CALL_GRACE_S = 15.0
+
+#: Calls abandoned and still running before new heavy calls are refused: a
+#: thread cannot be killed, and each one keeps its memory and a core.
+BREAKER_AT = 2
+
+_RUNNING: dict = {}     # call id -> (tool, thread, started)
+_ABANDONED: set = set()
+
+
+def _call_seconds() -> float:
+    try:
+        return float(os.environ.get("CERTO_MCP_CALL_S") or CALL_S)
+    except ValueError:
+        return CALL_S
+
+
+def _abandoned_alive() -> list:
+    """The abandoned calls whose threads are still running."""
+    for cid in list(_ABANDONED):
+        if cid not in _RUNNING:
+            _ABANDONED.discard(cid)
+    return [cid for cid in _ABANDONED if cid in _RUNNING]
+
+
 async def _off(fn, *a, **kw):
-    """Off the protocol thread: solving can take a while."""
-    return await anyio.to_thread.run_sync(lambda: fn(*a, **kw))
+    """Off the protocol thread: solving can take a while. Registered while it
+    runs, so the watchdog can tell an abandoned call that is still working
+    from one that finished; abandoned on cancel, because a thread cannot be
+    stopped and the client must not wait for it."""
+    import threading
+
+    cid = object()
+
+    def run():
+        _RUNNING[cid] = (getattr(fn, "__name__", "?"), threading.current_thread(),
+                         time.monotonic())
+        try:
+            return fn(*a, **kw)
+        finally:
+            _RUNNING.pop(cid, None)
+
+    _CURRENT.set(cid)
+    return await anyio.to_thread.run_sync(run, abandon_on_cancel=True)
 
 
 # ---------------------------------------------------------------------------

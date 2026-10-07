@@ -121,6 +121,12 @@ def _cbc(seconds):
 PREFER_HIGHS = os.environ.get("CERTO_LP_SOLVER", "").strip().lower() != "cbc"
 
 
+def _clock_cap(own):
+    from .. import clock
+
+    return clock.cap(own)
+
+
 def _highs_available() -> bool:
     try:
         return bool(pulp.HiGHS(msg=False).available())
@@ -434,8 +440,8 @@ def _opt_vectors(spec, lim, t0):
     try:
         x_ex, y_ex, rep, denom = exact.certify(
             P, b, c, x_float, y_float, y_alts=alts,
-            deadline=(time.monotonic() + lim.timeout_ms / 1000
-                      if lim and lim.timeout_ms else None))
+            deadline=_clock_cap(time.monotonic() + lim.timeout_ms / 1000
+                                if lim and lim.timeout_ms else None))
     except exact.Deadline:
         x_ex = y_ex = rep = denom = None
     if x_ex is None:
@@ -584,7 +590,10 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     t0 = time.perf_counter()
     # ONE clock for the whole call, the exact reconstruction included: the
     # budget used to bound only the floating-point solve.
-    deadline = time.monotonic() + lim.timeout_ms / 1000 if lim.timeout_ms else None
+    from .. import clock
+
+    deadline = clock.cap(time.monotonic() + lim.timeout_ms / 1000
+                         if lim.timeout_ms else None)
 
     # `cuts="clique"`: the conflict graph's clique cuts, derived from the
     # rows and added, each recorded with the row that forces every pair --

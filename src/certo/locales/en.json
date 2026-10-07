@@ -2084,5 +2084,11 @@
   "engine.check.no_regime": "the spec declares no regime `{name}` (declared: {known})",
   "cli.point": "a point where every formula holds:",
   "cli.regime.integer_vars": " with {names} integer",
-  "exists.too_many_cliques": "more than {n} cliques: too many candidates to encode; bound them with max_size"
+  "exists.too_many_cliques": "more than {n} cliques: too many candidates to encode; bound them with max_size",
+  "engine.bb.stopped_deadline": "STOPPED at the run's deadline after {nodes} nodes: incumbent {value}, best open bound {bound}, gap {gap}. The frontier certificate says what is open",
+  "clock.not_reached": "not reached: the run's deadline passed first",
+  "mcp.watchdog": "`{tool}` did not return within {seconds} s, past the run deadline every engine reads: answered without it. Its thread may still be running; it cannot be stopped from here",
+  "mcp.breaker": "{n} earlier calls passed the watchdog and are still running in this server: refusing new work until they end",
+  "mcp.breaker.hint": "wait, or restart the server (`certo mcp restart --yes`, then reconnect the client); lower timeout_ms or CERTO_MCP_CALL_S to stop sooner",
+  "engine.bb.deadline_before_start": "TIMEOUT: the run's deadline passed before a starting design was found. Inconclusive -- nothing searched"
 }
