@@ -2062,5 +2062,18 @@
   "find.note.hitting_set": "`cover` NO es una cubierta por conjuntos: particiona un grafo en cliques. Un hitting set, transversal, cubierta de vértices o cubierta por conjuntos es un programa 0-1 -- un LPSpec con variables binarias, minimizar la suma, una fila `>= 1` por arista -- que se corre con `mixed --prove-optimal` (el óptimo exacto, por branch and bound certificado) u `opt` (la cota del LP y su dual)",
   "cli.mcp.orphan": "HUÉRFANO (su cliente ya no existe)",
   "doctor.mcp.servers": "Servidores MCP en marcha: {n} ({stale} con código anterior al {version} instalado, {orphan} huérfanos). `certo mcp restart --yes` los detiene",
-  "doctor.mcp.servers_ok": "Servidores MCP en marcha: {n}, todos con el {version} instalado"
+  "doctor.mcp.servers_ok": "Servidores MCP en marcha: {n}, todos con el {version} instalado",
+  "cert.note.cegis_none": "No existe implementación: sus restricciones y el contrato en estos contraejemplos son contradictorios. Cada contraejemplo solo instancia el contrato, así que la refutación vale para todo el dominio, no solo para la búsqueda acotada.",
+  "verify.cegis_none.roles": "las variables de implementación, de entrada y auxiliares son disjuntas y cubren las fórmulas",
+  "verify.cegis_none.inputs": "cada contraejemplo asigna solo entradas, con sus tipos",
+  "verify.cegis_none.unsat": "las restricciones y el contrato en los contraejemplos son insatisfacibles",
+  "verify.cegis_none.detail": "no hay implementación sobre {vars}: {ces} contraejemplos descartan todo candidato",
+  "engine.synth.candidate_unknown": "el candidato nombra `{name}`, que no es una variable de implementación de la spec (estas son: {known})",
+  "engine.synth.candidate_missing": "el candidato no da valor para {names}",
+  "profile.out_of_time": "la búsqueda superó su presupuesto de tiempo",
+  "profile.timeout": "TIEMPO AGOTADO: la búsqueda del perfil agotó el presupuesto de {ms} ms antes de tener el perfil completo. Inconcluso -- sin certificado; sube --timeout-ms, o entrega los segmentos y las fuentes para comprobarlos",
+  "lean.theorem.bad_name": "`{name}` no es un identificador de Lean por el que se pueda citar un teorema (letras, dígitos, `_`, partes separadas por puntos; ninguna palabra reservada)",
+  "lean.theorem.nothing": "no hay ningún `example` en este archivo al que llamar `{name}`",
+  "scope.cegis": "comprobado en el dominio acotado de entradas {domain}, no más allá",
+  "scope.cegis_none": "ninguna implementación con {impl} cumple el contrato en las entradas {domain}"
 }

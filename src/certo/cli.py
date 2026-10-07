@@ -128,7 +128,7 @@ def _as_json(res, args) -> dict:
         "kind": cert.kind,
         "digest": cert.digest(),
         "solver_free": bool(cert.solver_free),
-        "bytes": len(json.dumps(cert.to_dict(), ensure_ascii=False)),
+        "bytes": len(json.dumps(cert.to_dict(copy=False), ensure_ascii=False)),
         "summarised": True,
     }
     return out
@@ -2634,6 +2634,8 @@ def _export_lean(args):
     if exporter is not None:
         try:
             text = exporter(data, source)
+            if getattr(args, "theorem", None):
+                text = leanexport.named(text, args.theorem)
         except leanexport.NotExportable as e:
             # certo declining to write is a RESULT, not a crash: the reason
             # says what the file would have needed and where the numbers are.
@@ -3455,6 +3457,11 @@ def build_parser():
     sp.add_argument("--out", metavar="FILE", help="write to a file")
     sp.add_argument("--negate-goal", action="store_true",
                     help="export the refutation form (hypotheses + not claim)")
+    sp.add_argument("--theorem", metavar="NAME",
+                    help="with --lean: emit `theorem NAME` instead of an "
+                         "anonymous `example` (NAME_1, NAME_2... when the "
+                         "file has several), so other files can use it. A "
+                         "Lean identifier; dotted parts allowed")
     sp.set_defaults(func=cmd_export)
 
     return p

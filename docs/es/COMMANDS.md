@@ -1979,11 +1979,21 @@ certificado de inadmisibilidad.
 
 **Pregunta** — ¿Existe un objeto con estas propiedades?
 **Spec** — `SynthSpec`
-**Responde** — el objeto, más los contraejemplos que lo forzaron
-**Certificado** — `cegis`; vuelve a resolver
+**Responde** — el objeto, más los contraejemplos que lo forzaron; o que no
+existe ninguno
+**Certificado** — `cegis` para un objeto, `cegis_none` para ninguno; ambos
+vuelven a resolver
 **No establece** — un teorema. `synth` busca sobre un dominio **acotado**, el
 banner dice `CANDIDATO SINTETIZADO -- búsqueda ACOTADA`, y eso es un
 descubrimiento.
+
+**La negativa también se certifica** (`examples/synth_none.py`). Cuando no
+queda implementación, el certificado lleva las restricciones de la
+implementación con el contrato instanciado en cada contraejemplo -- una
+implicación por entrada, con auxiliares frescas cada vez -- y `verify` vuelve
+a resolverlas como insatisfacibles. Cada instancia solo especializa el
+contrato, así que "no existe" vale para todo el dominio de entradas del spec.
+La línea de alcance dice sobre qué implementaciones y entradas.
 
 `--prove-candidate` encadena el enunciado general:
 
@@ -2140,6 +2150,16 @@ apuntado, irreducibilidad y libertad, y un certificado **ideal** como un
 **No establece** — nada para los demás tipos: se rechazan en vez de escribirse
 con esperanza. Cada exportador entró solo después de que su salida compilara
 contra un Mathlib real.
+
+**`--theorem NOMBRE`** escribe `theorem NOMBRE` donde estaba el `example`
+anónimo (`NOMBRE_1`, `NOMBRE_2`... si hay varios), para que un archivo de
+producción pueda usar el resultado; en un semigrupo, cuyas etapas ya son
+teoremas con nombre, NOMBRE reemplaza el namespace `Certo`. Un identificador de
+Lean, con partes separadas por puntos; lo que necesitaría escaparse se
+rechaza. El enunciado no cambia, y la comprobación de correspondencia lo relee
+igual.
+
+    certo export cert.json --lean --theorem E11.incidence_B --out B.lean
 
 ```lean
 set_option maxRecDepth 512 in

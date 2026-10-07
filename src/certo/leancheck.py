@@ -362,7 +362,7 @@ def _safe(name):
 # read back and compared
 # ---------------------------------------------------------------------------
 
-_IDEAL_HEAD = re.compile(r"^example \{(?:R|K) : Type\*\}[^(]*(?:\((.*?) : (?:R|K)\))?\s*$")
+_IDEAL_HEAD = re.compile(r"^(?:example|theorem [^\s{]+) \{(?:R|K) : Type\*\}[^(]*(?:\((.*?) : (?:R|K)\))?\s*$")
 _IDEAL_HYP = re.compile(r"^\s*\((h\d+) : (.+) = 0\)\s*$")
 _IDEAL_GOAL = re.compile(r"^\s*: (.+?) := by\s*$")
 
@@ -464,7 +464,9 @@ def ideal_correspondence(cert: dict, text: str) -> dict:
     integral = all(c.denominator == 1 for q in want_g + want_h
                    + ([want_claim] if want_claim else []) for c in q.values())
     lines = text.splitlines()
-    head = next((l for l in lines if l.startswith("example {")), None)
+    # `export --theorem NAME` writes `theorem NAME {` where `example {` was.
+    head = next((l for l in lines if re.match(r"^(?:example|theorem [^\s{]+) \{", l)),
+                None)
     if head is None:
         return {"checked": False, "reason": _t("leancheck.no_goal")}
     try:

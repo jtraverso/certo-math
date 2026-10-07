@@ -112,12 +112,34 @@ def _bisect(p):
     return [t("scope.monotone")]
 
 
+def _formula(smt2) -> str:
+    """An SMT-LIB2 assertion list as one readable formula, cut short."""
+    import z3
+
+    text = str(z3.simplify(z3.And(*z3.parse_smt2_string(smt2 or ""))))
+    text = " ".join(text.split())
+    return text if len(text) <= 120 else text[:117] + "..."
+
+
+def _cegis(p):
+    # A found object is checked on the BOUNDED input domain, which the
+    # verdict line used to leave to `meta.domain`.
+    return [t("scope.cegis", domain=_formula(p["smt2"]["behavior"]))]
+
+
+def _cegis_none(p):
+    return [t("scope.cegis_none",
+              impl=_formula(p["smt2"]["impl_constraints"]),
+              domain=_formula(p["smt2"]["behavior"]))]
+
+
 SCOPES = {
     "parametric_bound": _parametric, "polynomial_nonneg": _nonneg,
     "parametric_atlas": _atlas, "clique_lp": _cliques,
     "clique_lp_farkas": _cliques, "lp_dual": _lp, "sweep": _sweep,
     "domain_sweep": _domain, "sweep_range": _range, "exact_cover": _cover,
-    "proof": _proof, "bisect": _bisect,
+    "proof": _proof, "bisect": _bisect, "cegis": _cegis,
+    "cegis_none": _cegis_none,
 }
 
 
@@ -127,7 +149,7 @@ def scope_of(cert) -> list:
     cannot be read is omitted, not guessed."""
     if cert is None:
         return []
-    d = cert.to_dict() if hasattr(cert, "to_dict") else cert
+    d = cert.to_dict(copy=False) if hasattr(cert, "to_dict") else cert
     fn = SCOPES.get(d.get("kind"))
     if fn is None:
         return []

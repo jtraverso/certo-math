@@ -751,7 +751,7 @@ CLI_ONLY = {
                "repair"},                      # changes this machine
     "enum": {"filter", "no_geng", "out"},
     "export": {"check", "check_timeout_s", "graph", "lean", "lean_project",
-               "manifest", "out"},             # `export_lean` is its own tool
+               "manifest", "out", "theorem"},             # `export_lean` is its own tool
     "mcp": {"all", "yes"},                     # stops processes
     "report": {"certificate", "coverage", "stderr_file"},
     "repro": {"no_ledger"},

@@ -172,6 +172,28 @@ class Undiscovered(RuntimeError):
     """The search stopped before it had the whole profile."""
 
 
+class OutOfTime(Undiscovered):
+    """The search ran past the caller's clock. Nothing was found wrong."""
+
+
+def _late(deadline):
+    import time
+
+    if deadline is not None and time.monotonic() > deadline:
+        raise OutOfTime(_t("profile.out_of_time"))
+
+
+def _minimise(A, b, c, deadline):
+    from .simplex import SimplexLimit, minimise
+
+    try:
+        return minimise(A, b, c, deadline=deadline)
+    except SimplexLimit as e:
+        if str(e) == "deadline":
+            raise OutOfTime(_t("profile.out_of_time")) from None
+        raise
+
+
 def _matrix(data, order, rows):
     """`A` with one ROW per constraint and one column per program column."""
     return [[data["columns"][n].get(r, Fraction(0)) for n in order]
@@ -183,7 +205,7 @@ def _rhs(data, rows, t):
     return [t if r == p else data["capacity"][r] for r in rows]
 
 
-def _solve_at(data, order, rows, t):
+def _solve_at(data, order, rows, t, deadline=None):
     """The exact optimal dual at capacity `t`, and the line it gives.
 
     `simplex.minimise` takes the primal data and returns that primal's DUAL,
@@ -191,16 +213,14 @@ def _solve_at(data, order, rows, t):
     so the line `alpha + beta t` it defines bounds EVERY `t` at once, not only
     the one it was found at.
     """
-    from .simplex import minimise
-
-    y = minimise(_matrix(data, order, rows), _rhs(data, rows, t),
-                 [data["gain"][n] for n in order])
+    y = _minimise(_matrix(data, order, rows), _rhs(data, rows, t),
+                  [data["gain"][n] for n in order], deadline)
     priced = {r: Fraction(v) for r, v in zip(rows, y)}
     alpha, beta = dual_bound(data, priced)
     return priced, alpha, beta
 
 
-def _primal_at(data, order, rows, t):
+def _primal_at(data, order, rows, t, deadline=None):
     """A FEASIBLE optimal primal at capacity `t`, exactly.
 
     The primal is the optimal dual OF THE DUAL, and `simplex.minimise` returns
@@ -227,9 +247,7 @@ def _primal_at(data, order, rows, t):
     b2 = [-data["gain"][n] for n in order]
     c2 = [-v for v in _rhs(data, rows, t)]
 
-    from .simplex import minimise
-
-    return [Fraction(v) for v in minimise(A2, b2, c2)]
+    return [Fraction(v) for v in _minimise(A2, b2, c2, deadline)]
 
 
 def _cross(l1, l2):
@@ -240,7 +258,7 @@ def _cross(l1, l2):
     return (a2 - a1) / (b1 - b2)
 
 
-def discover(spec, max_solves=MAX_SOLVES) -> dict:
+def discover(spec, max_solves=MAX_SOLVES, deadline=None) -> dict:
     """Find the profile instead of checking one. Exactly, and without sampling.
 
     `f(t)` is the minimum, over dual-feasible `y`, of `alpha_y + beta_y t`, so
@@ -279,10 +297,15 @@ def discover(spec, max_solves=MAX_SOLVES) -> dict:
         if t not in solved:
             if len(solved) >= max_solves:
                 raise Undiscovered(_t("profile.budget", n=max_solves))
-            solved[t] = _solve_at(data, order, rows, t)
+            _late(deadline)
+            solved[t] = _solve_at(data, order, rows, t, deadline)
         return solved[t]
 
     breaks = set()
+    # Intervals one line was SHOWN to cover, with the dual that gives it: the
+    # segment is priced by that dual, not by whatever a degenerate solve at
+    # its midpoint returns.
+    covered = []
 
     def refine(t1, t2, depth=0):
         if depth > 64:
@@ -291,6 +314,16 @@ def discover(spec, max_solves=MAX_SOLVES) -> dict:
         _y2, a2, b2 = at(t2)
         if (a1, b1) == (a2, b2):
             return                               # one line covers [t1, t2]
+        # ONE LINE THROUGH BOTH ENDS covers the interval. Every dual line lies
+        # above `f`, and `f` is concave, so above its chord: a line equal to
+        # `f` at both ends IS `f` between them. Without this, a degenerate dual
+        # at an endpoint -- `5 + 3/2 t` at t = 0 of a profile that is 5 on
+        # [0, 2] -- crossed the other line AT the endpoint, never inside, and
+        # the bisection halved its way to the depth limit.
+        for (y, a, b) in (at(t1), at(t2)):
+            if a + b * t1 == a1 + b1 * t1 and a + b * t2 == a2 + b2 * t2:
+                covered.append((t1, t2, y))
+                return
         star = _cross((a1, b1), (a2, b2))
         if star is None or not (t1 < star < t2):
             # Two different lines that do not meet inside the interval: this
@@ -319,7 +352,9 @@ def discover(spec, max_solves=MAX_SOLVES) -> dict:
     # a breakpoint two do, and either would be a different segment.
     segments = []
     for a, b in zip(points, points[1:]):
-        y, _al, _be = at((a + b) / 2)
+        y = next((cy for c1, c2, cy in covered if c1 <= a and b <= c2), None)
+        if y is None:
+            y, _al, _be = at((a + b) / 2)
         segments.append({"from": str(a), "to": str(b),
                          "dual": {r: str(v) for r, v in sorted(y.items())
                                   if v != 0}})
@@ -329,7 +364,8 @@ def discover(spec, max_solves=MAX_SOLVES) -> dict:
     # for rather than reconstructed.
     sources = {}
     for t in points:
-        x = _primal_at(data, order, rows, t)
+        _late(deadline)
+        x = _primal_at(data, order, rows, t, deadline)
         if x is None or len(x) != len(order):
             raise Undiscovered(_t("profile.no_source_found", t=str(t)))
         sources[str(t)] = {n: str(v) for n, v in zip(order, x) if v != 0}

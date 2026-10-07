@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The fifty-six kinds
+## The fifty-seven kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -82,6 +82,7 @@ answers"*. The table below is the map; the header is the territory.
 | `dependency_cycle` | a cycle in a parameter's own dependencies, and the comparison that closes it | **yes**, class arithmetic |
 | `lean_binding` | what a certificate assumed, against what a declaration provides | no, re-asks the entailment |
 | `cegis` | the object has no counterexamples in the bounded domain | no, re-solves |
+| `cegis_none` | NO implementation exists: its constraints and the contract at the counterexamples are unsatisfiable; the counterexamples assign inputs only | no, re-solves |
 | `synth_proved` | the bounded discovery **and** the universal statement | no, re-solves |
 | `proof` | the lemmas, **and** that each is used as its certificate allows | no, re-solves |
 | `induction` | the base cases, the step, **and** that they chain without a gap | no, re-solves |

@@ -25,7 +25,7 @@ certificado en concreto: *"verificado sin solver"*, *"comprobado contando, sin
 solver"*, *"reejecutando el spec, no confiando en sus respuestas"*. La tabla de
 abajo es el mapa; la cabecera es el territorio.
 
-## Los cincuenta y seis tipos
+## Los cincuenta y siete tipos
 
 | Tipo | Qué atestigua | ¿Sin solver? |
 |---|---|---|
@@ -82,6 +82,7 @@ abajo es el mapa; la cabecera es el territorio.
 | `dependency_cycle` | un ciclo en las dependencias de un parámetro, y la comparación que lo cierra | **sí**, aritmética de clases |
 | `lean_binding` | lo que un certificado supuso, contra lo que provee una declaración | no, vuelve a preguntar la implicación |
 | `cegis` | el objeto no tiene contraejemplos en el dominio acotado | no, vuelve a resolver |
+| `cegis_none` | NO existe implementación: sus restricciones y el contrato en los contraejemplos son insatisfacibles; los contraejemplos asignan solo entradas | no, vuelve a resolver |
 | `synth_proved` | el descubrimiento acotado **y** el enunciado universal | no, vuelve a resolver |
 | `proof` | los lemas, **y** que cada uno se usa como su certificado permite | no, vuelve a resolver |
 | `induction` | los casos base, el paso, **y** que encadenan sin hueco | no, vuelve a resolver |

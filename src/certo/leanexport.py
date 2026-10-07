@@ -887,6 +887,39 @@ attribute local scoped set_option termination_by decreasing_by nomatch nofun
 """.split())
 
 
+def named(text: str, name: str) -> str:
+    """The emitted `example`s as `theorem NAME` -- `NAME_1`, `NAME_2`... when
+    there are several -- so a production file can USE the result. An
+    `example` states and proves, and nothing can refer to it.
+
+    The name is a Lean identifier, dotted parts allowed (`E11.incidence_B`),
+    never escaped: a name that needs guillemets is refused, because a
+    theorem is cited by its name and a different spelling would cite
+    something else. Only the word `example` at the start of a line changes,
+    so the statement read back for correspondence is the same.
+    """
+    import re
+
+    parts = str(name or "").split(".")
+    if not all(p.isidentifier() and p.isascii() and p not in LEAN_KEYWORDS
+               for p in parts):
+        raise NotExportable(t("lean.theorem.bad_name", name=name))
+    head = re.compile(r"^example\b", re.M)
+    n = len(head.findall(text))
+    if n == 0:
+        # Already named theorems inside `namespace Certo` (the semigroup's
+        # stages): the NAMESPACE is what takes the name, so they are cited as
+        # `NAME.certo_pointed` and two exports no longer collide.
+        ns = re.compile(r"^(namespace|end) Certo$", re.M)
+        if len(ns.findall(text)) == 2:
+            return ns.sub(lambda m: "{} {}".format(m.group(1), name), text)
+        raise NotExportable(t("lean.theorem.nothing", name=name))
+    if n == 1:
+        return head.sub("theorem " + name, text)
+    count = iter(range(1, n + 1))
+    return head.sub(lambda _m: "theorem {}_{}".format(name, next(count)), text)
+
+
 def lean_name(name: str) -> str:
     """A Lean identifier for a variable: as written when it is one, escaped
     in guillemets otherwise -- never silently renamed."""

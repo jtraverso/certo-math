@@ -108,6 +108,8 @@ STRUCTURAL_BENIGN = {
         'counterexamples:dup', 'counterexamples:empty',
         'counterexamples:reversed', 'counterexamples:short',
     },
+    # the same counterexample twice is the same instance twice
+    'cegis_none': {'counterexamples:dup'},
     # a core's `dropped`, `sorts` and provenance are labels; the cores are re-solved
     'core_matrix': {
         '=5:coherent', 'cores.identity.payload.dropped:dup',
@@ -1444,6 +1446,7 @@ EXAMPLE_FIXTURES = [
     ("assignment_hall.py", "assign", ()),
     ("bisect_constant.py", "bisect", ()),
     ("synth_constant.py", "synth", ()),
+    ("synth_none.py", "synth", ()),
     ("core_matrix.py", "core", ()),
     ("dependency_cycle.py", "cycle", ()),
     ("equitable_quotient.py", "quotient", ()),

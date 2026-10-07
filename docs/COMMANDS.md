@@ -1935,10 +1935,19 @@ rejection of the data, not a certificate of inadmissibility.
 
 **Question** — Does an object with these properties exist?
 **Spec** — `SynthSpec`
-**Answers** — the object, plus the counterexamples that forced it
-**Certificate** — `cegis`; re-solves
+**Answers** — the object, plus the counterexamples that forced it; or that
+none exists
+**Certificate** — `cegis` for an object, `cegis_none` for none; both re-solve
 **Not established** — a theorem. `synth` searches a **bounded** domain, the
 banner says `CANDIDATE SYNTHESISED -- BOUNDED search`, and that is a discovery.
+
+**A negative is certified too** (`examples/synth_none.py`). When no
+implementation is left, the certificate holds the implementation's
+constraints with the contract instantiated at each counterexample -- an
+implication per input, helpers fresh each time -- and `verify` re-solves them
+as unsatisfiable. Each instance only specialises the contract, so "none
+exists" holds for the spec's whole input domain. The scope line says over
+which implementations and inputs.
 
 `--prove-candidate` chains the general statement onto it:
 
@@ -2109,6 +2118,15 @@ example (x y : ℝ)
 `linarith only` is handed exactly the hypotheses the certificate used, and
 `maxRecDepth` grows with them: a combination of 169 rows used to stop at
 Lean's default depth with every step right.
+
+**`--theorem NAME`** writes `theorem NAME` where the anonymous `example` was
+(`NAME_1`, `NAME_2`... when there are several), so a production file can use
+the result; for a semigroup, whose stages are already named theorems, NAME
+replaces the `Certo` namespace. A Lean identifier, dotted parts allowed;
+anything that would need escaping is refused. The statement is unchanged, and
+the correspondence check reads it back the same way.
+
+    certo export cert.json --lean --theorem E11.incidence_B --out B.lean
 
 **An affine semigroup** goes out in four stages, every fact `decide`d by Lean
 and every consequence proved once in the file: (1) each point shown in the

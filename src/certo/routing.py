@@ -259,7 +259,7 @@ KIND_OF = {
     "audit": "hypothesis_audit", "farkas": "farkas", "compose": "proof",
     "induct": "induction",
     # `--prove-candidate` adds the universal half to the bounded one.
-    "synth": ("cegis", "synth_proved"),
+    "synth": ("cegis", "synth_proved", "cegis_none"),
     # `--gap` pairs the relaxation with an integer optimum, and that
     # pairing is its own kind -- the same flag that makes the tier
     # `depends` rather than `yes`.

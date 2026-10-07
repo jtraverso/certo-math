@@ -97,8 +97,14 @@ class Certificate:
         """Rendered in the reader's language, not the writer's."""
         return t(self.note_key, **self.note_args) if self.note_key else ""
 
-    def to_dict(self) -> dict:
-        return {
+    def to_dict(self, copy: bool = True) -> dict:
+        """The certificate as plain data -- a COPY. It handed out the payload
+        itself, so a mutation test that edited "its" dict edited the
+        certificate, and the next copy was already forged. `copy=False` is for
+        the paths that only read it to serialise."""
+        import copy as _copy
+
+        out = {
             "schema": self.schema,
             "kind": self.kind,
             "solver_free": self.solver_free,
@@ -108,6 +114,11 @@ class Certificate:
             "provenance": self.provenance,
             "payload": self.payload,
         }
+        if copy:
+            out["note_args"] = _copy.deepcopy(self.note_args)
+            out["provenance"] = _copy.deepcopy(self.provenance)
+            out["payload"] = _copy.deepcopy(self.payload)
+        return out
 
     @staticmethod
     def unwrap(d: dict) -> dict:
@@ -144,7 +155,7 @@ class Certificate:
         file -- a parametric certificate of 0.37 MB of content wrote 0.69 MB
         -- and nobody reads a file that size by eye. The digest is over the
         content, so it is the same either way."""
-        d = self.to_dict()
+        d = self.to_dict(copy=False)
         text = json.dumps(d, indent=2, ensure_ascii=False)
         if len(text) > COMPACT_ABOVE:
             text = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
@@ -467,6 +478,23 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
         solver_free=True,
         payload=payload,
         note_key="cert.note.lp_dual.exact" if is_exact else "cert.note.lp_dual.float",
+    )
+
+
+def cegis_none_certificate(smt2, implementation_vars, inputs, helpers,
+                           counterexamples) -> Certificate:
+    """NO implementation satisfies the contract: the implementation's
+    constraints, with `behavior IMPLIES correctness` instantiated at each
+    counterexample (fresh helpers each time), are unsatisfiable. Each
+    instance is a consequence of `forall input . behavior => exists helper .
+    correctness`, so no candidate meets them all."""
+    return Certificate(
+        kind="cegis_none",
+        solver_free=False,
+        payload={"smt2": smt2, "implementation_vars": implementation_vars,
+                 "inputs": inputs, "helpers": helpers,
+                 "counterexamples": counterexamples},
+        note_key="cert.note.cegis_none",
     )
 
 
@@ -3259,9 +3287,15 @@ def _verify_capacity_profile(cert, limits) -> VerifyReport:
         # adversarial suite: a derived list that nobody re-derives, and a
         # source whose own `at` need not match the capacity it is filed under.
         # Both are edits that leave every other number looking right.
+        # `value` and `parameter_load` of each source too: derived from the
+        # masses, shown to the reader, and editable to anything -- 108/5
+        # changed to 0 verified as complete.
         (t("verify.profile.bookkeeping"),
          got["breakpoints"] == p.get("breakpoints")
          and all(e.get("at") == at
+                 and str(e.get("value")) == str(got["sources"].get(at, {}).get("value"))
+                 and str(e.get("parameter_load"))
+                 == str(got["sources"].get(at, {}).get("parameter_load"))
                  for at, e in (p.get("sources") or {}).items()),
          t("verify.profile.derived", n=len(p.get("breakpoints") or []))),
     ]
@@ -6229,6 +6263,65 @@ def _verify_cegis(cert, limits) -> VerifyReport:
     )
 
 
+def _verify_cegis_none(cert, limits) -> VerifyReport:
+    import z3
+
+    from . import z3util
+    from .limits import Limits
+
+    lim = limits or Limits()
+    p = cert.payload
+    decls: dict = {}
+    impl_cons = z3.And(*z3.parse_smt2_string(p["smt2"]["impl_constraints"], decls=decls))
+    behav = z3.And(*z3.parse_smt2_string(p["smt2"]["behavior"], decls=decls))
+    corr = z3.And(*z3.parse_smt2_string(p["smt2"]["correctness"], decls=decls))
+
+    impl = {n: s for n, s in p["implementation_vars"]}
+    inputs = {n: s for n, s in p["inputs"]}
+    helpers = {n: s for n, s in p["helpers"]}
+    checks = []
+
+    # THE ROLES ARE DISJOINT, AND COVER THE FORMULAS. A "counterexample"
+    # that assigns an implementation variable fixes the candidate instead of
+    # testing it, and every candidate would be refuted by construction.
+    names = [n for n, _s in p["implementation_vars"]] + \
+        [n for n, _s in p["inputs"]] + [n for n, _s in p["helpers"]]
+    disjoint = len(names) == len(set(names)) and bool(impl)
+    free = {str(c) for c in z3util.free_consts(impl_cons, behav, corr)}
+    covered = free <= set(names)
+    checks.append((t("verify.cegis_none.roles"), disjoint and covered,
+                   ", ".join(sorted(free - set(names))[:5])))
+
+    ok_ces = True
+    formulas = [impl_cons]
+    for i, ce in enumerate(p["counterexamples"]):
+        if not isinstance(ce, dict) or not set(ce) <= set(inputs) or \
+                any(ce[n][0] != inputs[n] for n in ce):
+            ok_ces = False
+            continue
+        subs = [(_const(z3, n, s), _value(z3, s, v)) for n, (s, v) in ce.items()]
+        subs += [(_const(z3, h, s), z3.Const("{}__ce{}".format(h, i),
+                                             _const(z3, h, s).sort()))
+                 for h, s in helpers.items()]
+        formulas.append(z3.substitute(z3.Implies(behav, corr), *subs)
+                        if subs else z3.Implies(behav, corr))
+    checks.append((t("verify.cegis_none.inputs"), ok_ces, ""))
+
+    s = z3.Solver()
+    lim.apply_to(s)
+    s.add(*formulas)
+    r = s.check()
+    unsat = r == z3.unsat
+    checks.append((t("verify.cegis_none.unsat"), unsat, str(r)))
+    rep = VerifyReport(
+        disjoint and covered and ok_ces and unsat, "cegis_none", False,
+        checks=checks,
+        detail=t("verify.cegis_none.detail", ces=len(p["counterexamples"]),
+                 vars=", ".join(impl)))
+    rep.timed_out = r == z3.unknown
+    return rep
+
+
 def _verify_cnf_model(cert, limits) -> VerifyReport:
     from .cnf import CNF
 
@@ -7076,6 +7169,7 @@ VERIFIERS = {
     "unsat_core": _verify_unsat_core,
     "lp_dual": _verify_lp_dual,
     "cegis": _verify_cegis,
+    "cegis_none": _verify_cegis_none,
     "graph_set": _verify_graph_set,
     "cnf_model": _verify_cnf_model,
     "drat": _verify_drat,

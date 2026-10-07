@@ -163,11 +163,24 @@ def main() -> int:
     failures = 0
     cases = _cases(limits)
 
+    # And each exporter's output once more as `export --theorem NAME` writes
+    # it: a theorem with a dotted name, or a renamed namespace, has to
+    # elaborate too -- the rename is text, and text is what this checks.
+    seen, named = set(), []
     for name, cert in cases:
+        if cert.kind not in seen:
+            seen.add(cert.kind)
+            named.append(("named_" + name, cert, "CertoNamed.case_" + cert.kind))
+    jobs = [(n, c, None) for n, c in cases] + named
+
+    for name, cert, theorem in jobs:
         data = cert.to_dict()
         data["digest"] = cert.digest()
         text = leanexport.EXPORTERS[cert.kind](data)
-        path = tmp / "{}.lean".format(name.capitalize())
+        if theorem:
+            text = leanexport.named(text, theorem)
+        path = tmp / "{}.lean".format(
+            name.replace(".py", "").replace(".", "_").capitalize())
         path.write_text(text, encoding="utf-8")
 
         hollow = leanexport.hollow_count(text)
@@ -197,7 +210,7 @@ def main() -> int:
             for line in (report.get("output") or "").splitlines()[:8]:
                 print("       " + line)
 
-    print("\n{}/{} exports compile".format(len(cases) - failures, len(cases)))
+    print("\n{}/{} exports compile".format(len(jobs) - failures, len(jobs)))
     _ = json
     return 1 if failures else 0
 

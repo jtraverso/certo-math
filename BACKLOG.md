@@ -110,6 +110,12 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | A result CARD: the exact conclusion, its domain, the hypotheses, the dependencies declared pending (`pending=["CP7", "physical realisation"]`), the role (consumer or existence) and the degree -- declared in the spec, carried as optional fields, shown by `verify`, `status`, `--oneline` and in aggregates | **M** | med | med | the most repeated ask: about twenty sections of one report and the P0 of another (a local PROVED read as a closed gate). Joins the role row below. Designed with the users before it is built |
+| **P2** | Composition with PORTS: gadgets, projection contracts (each global partition induces a valid local state), refusing to add minima of incompatible states; an owner change certified relative to a previous packing; a Kempe trace with lists; integer balances derived from the trace, not re-entered | **L** | med | high | two reports, thirteen sections; acceptance tests in the feedback (two IN2 give 4/5, not 9/10 + 9/10). Joins the Tuza contracts row |
+| **P2** | A propositional `Spec` refuted by a DRAT proof checked in-process, not by re-solving the SMT core | **M** | med | med | user feedback: a 116-formula boolean Hall core verifies only with a solver |
+| **P2** | Evidence grade in every summary and aggregate: complete / with_solver / trace, per obligation, native rejection told apart from an adapter's | **S-M** | med | low | eleven sections of one report; `--oneline` covers one certificate, not an aggregate |
+| **P3** | Localisation and quotient maps as typed obligations (base ring, inverted elements, images of generators, both compositions, a cancelled factor's unit condition), and component transport across charts with the four presence cases | **L** | **low** | med | user feedback (E11); joins the isomorphism-of-localised-quotients row |
+| **P3** | Single asks from one report: simplified rational counterexamples, symmetry/orbit quotient certificates with lifting, a public stable list of kinds, a documented monomial key reader, typed external theorems beyond `cite`, an LP-relaxation-lost-everything warning | **S-M each** | med | low | user feedback (gap-cordal 49-78) |
 | **P2** | Hypergraph matching and transversal, triangle packing and covering of a graph, as native commands: certified branch and bound with the LP dual, and a data spec (`{"hypergraph": ...}`) instead of generated `.py` files | **M-L** | med | med | user feedback (0.26.1): what Jacobian refuses past 20 edges. Joins the branch-and-bound rows below. 0.26.2 points `find` to the 0-1 program |
 | **P2** | Non-vacuity in the regime that matters: `check --hypotheses-only` with extra conditions (integers, `l >= 6`), not only "satisfiable over the reals" | **S** | high | low | user feedback (0.26.1): a non-empty real regime was empty for the integers that mattered |
 | **P2** | A certificate's ROLE on its first line: consumer or existence, and which link of a reduction chain it touches -- declared in the spec, carried by `scope` | **S-M** | med | low | user feedback (0.26.1): with dozens of PASS certificates, volume is easy to mistake for progress |
@@ -1091,7 +1097,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.26.2**, with **56 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.26.3**, with **57 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1101,7 +1107,7 @@ lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
 `ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`; in 0.26.1 `helpers`
-(`cegis`); in 0.26.2 `citations` (`unsat_core`).
+(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`.
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

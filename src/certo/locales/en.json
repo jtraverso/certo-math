@@ -2062,5 +2062,18 @@
   "find.note.hitting_set": "`cover` is NOT a set cover: it partitions a graph into cliques. A hitting set, transversal, vertex cover or set cover is a 0-1 program -- an LPSpec with binary variables, minimise the sum, one `>= 1` row per edge -- run with `mixed --prove-optimal` (the exact optimum, by a certified branch and bound) or `opt` (the LP bound and its dual)",
   "cli.mcp.orphan": "ORPHANED (its client is gone)",
   "doctor.mcp.servers": "MCP servers running: {n} ({stale} on code older than the installed {version}, {orphan} orphaned). `certo mcp restart --yes` stops those",
-  "doctor.mcp.servers_ok": "MCP servers running: {n}, all on the installed {version}"
+  "doctor.mcp.servers_ok": "MCP servers running: {n}, all on the installed {version}",
+  "cert.note.cegis_none": "No implementation exists: its constraints and the contract at these counterexamples are contradictory. Each counterexample only instantiates the contract, so the refutation holds for the whole domain, not only the bounded search.",
+  "verify.cegis_none.roles": "implementation, input and helper variables are disjoint and cover the formulas",
+  "verify.cegis_none.inputs": "every counterexample assigns inputs only, with their sorts",
+  "verify.cegis_none.unsat": "the constraints and the contract at the counterexamples are unsatisfiable",
+  "verify.cegis_none.detail": "no implementation over {vars}: {ces} counterexamples rule out every candidate",
+  "engine.synth.candidate_unknown": "the candidate names `{name}`, which is not an implementation variable of the spec (these are: {known})",
+  "engine.synth.candidate_missing": "the candidate gives no value for {names}",
+  "profile.out_of_time": "the search ran past its time budget",
+  "profile.timeout": "TIMEOUT: the profile search ran out of the {ms} ms budget before it had the whole profile. Inconclusive -- no certificate; raise --timeout-ms, or give the segments and sources to check",
+  "lean.theorem.bad_name": "`{name}` is not a Lean identifier a theorem can be cited by (letters, digits, `_`, dotted parts; no reserved word)",
+  "lean.theorem.nothing": "there is no `example` in this file to name `{name}`",
+  "scope.cegis": "checked on the bounded input domain {domain}, not beyond it",
+  "scope.cegis_none": "no implementation with {impl} meets the contract on the inputs {domain}"
 }

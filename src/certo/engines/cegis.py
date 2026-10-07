@@ -21,7 +21,7 @@ import time
 import z3
 
 from .. import z3util
-from ..certificate import cegis_certificate
+from ..certificate import cegis_certificate, cegis_none_certificate
 from ..i18n import t
 from ..limits import Limits
 from ..status import Result, Status, Verdict, classify_unknown
@@ -98,9 +98,19 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
         impl_solver.set("timeout", _remaining_ms(deadline))
         r = impl_solver.check()
         if r == z3.unsat:
+            # THE NEGATIVE CARRIES ITS PROOF: the constraints and one instance
+            # per counterexample are contradictory, and every instance is a
+            # consequence of the contract. It used to come back with no
+            # certificate at all.
+            cert = cegis_none_certificate(
+                spec_smt2,
+                [[str(v), z3util.sort_name(v)] for v in impl_vars],
+                [[str(v), z3util.sort_name(v)] for v in input_vars],
+                [[str(h), z3util.sort_name(h)] for h in helper_vars],
+                counterexamples)
             return done(Status.UNSAT, Verdict.UNSATISFIABLE,
                         t("engine.synth.none", ces=len(counterexamples)),
-                        k=k)
+                        cert, k=k)
         if r != z3.sat:
             st = classify_unknown(impl_solver.reason_unknown())
             return done(st, Verdict.INCONCLUSIVE,
@@ -147,10 +157,16 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             on_round(trace[-1])
 
         # --- 3. aprender: instanciar la spec en ese contraejemplo ---------
+        # `behav IMPLIES corr`, not `behav AND corr`. The counterexample is in
+        # the domain of THIS candidate; when the domain depends on the
+        # implementation (`x >= k`), requiring it to be in the domain of
+        # every later candidate excluded the ones it is not an input of --
+        # and k = 1 was refuted by x = 0, found against k = 0: "no object
+        # satisfies the specification" for a spec k = 1 satisfies.
         subs = list(ce_concrete)
         for h in helper_vars:
             subs.append((h, z3.Const("{}__ce{}".format(h, k), h.sort())))
-        impl_solver.add(z3.substitute(z3.And(behav, corr), *subs))
+        impl_solver.add(z3.substitute(z3.Implies(behav, corr), *subs))
 
     return done(Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                 t("engine.synth.max_iter", n=lim.max_iterations),
@@ -175,12 +191,38 @@ def prove_candidate(spec, impl_assign, limits: Limits | None = None):
     """
     from . import smt
 
+    impl_assign = candidate_pairs(spec, impl_assign)
     values = {n: v for n, (_, v) in impl_assign.items()}
     uspec = universal_spec(spec, impl_assign)
     res = smt.prove(uspec, limits)
     res.command = "prove_candidate"
     res.meta["candidate"] = values
     return res
+
+
+def candidate_pairs(spec, impl_assign) -> dict:
+    """`{name: (sort, value)}`, from either shape a candidate comes in.
+
+    `result.meta["implementation"]` is `{name: value}`, the certificate's is
+    `{name: [sort, value]}`; passing the first raised `cannot unpack
+    non-iterable int object`. The sort is read from the spec, and a name the
+    spec does not declare -- or a declared one left out -- is refused by name.
+    """
+    sorts = {str(v): z3util.sort_name(v) for v in spec.impl_vars}
+    out = {}
+    for name, val in (impl_assign or {}).items():
+        if name not in sorts:
+            raise ValueError(t("engine.synth.candidate_unknown", name=name,
+                               known=", ".join(sorts)))
+        if isinstance(val, (list, tuple)) and len(val) == 2:
+            out[name] = (val[0], val[1])
+        else:
+            out[name] = (sorts[name], val)
+    missing = [n for n in sorts if n not in out]
+    if missing:
+        raise ValueError(t("engine.synth.candidate_missing",
+                           names=", ".join(missing)))
+    return out
 
 
 def universal_spec(spec, impl_assign):
@@ -199,7 +241,12 @@ def universal_spec(spec, impl_assign):
         subs = [(z3util.const(n, srt), z3util.value_of(srt, v))
                 for n, (srt, v) in impl_assign.items()]
         uspec = Spec(title="obligacion universal")
-        uspec.assume("dominio_universal", spec.universal_behavior)
+        # The candidate is substituted in the DOMAIN too. With `x >= k` left
+        # as it was, the obligation read "for every k" -- k = 1 was refuted
+        # by k = 0 -- which is not the candidate's statement.
+        uspec.assume("dominio_universal",
+                     z3.substitute(spec.universal_behavior, *subs) if subs
+                     else spec.universal_behavior)
         claim = z3.substitute(corr, *subs)
         # The helpers stay EXISTENTIAL in the general statement too: proving
         # the correctness for EVERY helper value claimed more than the spec.

@@ -6,6 +6,54 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.26.3] — 2026-10-07
+
+**Corrections from four reports on 0.26.2, two of them wrong answers.**
+No new commands (59); one new kind (57), `cegis_none`; the schema stays 5.
+
+### Correctness
+
+- **`synth` said "no object exists" for a spec that has one.** The search
+  learned `behavior AND correctness` at each counterexample; when the domain
+  depends on the implementation (`x >= k`), that excluded every candidate
+  the counterexample is not an input of -- `k = 1` was refuted by `x = 0`,
+  found against `k = 0`. It learns `behavior IMPLIES correctness` now. Never
+  a false PROVED: the found object is always re-checked.
+- **`prove_candidate` refuted a correct candidate** when `universal_behavior`
+  mentions an implementation variable: the domain kept it free, so the
+  obligation read "for every k". The candidate is substituted in the domain
+  too (a user's report, with the workaround that confirmed it).
+- **A `capacity_profile` source's `value` and `parameter_load` are checked.**
+  Both are derived from the masses and shown to the reader; changing 108/5 to
+  0 verified as complete.
+
+### Fixed
+
+- **`capacity_profile` finds a profile from a degenerate endpoint dual.** A
+  dual optimal at an end but not the profile's line crossed the other line AT
+  the end, and the bisection ran to its depth limit ("nested deeper than any
+  real profile"). A line equal to the profile at both ends covers the
+  interval, by concavity, and prices it.
+- **`capacity_profile` keeps its time budget.** `limits` was taken and never
+  read; the search and each of its linear programs now stop at the clock --
+  TIMEOUT, `stopped_by: time`, no certificate.
+- **`prove_candidate` takes the candidate in either shape**, `{name: value}`
+  from `meta` or `{name: [sort, value]}` from the certificate, and refuses
+  an unknown or missing name by name instead of `cannot unpack`.
+- **`Certificate.to_dict()` returns a copy.** It handed out the payload
+  itself, so editing "its" dict edited the certificate.
+
+### New
+
+- **A synthesis negative carries a certificate**, `cegis_none`: the
+  constraints with the contract instantiated at each counterexample are
+  unsatisfiable, and the counterexamples assign inputs only. `synth` results
+  also print their scope -- the bounded input domain, or the implementations
+  and inputs a negative is about.
+- **`export --lean --theorem NAME`**: a named `theorem` instead of an
+  anonymous `example` (`NAME_k` for several; the namespace for a semigroup),
+  checked for correspondence as before and compiled in the Lean gate.
+
 ## [0.26.2] — 2026-10-06
 
 **From a user's report on 0.26.1: one fix and the frictions around it.**

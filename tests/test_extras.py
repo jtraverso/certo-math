@@ -16089,6 +16089,213 @@ def test_0_26_2_the_parent_watch_can_be_turned_off():
             os.environ["CERTO_MCP_NO_PARENT_WATCH"] = old
 
 
+def test_0_26_3_cegis_learns_an_implication_not_a_conjunction():
+    """With the domain depending on the implementation (`x >= k`), learning
+    `behavior AND correctness` at x = 0 excluded every k > 0: "no object
+    satisfies the specification" for a spec k = 1 satisfies."""
+    import z3
+
+    from certo import SynthSpec
+    from certo.engines import cegis
+
+    k, x = z3.Int("k"), z3.Int("x")
+    s = SynthSpec([k], [x], impl_constraints=z3.And(k >= 0, k <= 2),
+                  behavior=z3.And(x >= k, x <= 3), correctness=x >= 1)
+    res = cegis.synth(s)
+    assert res.verdict is Verdict.PROVED, res.detail
+    assert res.meta["implementation"]["k"] >= 1
+
+
+def test_0_26_3_a_synthesis_negative_carries_a_certificate():
+    import z3
+
+    from certo import SynthSpec
+    from certo.certificate import verify
+    from certo.engines import cegis
+
+    k, x, h = z3.Int("k"), z3.Int("x"), z3.Int("h")
+    s = SynthSpec([k], [x], impl_constraints=z3.And(k >= 0, k <= 2),
+                  behavior=z3.And(x >= 0, x <= 3), correctness=x >= k + 2)
+    res = cegis.synth(s)
+    assert res.verdict is Verdict.UNSATISFIABLE
+    cert = res.certificate
+    assert cert is not None and cert.kind == "cegis_none"
+    rep = verify(cert)
+    assert rep.ok and rep.degree == "with_solver", rep.detail
+
+    # a "counterexample" that assigns the implementation fixes it instead
+    d = cert.to_dict()
+    d["payload"]["counterexamples"].append({"k": ["Int", 0]})
+    assert not verify(d).ok
+    # a variable moved out of every role leaves the formulas uncovered
+    d = cert.to_dict()
+    d["payload"]["implementation_vars"] = [["kk", "Int"]]
+    assert not verify(d).ok
+    # with no counterexample the constraints alone are satisfiable
+    d = cert.to_dict()
+    d["payload"]["counterexamples"] = []
+    assert not verify(d).ok
+
+    # helpers stay existential, one fresh copy per counterexample
+    s = SynthSpec([k], [x], helper_vars=[h],
+                  impl_constraints=z3.And(k >= 0, k <= 2),
+                  behavior=z3.And(x >= 0, x <= 3),
+                  correctness=z3.And(h >= 0, h <= 1, x == 2 * h + k))
+    res = cegis.synth(s)
+    assert res.verdict is Verdict.UNSATISFIABLE, res.detail
+    assert verify(res.certificate).ok
+
+
+def test_0_26_3_prove_candidate_substitutes_the_candidate_in_the_domain():
+    """`universal_behavior` mentioning an implementation variable was read
+    "for every k": k = 1 refuted by k = 0. And the candidate is accepted in
+    either shape, `meta` or certificate."""
+    import z3
+
+    from certo import SynthSpec
+    from certo.engines import cegis
+
+    k, x = z3.Int("domain_k"), z3.Real("domain_x")
+    s = SynthSpec([k], [x], impl_constraints=k == 1, behavior=x >= k,
+                  correctness=x >= 1, universal_behavior=x >= k)
+    res = cegis.synth(s)
+    assert res.verdict is Verdict.PROVED
+    for cand in (res.certificate.payload["implementation"],
+                 res.meta["implementation"]):
+        out = cegis.prove_candidate(s, cand)
+        assert out.verdict is Verdict.PROVED, (cand, out.detail)
+    for bad in ({"zz": 1}, {}):
+        try:
+            cegis.prove_candidate(s, bad)
+        except ValueError as e:
+            assert "domain_k" in str(e) or "zz" in str(e)
+        else:
+            raise AssertionError("accepted " + repr(bad))
+
+
+def test_0_26_3_to_dict_is_a_copy():
+    import z3
+
+    from certo import Spec
+    from certo.engines import smt
+
+    x = z3.Int("x")
+    s = Spec()
+    s.assume("h", x >= 3)
+    s.claim(x >= 1)
+    cert = smt.prove(s).certificate
+    d = cert.to_dict()
+    d["payload"]["names"].append("forged")
+    assert "forged" not in cert.payload["names"]
+
+
+def _profile_example():
+    from certo.engines import algebra
+    from certo.spec import load_spec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    return algebra.capacity_profile(load_spec(str(root / "examples" / "capacity_profile.py")))
+
+
+def test_0_26_3_a_profile_source_value_is_checked():
+    from certo.certificate import verify
+
+    res = _profile_example()
+    assert res.verdict is Verdict.PROVED
+    d = res.certificate.to_dict()
+    assert verify(d).ok
+    at = next(iter(d["payload"]["sources"]))
+    d["payload"]["sources"][at]["value"] = "0"
+    assert not verify(d).ok
+    d = res.certificate.to_dict()
+    d["payload"]["sources"][at]["parameter_load"] = "12345"
+    assert not verify(d).ok
+
+
+def test_0_26_3_a_profile_one_line_covers_from_a_degenerate_end():
+    """A dual at an endpoint that is optimal there but not the profile's line
+    (5 + 3/2 t at t = 0 of a profile that is 5 on [0, 2]) crossed the other
+    line AT the endpoint, and the bisection ran to its depth limit."""
+    from fractions import Fraction as F
+
+    from certo import profile as pr
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import ProfileSpec
+
+    real = pr._solve_at
+
+    def degenerate(data, order, rows, t, deadline=None):
+        y, a, b = real(data, order, rows, t, deadline)
+        if t == 0:
+            return dict(y, p=F(3, 2)), a, F(3, 2)
+        return y, a, b
+
+    pr._solve_at = degenerate
+    try:
+        spec = ProfileSpec(columns={"x": {"A": 1}, "z": {"A": 1, "p": 1}},
+                           gain={"x": 5, "z": 5}, capacity={"A": 1},
+                           parameter="p", domain=(0, 2))
+        res = algebra.capacity_profile(spec)
+    finally:
+        pr._solve_at = real
+    assert res.verdict is Verdict.PROVED, res.detail
+    assert verify(res.certificate).ok
+
+
+def test_0_26_3_a_profile_search_keeps_its_time_budget():
+    import time
+
+    from certo import Limits
+    from certo import profile as pr
+
+    real = pr._solve_at
+
+    def slow(*a, **k):
+        time.sleep(0.05)
+        return real(*a, **k)
+
+    pr._solve_at = slow
+    try:
+        from certo.engines import algebra
+        from certo.spec import load_spec
+
+        root = pathlib.Path(__file__).resolve().parent.parent
+        spec = load_spec(str(root / "examples" / "capacity_profile.py"))
+        spec.segments, spec.sources = None, None
+        res = algebra.capacity_profile(spec, Limits(timeout_ms=20))
+    finally:
+        pr._solve_at = real
+    assert res.status is Status.TIMEOUT, (res.status, res.detail)
+    assert res.meta["stopped_by"] == "time" and res.certificate is None
+
+    try:
+        pr.discover(spec, deadline=time.monotonic() - 1)
+    except pr.OutOfTime:
+        pass
+    else:
+        raise AssertionError("a past deadline did not stop the search")
+
+
+def test_0_26_3_export_names_the_theorem():
+    from certo import leanexport
+
+    one = "-- c\nexample (x : ℝ) (h : x ≥ 1) : x ≥ 0 := by linarith\n"
+    assert "theorem E11.incidence_B (x" in leanexport.named(one, "E11.incidence_B")
+    two = one + "example (y : ℝ) : y = y := rfl\n"
+    out = leanexport.named(two, "T")
+    assert "theorem T_1 " in out and "theorem T_2 " in out
+    ns = "namespace Certo\ntheorem certo_a : True := trivial\nend Certo\n"
+    assert leanexport.named(ns, "Cone.sg").startswith("namespace Cone.sg")
+    for bad in ("bad name", "theorem", "a..b", "x-y", "«x»"):
+        try:
+            leanexport.named(one, bad)
+        except leanexport.NotExportable:
+            pass
+        else:
+            raise AssertionError("accepted " + bad)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

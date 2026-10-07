@@ -88,6 +88,7 @@ CASES = [
     ("walkthrough_proof.py", "compose", []),
     ("packing_mixed.py", "opt", ["--by-type"]),
     ("synth_constant.py", "synth", []),
+    ("synth_none.py", "synth", []),
     ("synth_prove_identity.py", "synth", ["--prove-candidate"]),
     ("ramsey.py", "cases", []),
     ("propositional.py", "cases", []),

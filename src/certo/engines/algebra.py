@@ -913,9 +913,14 @@ def capacity_profile(spec, limits: Limits | None = None,
     from ..certificate import capacity_profile_certificate
     from ..profile import NotAProfile, certify
 
-    from ..profile import Undiscovered, discover
+    from ..profile import OutOfTime, Undiscovered, discover
 
     t0 = time.perf_counter()
+    lim = limits or Limits()
+    # THE BUDGET IS KEPT. `limits` was taken and never read: a profile asked
+    # for in one second ran until something outside killed it.
+    deadline = (time.monotonic() + lim.timeout_ms / 1000
+                if lim.timeout_ms else None)
 
     # NO SEGMENTS MEANS FIND THEM. The search proposes breakpoints, duals and
     # sources; `certify` then admits or refuses them on exactly the same terms
@@ -925,11 +930,17 @@ def capacity_profile(spec, limits: Limits | None = None,
     found = None
     if not getattr(spec, "segments", None):
         try:
-            found = discover(spec)
+            found = discover(spec, deadline=deadline)
         except NotAProfile as e:
             return Result("profile", Status.OUT_OF_THEORY,
                           Verdict.INCONCLUSIVE, ENGINE_PROFILE, 0.0, None,
                           detail=str(e))
+        except OutOfTime as e:
+            return Result("profile", Status.TIMEOUT, Verdict.INCONCLUSIVE,
+                          ENGINE_PROFILE, (time.perf_counter() - t0) * 1000,
+                          None, detail=t("profile.timeout", ms=lim.timeout_ms),
+                          meta={"stopped_by": "time", "phase": "discovery",
+                                "why": str(e)})
         except Undiscovered as e:
             return Result("profile", Status.RESOURCE_EXHAUSTED,
                           Verdict.INCONCLUSIVE, ENGINE_PROFILE,
