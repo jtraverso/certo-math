@@ -6579,9 +6579,14 @@ def test_the_peak_verifier_rederives_the_coefficients_from_the_objective():
     assert not rep.ok
     assert any("expanded" in n for n, ok, _ in rep.checks if not ok)
 
-    bent = r.certificate.to_dict()
-    bent["payload"]["argmax"] = {"1": "1"}         # a different maximiser
-    assert not verify(Certificate.from_dict(bent), LIM).ok
+    # A DIFFERENT maximiser. This line used to write {"1": "1"} -- which is
+    # `m`, the argmax already there -- and passed only because `to_dict()`
+    # shared the payload, so the forged `value` above was still in it.
+    for other in ({"0": "1"}, {"1": "1", "0": "1"}):   # 1, and m + 1
+        bent = r.certificate.to_dict()
+        assert bent["payload"]["argmax"] != other
+        bent["payload"]["argmax"] = other
+        assert not verify(Certificate.from_dict(bent), LIM).ok
 
 
 def test_the_shift_is_exact_and_sufficient_not_necessary():
