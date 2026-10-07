@@ -16301,6 +16301,162 @@ def test_0_26_3_export_names_the_theorem():
             raise AssertionError("accepted " + bad)
 
 
+def test_0_27_a_core_with_an_equality_passes_its_own_self_check():
+    """An equality is two Farkas rows, `X` and `X_rev`, and one name: the
+    "names are the rows'" check refused every core with an equality, and
+    `prove` failed its own self-check on `2 nu = l - 5`."""
+    import z3
+
+    from certo import Spec
+    from certo.certificate import verify
+    from certo.engines import smt
+
+    l, nu = z3.Reals("l nu")
+    s = Spec()
+    s.assume("nu_half", 2 * nu == l - 5)
+    s.assume("l_small", l <= 6)
+    s.claim(nu <= 1)
+    res = smt.prove(s)
+    assert res.verdict is Verdict.PROVED
+    cert = res.certificate
+    assert cert.payload.get("multipliers"), "expected a Farkas core"
+    assert verify(cert).ok
+    # the names still have to be the rows': a reordering is refused
+    d = cert.to_dict()
+    d["payload"]["names"] = list(reversed(d["payload"]["names"]))
+    assert not verify(d).ok
+
+
+def test_0_27_regimes_say_where_a_theorem_is_inhabited():
+    import z3
+
+    from certo import Spec
+    from certo.engines import smt
+
+    l, nu = z3.Reals("l nu")
+    s = Spec()
+    s.assume("nu_half", 2 * nu == l - 5)
+    s.assume("l_small", l <= 6)
+    s.claim(nu <= 1)
+    s.regime("l_ge_6", l >= 6, integers=["l"])
+    s.regime("l_ge_6_all_int", l >= 6, integers=True)
+    s.regime("l_ge_7", l >= 7)
+    res = smt.prove(s)
+    assert res.verdict is Verdict.PROVED
+    got = {r["regime"]: r["status"] for r in res.meta["regimes"]}
+    # l = 6, nu = 1/2: inhabited with l an integer, EMPTY with nu one too
+    assert got == {"l_ge_6": "inhabited", "l_ge_6_all_int": "EMPTY",
+                   "l_ge_7": "EMPTY"}, got
+
+    # check --hypotheses-only joins ONE regime, by name, and names it in a clash
+    out = smt.check(s, hypotheses_only=True, regime="l_ge_7")
+    assert out.verdict is Verdict.UNSATISFIABLE
+    assert "regime:l_ge_7" in out.meta["clash"]
+    out = smt.check(s, hypotheses_only=True, regime="l_ge_6")
+    assert out.verdict is Verdict.SATISFIABLE and out.meta["integers"] == ["l"]
+    try:
+        smt.check(s, hypotheses_only=True, regime="nope")
+    except ValueError as e:
+        assert "l_ge_6" in str(e)
+    else:
+        raise AssertionError("an unknown regime was accepted")
+    # --integers on the bare hypotheses: 2 nu = l - 5 with both integers
+    out = smt.check(s, hypotheses_only=True, integers=True)
+    assert out.verdict is Verdict.SATISFIABLE
+
+
+def test_0_27_a_wide_lp_is_solved_as_its_primal():
+    """The dual route put one tableau row per primal column; the primal
+    route reads the same optimal dual value off the slacks."""
+    import random
+
+    from certo import simplex as S
+
+    rng = random.Random(11)
+    for _ in range(40):
+        m, n = rng.randint(1, 5), rng.randint(1, 30)
+        A = [[Fraction(rng.choice([0, 0, 1, 2, -1, 3])) for _ in range(n)]
+             for _ in range(m)]
+        b = [Fraction(rng.randint(-2, 8)) for _ in range(m)]
+        c = [Fraction(rng.randint(-3, 6)) for _ in range(n)]
+        xh = [rng.random() if rng.random() < 0.3 else 0.0 for _ in range(n)]
+        outs = []
+        for route in (lambda: S.minimise(A, b, c),
+                      lambda: S._primal_dual(A, b, c, None),
+                      lambda: S._primal_dual(A, b, c, None, None, xh)):
+            try:
+                outs.append(route())
+            except S.SimplexLimit:
+                outs.append(None)
+        assert len({o is None for o in outs}) == 1
+        if outs[0] is None:
+            continue
+        values = {sum(bi * yi for bi, yi in zip(b, y)) for y in outs}
+        assert len(values) == 1, values
+        y = outs[2]
+        assert all(v >= 0 for v in y)
+        assert all(sum(A[i][j] * y[i] for i in range(m)) >= c[j] for j in range(n))
+
+
+def test_0_27_the_exact_dual_from_the_float_basis():
+    """Denominators past the ladder: the float dual is BASIC, and its support
+    and tight columns pin it exactly."""
+    from certo import exact
+
+    # max x1 + x2  s.t.  7 x1 + 3 x2 <= 1,  2 x1 + 9 x2 <= 1
+    A = [[Fraction(7), Fraction(3)], [Fraction(2), Fraction(9)]]
+    b = [Fraction(1), Fraction(1)]
+    c = [Fraction(1), Fraction(1)]
+    xf = [6 / 57, 5 / 57]
+    yf = [7 / 57, 4 / 57]
+    y = exact.dual_from_basis(A, c, yf)
+    assert y == [Fraction(7, 57), Fraction(4, 57)]
+    x = exact.primal_from_basis(A, b, xf, y)
+    assert x == [Fraction(6, 57), Fraction(5, 57)]
+    assert exact.check_lp(exact.Prepared(A, b, c), b, c, x, y)["ok"]
+    # a float dual with a tight column missing does not pin its unknowns
+    assert exact.dual_from_basis(A, c, [7 / 57, 0.0]) is None
+
+
+def test_0_27_flint_and_python_products_agree():
+    import random
+
+    from certo import polynomials as P
+
+    rng = random.Random(2)
+    V = ("a", "b", "c")
+
+    def rnd(k):
+        return P.Poly(V, {tuple(rng.randint(0, 5) for _ in V):
+                          Fraction(rng.randint(-9, 9), rng.randint(1, 7))
+                          for _ in range(k)})
+
+    a, b = rnd(200), rnd(200)
+    fast = a * b
+    saved = list(P._FLINT)
+    P._FLINT[:] = [None]
+    try:
+        slow = a * b
+        assert not P.flint_in_use()
+    finally:
+        P._FLINT[:] = saved
+    assert fast == slow
+
+
+def test_0_27_cliques_of_gives_every_clique():
+    from itertools import combinations
+
+    from certo.existence import cliques_of, triangles_of
+
+    K5 = list(combinations(range(5), 2))
+    assert len(cliques_of(5, K5)) == 10 + 10 + 5 + 1
+    assert sorted(map(sorted, cliques_of(5, K5, 3, 3))) == \
+        sorted(map(sorted, triangles_of(5, K5)))
+    assert sorted(cliques_of(4, [(0, 1), (1, 2), (0, 2), (2, 3)],
+                             as_vertices=True)) == \
+        [[0, 1], [0, 1, 2], [0, 2], [1, 2], [2, 3]]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

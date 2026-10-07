@@ -2075,5 +2075,14 @@
   "lean.theorem.bad_name": "`{name}` is not a Lean identifier a theorem can be cited by (letters, digits, `_`, dotted parts; no reserved word)",
   "lean.theorem.nothing": "there is no `example` in this file to name `{name}`",
   "scope.cegis": "checked on the bounded input domain {domain}, not beyond it",
-  "scope.cegis_none": "no implementation with {impl} meets the contract on the inputs {domain}"
+  "scope.cegis_none": "no implementation with {impl} meets the contract on the inputs {domain}",
+  "engine.check.over_integers": "(every real variable read as an integer)",
+  "cli.regime.inhabited": "regime {name}{over}: the hypotheses are inhabited there ({witness})",
+  "cli.regime.empty": "regime {name}{over}: the hypotheses are EMPTY there -- the theorem is vacuous in the regime it is meant for",
+  "cli.regime.unknown": "regime {name}{over}: not decided within the limits",
+  "cli.regime.integers": " over the integers",
+  "engine.check.no_regime": "the spec declares no regime `{name}` (declared: {known})",
+  "cli.point": "a point where every formula holds:",
+  "cli.regime.integer_vars": " with {names} integer",
+  "exists.too_many_cliques": "more than {n} cliques: too many candidates to encode; bound them with max_size"
 }

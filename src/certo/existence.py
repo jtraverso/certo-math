@@ -66,6 +66,50 @@ def triangles_of(n: int, edges) -> list:
     return out
 
 
+#: How many cliques `cliques_of` builds before refusing: each one becomes a
+#: SAT variable, and the count grows exponentially with the clique number.
+MAX_CLIQUES = 200_000
+
+
+def cliques_of(n: int, edges, min_size: int = 2, max_size=None,
+               as_vertices: bool = False) -> list:
+    """Every clique of a graph with `min_size <= |K| <= max_size` vertices --
+    as its edges (a part of an EDGE partition), or as its vertices.
+
+    `triangles_of` is the case `min_size = max_size = 3`. A clique partition
+    of the edges needs EVERY clique as a candidate -- every edge (K2), every
+    triangle, every K4 -- or "no partition into at most k cliques" is about
+    the cliques somebody listed. Built here for the same reason: the claim
+    is only as strong as the candidate set, and this one is complete by
+    construction. Every clique, not only the maximal ones: a partition uses
+    sub-cliques of maximal cliques all the time.
+    """
+    adj = {v: set() for v in range(n)}
+    for a, b in edges:
+        a, b = int(a), int(b)
+        if a != b:
+            adj[a].add(b)
+            adj[b].add(a)
+    top = n if max_size is None else int(max_size)
+    out = []
+
+    def grow(clique, cands):
+        if len(clique) >= min_size:
+            if len(out) >= MAX_CLIQUES:
+                raise NotEncodable(_t("exists.too_many_cliques", n=MAX_CLIQUES))
+            out.append(list(clique) if as_vertices
+                       else [tuple(sorted(p)) for p in combinations(clique, 2)])
+        if len(clique) == top:
+            return
+        for v in sorted(cands):
+            # only larger vertices: each clique is built once, in order
+            grow(clique + [v], {u for u in cands & adj[v] if u > v})
+
+    for v in range(n):
+        grow([v], {u for u in adj[v] if u > v})
+    return out
+
+
 def encode(universe, candidates, exact=True, max_parts=None, title=""):
     """The cover question as a CNF. One variable per candidate part.
 

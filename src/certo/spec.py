@@ -40,6 +40,25 @@ class Spec:
     goal: object = None
     title: str = ""
     citations: dict = field(default_factory=dict)    # name -> source
+    # [(name, expr, integers)]: the regime that MATTERS, which is not a
+    # hypothesis of the theorem. `prove` says whether the hypotheses are
+    # inhabited there; `check --hypotheses-only` asks it directly.
+    regimes: list = field(default_factory=list)
+
+    def regime(self, name: str, expr, integers=False):
+        """A regime the result is MEANT for -- `l >= 6`, over the integers --
+        that is not a hypothesis of the theorem. A theorem proved over the
+        reals can be vacuous exactly there, and a model of the hypotheses
+        somewhere else says nothing about it. `integers=True` reads every
+        real variable as an integer for that question; a list of names,
+        only those (`integers=["l"]`: `l` is a count, `nu` need not be)."""
+        if any(n == name for n, _e, _i in self.regimes) or \
+                any(n == name for n, _ in self.assumptions):
+            raise ValueError(t("spec.duplicate_hypothesis", name=name))
+        if not isinstance(integers, bool):
+            integers = sorted(str(v) for v in integers)
+        self.regimes.append((name, expr, integers))
+        return self
 
     def assume(self, name: str, expr, cite: str = ""):
         if any(n == name for n, _ in self.assumptions):

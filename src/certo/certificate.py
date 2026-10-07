@@ -5687,8 +5687,12 @@ def _verify_core_by_farkas(cert) -> VerifyReport:
     # THE NAMES ARE THE ROWS'. `names` is what a reader quotes and what
     # `compose` reads to see which hypotheses a step used; reversed or cut
     # short, it named other hypotheses than the rows the combination closes.
+    # An EQUALITY is two rows, `X` and `X_rev` (its negation), and one
+    # hypothesis: `names` has `X` once. Requiring a name per row refused
+    # every core with an equality in it -- `prove` failed its own self-check
+    # on `2 nu = l - 5`.
     named = (len(lams) == len(rows)
-             and list(p.get("names") or []) == [n for n, _, _ in rows])
+             and list(p.get("names") or []) == _hypothesis_names(rows))
     tied = tied and named
     checks = [
         (t("verify.core.rows_match"), tied, ""),
@@ -5706,6 +5710,19 @@ def _verify_core_by_farkas(cert) -> VerifyReport:
         detail=t("verify.core.detail_farkas", n=len(used),
                  names=", ".join(n for n in used if n != "__goal__")),
     )
+
+
+def _hypothesis_names(rows) -> list:
+    """The hypotheses the rows come from: a row `X_rev` that is the negation
+    of the row `X` just before it is the other half of the equality `X`."""
+    out = []
+    for i, (name, poly, rel) in enumerate(rows):
+        prev = rows[i - 1] if i else None
+        if prev and name == prev[0] + "_rev" and rel == prev[2] \
+                and poly == {m: -c for m, c in prev[1].items()}:
+            continue
+        out.append(name)
+    return out
 
 
 def _rows_match_smt2(rows, smt2: str) -> bool:

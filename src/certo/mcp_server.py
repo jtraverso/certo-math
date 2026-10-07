@@ -773,7 +773,8 @@ async def prove(spec_path: str | None = None, spec_source: str | None = None,
     "instead returns unsat for every regime, empty or not."))
 @_guard
 async def check(spec_path: str | None = None, spec_source: str | None = None,
-                hypotheses_only: bool = False,
+                hypotheses_only: bool = False, integers: bool = False,
+                regime: str | None = None,
                 timeout_ms: int = 10_000, rlimit: int = 20_000_000) -> dict:
     from .engines import smt
     from .spec import Spec, load_spec
@@ -781,7 +782,7 @@ async def check(spec_path: str | None = None, spec_source: str | None = None,
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), Spec)
     res = await _off(smt.check, spec, _limits(timeout_ms, rlimit),
-                     hypotheses_only)
+                     hypotheses_only, integers, regime)
     return _emit(res, spec_file=f)
 
 

@@ -60,7 +60,7 @@ def scope_note(res: Result):
 _HIDDEN_META = ("self_check", "self_check_ms", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
-                "counterexample", "hint", "hints", "lemmas", "used", "unused", "bridges", "lo", "hi",
+                "counterexample", "hint", "hints", "regimes", "lemmas", "used", "unused", "bridges", "lo", "hi",
                 "width", "ladder", "lo_float", "hi_float", "vacuous",
                 "banner_key", "level", "orbits", "spot_checks",
                 "by_orbit", "evaluated", "inferred", "cofactors", "squares",
@@ -217,12 +217,23 @@ def emit(res: Result, args) -> int:
         ce = res.meta.get("counterexample")
         if ce:
             print("  " + t("cli.counterexample" if res.verdict is Verdict.REFUTED
-                           else "cli.witness"))
+                           else "cli.point"))
             for k, v in sorted(ce.items()):
                 print("    {} = {}".format(k, v))
             _print_explained(res.certificate)
         for h in res.meta.get("hints") or []:
             print("  -> " + h)
+        for r in res.meta.get("regimes") or []:
+            key = {"inhabited": "cli.regime.inhabited", "EMPTY": "cli.regime.empty"}.get(
+                r["status"], "cli.regime.unknown")
+            print("  {}{}".format("!! " if r["status"] != "inhabited" else "",
+                                 t(key, name=r["regime"],
+                                   over=(t("cli.regime.integers") if r["integers"] is True
+                                         else t("cli.regime.integer_vars",
+                                                names=", ".join(r["integers"]))
+                                         if r["integers"] else ""),
+                                   witness=", ".join("{} = {}".format(k, v) for k, v in
+                                                     sorted((r.get("witness") or {}).items())[:6]))))
 
         for k, v in sorted(res.meta.items()):
             if k in _HIDDEN_META:
@@ -1055,7 +1066,9 @@ def cmd_check(args):
     from .spec import Spec, load_spec
 
     res = smt.check(load_spec(args.spec, Spec), limits_from(args),
-                    hypotheses_only=args.hypotheses_only)
+                    hypotheses_only=args.hypotheses_only,
+                    integers=getattr(args, "integers", False),
+                    regime=getattr(args, "regime", None))
     rc = emit(res, args)
     # A constant claim makes `check` decide something other than what the
     # shape of the spec suggests, and the verdict alone cannot say so.
@@ -2856,7 +2869,16 @@ def build_parser():
     sp.add_argument("--hypotheses-only", action="store_true",
                     dest="hypotheses_only",
                     help="drop the claim and ask whether the hypotheses alone "
-                         "have a model; on unsat, name the minimal clash")
+                         "have a model; on unsat, name the minimal clash. The "
+                         "spec's declared regimes (`s.regime(...)`) join them")
+    sp.add_argument("--integers", action="store_true",
+                    help="with --hypotheses-only: read every real variable as "
+                         "an integer -- non-vacuity where the quantities are "
+                         "counts, not only over the reals")
+    sp.add_argument("--regime", metavar="NAME",
+                    help="with --hypotheses-only: join this declared regime "
+                         "(`s.regime(NAME, ...)`) to the hypotheses; every "
+                         "declared regime is reported on its own either way")
     sp.set_defaults(func=cmd_check)
 
     sp = add("opt", "LP/ILP -> dual certificate in EXACT rationals")

@@ -194,10 +194,14 @@ def prove(spec, limits: Limits | None = None) -> Result:
                   if vacuous
                   else t("engine.prove.proved", used=len(used),
                          total=len(spec.assumptions)))
+        meta = {"hypotheses_used": used, "hypotheses_dropped": dropped,
+                "vacuous": vacuous, "clash": clash}
+        regimes = regime_report(spec, lim)
+        if regimes:
+            meta["regimes"] = regimes
         return Result(
             "prove", st, Verdict.PROVED, ENGINE, ms, cert, detail=detail,
-            meta={"hypotheses_used": used, "hypotheses_dropped": dropped,
-                  "vacuous": vacuous, "clash": clash},
+            meta=meta,
         )
 
     if st is Status.SAT:
@@ -289,7 +293,8 @@ def _constant_goal(goal):
 
 
 def check(spec, limits: Limits | None = None,
-          hypotheses_only: bool = False) -> Result:
+          hypotheses_only: bool = False, integers: bool = False,
+          regime: str | None = None) -> Result:
     """Plain satisfiability of hypotheses plus claim.
 
     With `hypotheses_only`, the claim is dropped and the question becomes "is
@@ -300,7 +305,7 @@ def check(spec, limits: Limits | None = None,
     lim = limits or Limits()
     t0 = time.perf_counter()
     if hypotheses_only:
-        return _hypotheses_only(spec, lim, t0)
+        return _hypotheses_only(spec, lim, t0, integers=integers, regime=regime)
     s, ind, formulas = _tracked(spec, negate_goal=False)
     lim.apply_to(s)
     all_names = list(formulas)
@@ -338,7 +343,48 @@ def _constant_meta(constant):
     return {} if constant is None else {"constant_goal": constant}
 
 
-def _hypotheses_only(spec, lim, t0) -> Result:
+def as_integers(formulas, names=None):
+    """REAL constants read as integers -- every one, or those in `names`: `x`
+    becomes `ToReal(x)` with an integer `x` of the same name. The formulas
+    keep their arithmetic; only the domain shrinks, which is the question a
+    count asks."""
+    reals = [c for c in z3util.free_consts(*formulas)
+             if c.sort() == z3.RealSort()
+             and (names in (None, True) or str(c) in names)]
+    subs = [(c, z3.ToReal(z3.Int(str(c)))) for c in reals]
+    if not subs:
+        return list(formulas)
+    return [z3.substitute(f, *subs) for f in formulas]
+
+
+def regime_report(spec, lim) -> list:
+    """For each declared regime: are the hypotheses inhabited THERE?
+
+    `[{"regime", "integers", "status": inhabited|EMPTY|unknown, "witness"}]`.
+    One satisfiability call each, under the same limits. An EMPTY regime is
+    the finding that matters: the theorem is vacuous where it was meant.
+    """
+    out = []
+    for name, expr, integers in getattr(spec, "regimes", None) or []:
+        fs = [f for _n, f in spec.assumptions] + [expr]
+        if integers:
+            fs = as_integers(fs, integers)
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.add(*fs)
+        r = s.check()
+        row = {"regime": name, "integers": integers,
+               "status": ("inhabited" if r == z3.sat
+                          else "EMPTY" if r == z3.unsat else "unknown")}
+        if r == z3.sat:
+            m = s.model()
+            row["witness"] = {str(d.name()): str(m[d]) for d in m.decls()
+                              if d.arity() == 0}
+        out.append(row)
+    return out
+
+
+def _hypotheses_only(spec, lim, t0, integers=False, regime=None) -> Result:
     """Is this regime non-empty? The question, asked directly.
 
     Satisfiable gives a MODEL: the parameter set exhibited rather than argued.
@@ -350,6 +396,25 @@ def _hypotheses_only(spec, lim, t0) -> Result:
 
     bare = copy.copy(spec)
     bare.goal = None
+    # THE REGIMES JOIN THE QUESTION, by name: "is the regime that matters
+    # non-empty" is the one this flag exists for, and a clash then names the
+    # regime condition it involves.
+    # ONE REGIME JOINS THE QUESTION, by name, when asked for: regimes are
+    # alternatives (`l >= 6`, `l >= 7`), not one conjunction. A clash then
+    # names the regime condition it involves. Every declared regime is also
+    # reported on its own below.
+    declared = {n: (e, i) for n, e, i in (getattr(spec, "regimes", None) or [])}
+    bare.assumptions = list(spec.assumptions)
+    if regime is not None:
+        if regime not in declared:
+            raise ValueError(t("engine.check.no_regime", name=regime,
+                               known=", ".join(declared) or "-"))
+        bare.assumptions.append(("regime:" + regime, declared[regime][0]))
+        integers = integers or declared[regime][1]
+    if integers:
+        names_ = [n for n, _ in bare.assumptions]
+        bare.assumptions = list(zip(names_, as_integers(
+            [f for _, f in bare.assumptions], integers)))
     s, ind, formulas = _tracked(bare, negate_goal=False)
     lim.apply_to(s)
     names = [n for n in formulas if n != "__goal__"]
@@ -365,8 +430,10 @@ def _hypotheses_only(spec, lim, t0) -> Result:
     if st is Status.SAT:
         cert = _model_cert(bare, formulas, s.model(), names)
         return Result("check", st, Verdict.SATISFIABLE, ENGINE, ms, cert,
-                      detail=t("engine.check.regime_nonempty", n=len(names)),
-                      meta={"hypotheses_only": True,
+                      detail=t("engine.check.regime_nonempty", n=len(names))
+                      + (" " + t("engine.check.over_integers") if integers else ""),
+                      meta={"hypotheses_only": True, "integers": integers,
+                            "regimes": regime_report(spec, lim),
                             "counterexample": {
                                 k: v[1] for k, v
                                 in cert.payload["assignment"].items()}})

@@ -2075,5 +2075,14 @@
   "lean.theorem.bad_name": "`{name}` no es un identificador de Lean por el que se pueda citar un teorema (letras, dígitos, `_`, partes separadas por puntos; ninguna palabra reservada)",
   "lean.theorem.nothing": "no hay ningún `example` en este archivo al que llamar `{name}`",
   "scope.cegis": "comprobado en el dominio acotado de entradas {domain}, no más allá",
-  "scope.cegis_none": "ninguna implementación con {impl} cumple el contrato en las entradas {domain}"
+  "scope.cegis_none": "ninguna implementación con {impl} cumple el contrato en las entradas {domain}",
+  "engine.check.over_integers": "(cada variable real leída como entera)",
+  "cli.regime.inhabited": "régimen {name}{over}: las hipótesis están habitadas ahí ({witness})",
+  "cli.regime.empty": "régimen {name}{over}: las hipótesis son VACÍAS ahí -- el teorema es vacuo en el régimen para el que se pensó",
+  "cli.regime.unknown": "régimen {name}{over}: no decidido dentro de los límites",
+  "cli.regime.integers": " sobre los enteros",
+  "engine.check.no_regime": "el spec no declara un régimen `{name}` (declarados: {known})",
+  "cli.point": "un punto donde se cumple cada fórmula:",
+  "cli.regime.integer_vars": " con {names} entero(s)",
+  "exists.too_many_cliques": "más de {n} cliques: demasiados candidatos para codificar; acótalos con max_size"
 }

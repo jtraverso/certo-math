@@ -29,6 +29,56 @@ from itertools import combinations
 
 from .i18n import t
 
+#: A product with at least this many term pairs is multiplied by FLINT's
+#: `fmpq_mpoly` when python-flint is installed. Below it, converting costs
+#: more than it saves. Exact either way: the same rationals in, the same
+#: rationals out -- a faster implementation of the same arithmetic, with the
+#: Python loop kept as the fallback and `CERTO_NO_FLINT=1` to force it.
+FLINT_FROM = 20_000
+
+_FLINT = []          # [module or None], resolved once
+
+
+def _flint():
+    if not _FLINT:
+        import os
+
+        mod = None
+        if not os.environ.get("CERTO_NO_FLINT"):
+            try:
+                import flint
+
+                if hasattr(flint, "fmpq_mpoly_ctx"):
+                    mod = flint
+            except Exception:  # noqa: BLE001 -- absent or broken: the fallback
+                mod = None
+        _FLINT.append(mod)
+    return _FLINT[0]
+
+
+def flint_in_use() -> bool:
+    """Whether large products go through FLINT in this process."""
+    return _flint() is not None
+
+
+def _flint_mul(a, b):
+    """`a * b` through `fmpq_mpoly`, or None when FLINT is not there. The
+    variables are renamed `v0, v1, ...` for the context: FLINT never sees a
+    user's name, and the exponent tuples carry the meaning."""
+    fl = _flint()
+    if fl is None:
+        return None
+    ctx = fl.fmpq_mpoly_ctx.get(tuple("v{}".format(i) for i in range(len(a.vars))),
+                                "lex")
+
+    def to(p):
+        return ctx.from_dict({e: fl.fmpq(c.numerator, c.denominator)
+                              for e, c in p.terms.items()})
+
+    prod = to(a) * to(b)
+    return {tuple(int(x) for x in e): Fraction(int(c.p), int(c.q))
+            for e, c in prod.to_dict().items()}
+
 
 class Budget(RuntimeError):
     """Buchberger ran past its budget. Says so; does not guess."""
@@ -179,6 +229,10 @@ class Poly:
         other = self._coerce(other)
         if other is NotImplemented:
             return other
+        if self.vars and len(self.terms) * len(other.terms) >= FLINT_FROM:
+            fast = _flint_mul(self, other)
+            if fast is not None:
+                return Poly._exact(self.vars, {e: c for e, c in fast.items() if c})
         out = {}
         for e1, c1 in self.terms.items():
             for e2, c2 in other.terms.items():

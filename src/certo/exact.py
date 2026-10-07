@@ -400,6 +400,93 @@ def support_candidates(P, x_float, y_float, y_alts=(), tol=1e-7):
                 yield None, y
 
 
+def dual_from_basis(A, c, y_float, tol=1e-7):
+    """The exact dual on the float dual's basis, or None.
+
+    Unknowns: the rows where `y_float` is non-zero (the rest are 0).
+    Equations: `sum_i A[i][j] y_i = c_j` for every column the float dual makes
+    TIGHT, `|reduced cost| <= tol (1 + |c_j|)`. Solved by elimination in
+    `Fraction`; None unless the system pins every unknown and is consistent.
+    Feasibility and optimality are NOT checked here -- `check_lp` decides.
+    """
+    m, n = len(A), len(c)
+    yf = [float(v or 0.0) for v in y_float]
+    S = [i for i in range(m) if abs(yf[i]) > tol]
+    if not S:
+        return None
+    tight = []
+    for j in range(n):
+        rc = sum(float(A[i][j]) * yf[i] for i in S) - float(c[j])
+        if abs(rc) <= tol * (1 + abs(float(c[j]))):
+            tight.append(j)
+    if len(tight) < len(S):
+        return None
+    M = [[Fraction(A[i][j]) for i in S] + [Fraction(c[j])] for j in tight]
+    r, piv = 0, []
+    for col in range(len(S)):
+        p = next((k for k in range(r, len(M)) if M[k][col] != 0), None)
+        if p is None:
+            return None                       # an unknown the columns do not pin
+        M[r], M[p] = M[p], M[r]
+        inv = Fraction(1) / M[r][col]
+        M[r] = [v * inv for v in M[r]]
+        for k in range(len(M)):
+            if k != r and M[k][col]:
+                f = M[k][col]
+                M[k] = [a - f * bb for a, bb in zip(M[k], M[r])]
+        piv.append(col)
+        r += 1
+    if any(M[k][-1] != 0 for k in range(r, len(M))):
+        return None                           # the tight columns disagree
+    y = [Fraction(0)] * m
+    for k, col in enumerate(piv):
+        y[S[col]] = M[k][-1]
+    return y
+
+
+def primal_from_basis(A, b, x_float, y, tol=1e-7):
+    """The exact primal on the float primal's SUPPORT, or None.
+
+    Unknowns: the columns where `x_float` is positive (the rest are 0).
+    Equations: every row the float primal makes tight, and every row the
+    exact dual `y` prices. On a degenerate vertex complementary slackness
+    alone leaves many columns free and `primal_from_dual` picks one solution
+    of an underdetermined system -- which violated rows it did not look at.
+    The float support pins the vertex. Unique or None; `check_lp` decides.
+    """
+    m, n = len(A), len(x_float)
+    xf = [float(v or 0.0) for v in x_float]
+    T = [j for j in range(n) if xf[j] > tol]
+    rows = []
+    for i in range(m):
+        slack = float(b[i]) - sum(float(A[i][j]) * xf[j] for j in T)
+        if y[i] > 0 or abs(slack) <= tol * (1 + abs(float(b[i]))):
+            rows.append(i)
+    if not T:
+        return [Fraction(0)] * n
+    M = [[Fraction(A[i][j]) for j in T] + [Fraction(b[i])] for i in rows]
+    r, piv = 0, []
+    for col in range(len(T)):
+        p = next((k for k in range(r, len(M)) if M[k][col] != 0), None)
+        if p is None:
+            return None
+        M[r], M[p] = M[p], M[r]
+        inv = Fraction(1) / M[r][col]
+        M[r] = [v * inv for v in M[r]]
+        for k in range(len(M)):
+            if k != r and M[k][col]:
+                f = M[k][col]
+                M[k] = [a - f * bb for a, bb in zip(M[k], M[r])]
+        piv.append(col)
+        r += 1
+    if any(M[k][-1] != 0 for k in range(r, len(M))):
+        return None
+    x = [Fraction(0)] * n
+    for k, col in enumerate(piv):
+        x[T[col]] = M[k][-1]
+    return x
+
+
 class Deadline(RuntimeError):
     """The reconstruction ran past the caller's clock. Nothing was found
     wrong; nothing exact was produced either."""
@@ -473,6 +560,28 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
             if rep["ok"]:
                 return x, y, rep, denom
 
+    # 1b. THE FLOAT DUAL'S BASIS, solved exactly. A simplex dual is a basic
+    # solution: its non-zero entries and the columns it makes tight determine
+    # it. Rounding it fails when its denominators are past the ladder --
+    # 2598216 on a 4130-column quotient, where every later pass then ran out
+    # of a two-minute budget -- but the linear system those two sets define
+    # does not care how large the denominators are. One elimination on the
+    # support, then the primal by complementary slackness, then `check_lp`.
+    for y_try in (y_float, *y_alts):
+        _late(deadline)
+        y = dual_from_basis(A_dense(), c, y_try)
+        if y is None:
+            continue
+        for x in (primal_from_basis(A_dense(), b, x_float, y),
+                  primal_from_dual(A_dense(), b, c, y)):
+            if x is None:
+                continue
+            rep = check_lp(P, b, c, x, y)
+            if rep["ok"]:
+                denom = max((v.denominator for v in list(x) + list(y)), default=1)
+                return x, y, rep, denom
+            last = rep
+
     # The primals worth pairing a dual against: feasibility is cheap and it
     # keeps the search below from running on a problem that is simply
     # infeasible.
@@ -525,7 +634,13 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
 
     _late(deadline)
     try:
-        y = minimise(A_dense(), b, c, deadline=deadline)
+        # The float solver's support, largest first: where the exact simplex
+        # should look for the optimal basis before anywhere else.
+        hint = sorted((j for j, v in enumerate(x_float or [])
+                       if v is not None and float(v) > 1e-9),
+                      key=lambda j: -float(x_float[j]))
+        y = minimise(A_dense(), b, c, deadline=deadline, hint=hint,
+                     x_hint=x_float)
     except SimplexLimit as e:
         if str(e) == "deadline":
             raise Deadline("deadline") from None
