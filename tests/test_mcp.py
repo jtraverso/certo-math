@@ -743,8 +743,7 @@ def test_farkas_takes_a_linear_program_over_mcp_and_returns_the_point():
 CLI_ONLY = {
     "batch": {"glob", "gz", "out"},           # writes into a directory tree
     "bisect": {"trace"}, "synth": {"trace"},   # terminal presentation
-    "ideal": {"progress"},
-    "verify": {"elaborate"},                  # runs a local Lean toolchain                     # lines on a terminal's stderr
+    "ideal": {"progress"},                     # lines on a terminal's stderr
     "cases": {"no_check", "proof", "solver_binary"},  # local files, binaries
     "columns": {"top"}, "opt": {"top"},        # rows printed to a terminal
     "assign": {"top"},
@@ -758,7 +757,8 @@ CLI_ONLY = {
     "report": {"certificate", "coverage", "stderr_file"},
     "repro": {"no_ledger"},
     "shrink": {"no_geng"}, "sweep": {"no_geng", "worst"},  # binary, printing
-    "verify": {"jobs", "md", "tamper", "tamper_all"},
+    "verify": {"jobs", "md", "tamper", "tamper_all",
+               "elaborate"},             # elaborate: runs a local Lean toolchain
 }
 
 #: The same option under another name on the tool: (command, CLI dest) ->
