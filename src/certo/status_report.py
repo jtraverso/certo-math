@@ -98,6 +98,13 @@ def _owed(data: dict) -> list:
     elif kind == "gap" and p.get("level") != "global_optimum":
         out.append({"sort": "not_claimed", "name": t("status.owed.optimal"),
                     "why": t("status.owed.gap", level=p.get("level", "?"))})
+    # Declared by the spec (`certo.card`), and carried: what this result is
+    # still PENDING on, and the published results its proof cited.
+    for name in (p.get("card") or {}).get("pending") or []:
+        out.append({"sort": "pending", "name": name,
+                    "why": t("status.owed.pending")})
+    for name, source in sorted((p.get("citations") or {}).items()):
+        out.append({"sort": "cited", "name": name, "why": source})
     return out
 
 
@@ -237,6 +244,9 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
             "spec": prov.get("spec_path"),
             "stale": _stale(data),
             "owed": _owed(data), "hollow": _hollow(data),
+            "role": ((data.get("payload") or {}).get("card") or {}).get("role"),
+            "pending": len(((data.get("payload") or {}).get("card") or {})
+                           .get("pending") or []),
             "children": [],
         }
         for child in _children(data):
@@ -267,6 +277,7 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
         if verify_all:
             rep = verify_cert(cert, limits)
             entry["verified"] = rep.ok
+            entry["degree"] = rep.degree
             if not rep.ok:
                 # The FAILING CHECKS, not rep.detail: the detail describes
                 # what the certificate claims about itself, and printing that
@@ -300,6 +311,9 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
         "broken": broken,
         "kinds": _count(n["kind"] for n in order),
         "versions": _count(n["version"] for n in order if n["version"]),
+        "degrees": _count(n["degree"] for n in order if n.get("degree")),
+        "roles": _count(n["role"] for n in order if n.get("role")),
+        "resting_on_pending": sum(1 for n in order if n.get("pending")),
     }
 
 

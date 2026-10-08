@@ -52,6 +52,13 @@ La escalera, con números de Ramsey como ejemplo:
   se cuelga en ejemplos de libro de texto. Por eso `qe` no está entre los
   comandos.
 
+- Una `card` -- rol, eslabón, pendientes -- es **declarada**, nunca
+  comprobada: dice para qué pensó el autor el resultado, y un PASS que descansa
+  sobre algo pendiente es condicional.
+- Un LP exacto resuelto desde la base del solver en flotante sigue siendo
+  **comprobado**, no creído: `check_lp` decide, sea cual sea la ruta que lo
+  encontró.
+
 **El nicho es claro:** descubrir objetos, destruir formulaciones falsas y
 minimizar hipótesis antes de pagar el coste de formalizarlas.
 

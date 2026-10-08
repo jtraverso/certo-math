@@ -123,7 +123,13 @@ def load(path, expected=None):
         raise NotData(_t("dataspec.no_type",
                          known=", ".join(BUILDABLE)))
 
-    obj = build(str(data["type"]), data)
+    obj = build(str(data["type"]), {k: v for k, v in data.items() if k != "card"})
+    if isinstance(data.get("card"), dict):
+        from . import card as _card
+
+        c = data["card"]
+        _card.declare(obj, role=c.get("role"), link=c.get("link"),
+                      pending=c.get("pending"))
     if expected is not None and not isinstance(obj, expected):
         raise TypeError(_t("spec.wrong_type", got=type(obj).__name__,
                            want=expected.__name__))

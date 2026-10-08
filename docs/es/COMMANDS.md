@@ -198,6 +198,16 @@ SATISFACIBLE  [sat]
   punto donde lo hacen
 ```
 
+**El régimen que importa.** Un teorema demostrado sobre los reales puede ser
+vacuo justo donde se pensó -- `l >= 6`, `l` entero -- y un modelo de las
+hipótesis en otra parte no dice nada de eso. Declara el régimen en el spec,
+`s.regime("l_ge_6", l >= 6, integers=["l"])` (`integers=True` lee toda variable
+real como entera); no es una hipótesis del teorema. `prove` informa entonces,
+para cada régimen declarado, si las hipótesis están habitadas ahí, con un
+testigo, o VACÍAS -- el teorema vacuo donde se pensó. `check --hypotheses-only
+--regime l_ge_6` une un régimen a las hipótesis (un choque lo nombra), y
+`--integers` lee las hipótesis solas sobre los enteros.
+
 ### `certo lint`
 
 **Pregunta** — ¿Está bien planteado este spec, antes de gastar el cómputo?
@@ -372,6 +382,11 @@ matriz*, no que uno dependa del otro. La regularidad de un cono la establece su
 propio `multiplicity == 1`; un Smith sobre ese retículo la corrobora y no la
 carga.
 
+**El agregado.** Bajo los recuentos por tipo, `status` dice cuánto está
+comprobado -- los grados, con `--verify` --, para qué son los resultados -- los
+roles declarados -- y cuántos descansan sobre algo declarado PENDIENTE, en cuyo
+caso un PASS aquí es condicional. Las dependencias pendientes y las hipótesis
+citadas se listan con lo que se sigue DEBIENDO.
 
 ### `certo report`
 
@@ -1608,6 +1623,13 @@ DEMOSTRADO  [unsat]
 
 ---
 
+**Todo clique como candidato.** "No hay partición en a lo más k cliques" es tan
+fuerte como el conjunto de candidatos; `certo.existence.cliques_of(n, edges)`
+construye todos los cliques del grafo -- aristas, triángulos, K4,
+`min_size`/`max_size` para acotarlos -- así la refutación es sobre el grafo y no
+sobre una lista (`examples/clique_partition.py`: el octaedro necesita cuatro
+cliques). `triangles_of` es el caso de tamaño tres.
+
 ## ¿Vale para todos los casos?
 
 ### `certo sweep`
@@ -2106,6 +2128,18 @@ ESTRUCTURALES -- listas vaciadas y acortadas, índices fuera de rango,
 subcertificados intercambiados, un valor reescrito en todas partes -- que es
 como se encontraron los arreglos de 0.22.
 
+**La ficha.** Tras las comprobaciones, `verify` imprime qué ES el resultado: su
+tipo y grado, el rol y el eslabón de la cadena a la que pertenece, su alcance,
+las hipótesis usadas y cuántas son citadas, de qué está PENDIENTE ("NO
+establecido aquí"), y su procedencia -- versiones que lo produjeron y lo
+verifican, esquema, id. Rol, eslabón y pendientes los declara el spec
+(`s.role("consumer").link("paso 3").pending("CP7")`, o
+`certo.card.declare(spec, ...)`, o `"card": {...}` en un spec JSON), viajan en
+el payload como el campo opcional `card` -- así cuentan en el digest -- y se
+marcan como DECLARADOS: nada de ellos se comprueba. `verify --json`, el `verify`
+del MCP y `api` llevan la ficha entera, con intérprete y ruta del paquete.
+Roles: `consumer`, `existence`, `refutation`, `finite_check`.
+
 ### `certo bind`
 
 **Pregunta** — ¿Da realmente el lema de Lean lo que supuso mi certificado?
@@ -2443,6 +2477,14 @@ Desktop. Listar es lo que hace por defecto, porque detener un servidor corta la
 sesión de ese cliente con él. Y cada respuesta MCP trae `certo_version`, más
 `stale: true` con un aviso cuando el código del servidor es más viejo que el
 paquete instalado.
+
+**Toda llamada tiene un plazo.** Cada llamada a una herramienta corre bajo un
+plazo de ejecución (`CERTO_MCP_CALL_S`, 600 s por defecto) que leen todos los
+motores, así que termina con TIEMPO AGOTADO y lo que tenía; a una llamada que
+no vuelve 15 s después la responde el vigilante, y con dos llamadas así todavía
+corriendo el servidor rechaza trabajo nuevo (`CircuitOpen`) hasta que terminen
+o se reinicie. `timeout_ms` conserva su significado: el presupuesto de una
+llamada al solver.
 
 Un servidor **huérfano** es uno cuyo cliente ya no existe: nadie podrá volver a
 hablarle. Desde 0.26.2 un servidor termina cuando termina su padre (un padre que

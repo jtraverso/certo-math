@@ -31,6 +31,13 @@ certificado lista las hipótesis citadas que la prueba USÓ, y `verify` nombra
 cada una como externa y no auditada -- se comprueba la implicación a partir de
 ella, no el resultado en sí.
 
+**Para qué es el resultado.** `s.role("consumer")` (o `existence`,
+`refutation`, `finite_check`), `s.link("paso 3 de la reducción")` y
+`s.pending("CP7", "realización física")` declaran el lugar del resultado en un
+argumento mayor y sobre qué descansa todavía. Viajan en el certificado y todo
+lector los muestra como DECLARADOS -- ver la ficha de `verify`. Todo tipo de
+spec los acepta; un spec JSON acepta `"card": {"role": ..., "pending": [...]}`.
+
 **Los enteros no son el valor por defecto.** `z3.Reals` hace real cada
 cantidad, que es un enunciado más débil cuando las cantidades son recuentos,
 pisos o residuos, y sus contraejemplos pueden ser espurios (`nu = -1/2`).
@@ -352,14 +359,14 @@ Las opciones comunes van **después** del subcomando:
 | Opción | Hace |
 |---|---|
 | `--json` | resultado legible por máquina en stdout |
-| `--oneline` | una línea separada por tabuladores: veredicto, estado, tipo, digest, ruta del certificado, detalle (`-` si falta); en `verify`: valid o invalid, grado, tipo, digest, ruta, detalle |
+| `--oneline` | una línea separada por tabuladores: veredicto, estado, tipo, digest, ruta del certificado, detalle (`-` si falta); en `verify`: valid o invalid, grado, tipo, digest, ruta, detalle. Un séptimo campo `pending=k` solo cuando el spec declara k dependencias pendientes |
 | `--cert FILE` | escribe aquí el certificado |
 | `--lang` | `en` o `es`; o pon `CERTO_LANG` |
 | `--timeout-ms` | reloj de pared, un tope y no el presupuesto |
 | `--rlimit` | el presupuesto de trabajo de Z3 — este es el reproducible |
 | `--max-memory-mb` | techo duro |
 | `--seed` | para los motores que toman uno |
-| `--deadline S` | la corrida ENTERA, reloj de pared; a los S segundos la pila de cada hilo va a stderr y certo sale con 2. O `CERTO_DEADLINE_S` |
+| `--deadline S` | la corrida ENTERA, reloj de pared: cada llamada al solver, motor y bucle lo lee y se detiene con TIEMPO AGOTADO y lo que tenía (sale con 2); los hijos (`geng`, `cbc`, `lake`) terminan con certo. Solo una llamada que nunca vuelve llega al respaldo -- la pila de cada hilo en stderr, unos segundos después. O `CERTO_DEADLINE_S` |
 | `--heartbeat S` | una línea en stderr cada S segundos mientras corre. O `CERTO_HEARTBEAT_S` |
 | `--enumerate-timeout-s` | reloj de una enumeración externa (`geng`), separado del de un solver; por defecto 120 |
 | `--max-output-mb` | cuánto puede imprimir una enumeración externa antes de detenerla; por defecto 64 |

@@ -29,7 +29,14 @@ from .spec import (BisectSpec, BoundSpec, DomainSpec, IdealSpec,
                    SynthSpec, load_spec)
 from .status import Result, Status, Verdict
 
-__version__ = "0.26.3"
+__version__ = "0.27.0"
+
+# `spec.role(...)`, `.link(...)`, `.pending(...)` on every spec type: the
+# card a certificate carries (`certo.card`).
+from . import card as _card  # noqa: E402
+
+_card.install(*[v for k, v in dict(globals()).items()
+                if isinstance(v, type) and (k.endswith("Spec") or k == "CNF")])
 
 __all__ = [
     "Spec", "SynthSpec", "LPSpec", "SweepSpec", "CNF", "CNFSpec",

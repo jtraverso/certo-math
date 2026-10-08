@@ -31,6 +31,13 @@ certificate lists the cited hypotheses the proof USED, and `verify` names each
 as external and not audited -- the implication from it is checked, the result
 itself is not.
 
+**What the result is for.** `s.role("consumer")` (or `existence`,
+`refutation`, `finite_check`), `s.link("step 3 of the reduction")` and
+`s.pending("CP7", "physical realisation")` declare the result's place in a
+larger argument and what it still rests on. They travel in the certificate
+and every reader shows them as DECLARED -- see `verify`'s card. Every spec
+type takes them; a JSON spec takes `"card": {"role": ..., "pending": [...]}`.
+
 **Integers are not the default.** `z3.Reals` makes every quantity real, which
 is a weaker claim when the quantities are counts, floors or residues, and its
 counterexamples can be spurious (`nu = -1/2`). Declare them with `z3.Int` /
@@ -344,14 +351,14 @@ Common options go **after** the subcommand:
 | Option | Does |
 |---|---|
 | `--json` | machine-readable result on stdout |
-| `--oneline` | one tab-separated line: verdict, status, kind, digest, certificate path, detail (`-` when absent); on `verify`: valid or invalid, degree, kind, digest, path, detail |
+| `--oneline` | one tab-separated line: verdict, status, kind, digest, certificate path, detail (`-` when absent); on `verify`: valid or invalid, degree, kind, digest, path, detail. A seventh field `pending=k` only when the spec declares k pending dependencies |
 | `--cert FILE` | write the certificate here |
 | `--lang` | `en` or `es`; or set `CERTO_LANG` |
 | `--timeout-ms` | wall clock, a backstop rather than the budget |
 | `--rlimit` | Z3's work budget — this is the reproducible one |
 | `--max-memory-mb` | hard ceiling |
 | `--seed` | for the engines that take one |
-| `--deadline S` | the WHOLE run, wall clock; at S seconds every thread's stack goes to stderr and certo exits 2. Or `CERTO_DEADLINE_S` |
+| `--deadline S` | the WHOLE run, wall clock: every solver call, engine and loop reads it and stops with TIMEOUT and what it had (exit 2); children (`geng`, `cbc`, `lake`) end with certo. Only a call that never returns meets the backstop -- every thread's stack on stderr, a few seconds later. Or `CERTO_DEADLINE_S` |
 | `--heartbeat S` | a line on stderr every S seconds while it runs. Or `CERTO_HEARTBEAT_S` |
 | `--enumerate-timeout-s` | clock for an external enumeration (`geng`), separate from a solver's; default 120 |
 | `--max-output-mb` | how much an external enumeration may print before it is stopped; default 64 |

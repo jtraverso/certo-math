@@ -54,7 +54,8 @@ check, `3` error. `lint` differs: `0` clean or notes only, `1` errors,
 `2` warnings. Scripts should branch on these, not on the text. A
 conclusive `0` is either answer: `--oneline` prints the verdict as the first
 tab-separated field (`proved`, `refuted`, `satisfiable`...; on `verify`,
-`valid` or `invalid`).
+`valid` or `invalid`), and a seventh field `pending=k` when the spec declared
+pending dependencies: a PASS that is conditional says so on the same line.
 
 `--deadline` stops a run with `2`, after printing every thread's stack. Any
 OTHER code is not certo's: `-1073741819` (`0xC0000005`) or `-1073740022`

@@ -198,6 +198,17 @@ SATISFIABLE  [sat]
   point where they do
 ```
 
+**The regime that matters.** A theorem proved over the reals can be vacuous
+exactly where it is meant -- `l >= 6`, `l` an integer -- and a model of the
+hypotheses somewhere else says nothing about it. Declare the regime in the spec,
+`s.regime("l_ge_6", l >= 6, integers=["l"])` (`integers=True` reads every real
+variable as an integer); it is not a hypothesis of the theorem. `prove` then
+reports, for each declared regime, whether the hypotheses are inhabited there,
+with a witness, or EMPTY -- the theorem vacuous where it was meant.
+`check --hypotheses-only --regime l_ge_6` joins one regime to the hypotheses (a
+clash then names it), and `--integers` reads the bare hypotheses over the
+integers.
+
 ### `certo lint`
 
 **Question** — Is this spec well-posed, before I spend the compute?
@@ -365,6 +376,11 @@ there is nothing to forge. An edge says *these two are about the same matrix*
 its own `multiplicity == 1`; a Smith certificate over the same lattice
 corroborates it and does not carry it.
 
+**The aggregate.** Under the counts by kind, `status` says how much is
+checked -- the degrees, with `--verify` -- what the results are for -- the
+declared roles -- and how many rest on something declared PENDING, in which
+case a PASS here is conditional. Pending dependencies and cited hypotheses are
+listed with what is still OWED.
 
 ### `certo report`
 
@@ -1577,6 +1593,13 @@ PROVED  [unsat]
 
 ---
 
+**Every clique as a candidate.** "No partition into at most k cliques" is only
+as strong as the candidate set; `certo.existence.cliques_of(n, edges)` builds
+every clique of the graph -- edges, triangles, K4s, `min_size`/`max_size` to
+bound them -- so the refutation is about the graph and not about a list
+(`examples/clique_partition.py`: the octahedron needs four cliques).
+`triangles_of` is the case of size three.
+
 ## Does it hold for every case?
 
 ### `certo sweep`
@@ -2059,6 +2082,18 @@ proof. `--tamper` adds the STRUCTURAL forgeries -- emptied and shortened
 lists, out-of-range indices, swapped sub-certificates, one value rewritten
 everywhere -- which is how the 0.22 fixes were found.
 
+**The card.** After the checks, `verify` prints what the result IS: its kind
+and degree, the role and link of the chain it belongs to, its scope, the
+hypotheses used and how many are cited, what it is PENDING on ("NOT
+established here"), and its provenance -- producing and verifying versions,
+schema, id. Role, link and pending are declared by the spec
+(`s.role("consumer").link("step 3").pending("CP7")`, or
+`certo.card.declare(spec, ...)`, or `"card": {...}` in a JSON spec), carried in
+the payload as the optional field `card` -- so they count in the digest -- and
+labelled DECLARED: nothing about them is checked. `verify --json`, the MCP
+`verify` and `api` carry the whole card, interpreter and package path
+included. Roles: `consumer`, `existence`, `refutation`, `finite_check`.
+
 ### `certo bind`
 
 **Question** — Does the Lean lemma actually give what my certificate assumed?
@@ -2388,6 +2423,13 @@ fresh ones: `/mcp` in Claude Code, or a restart of Claude Desktop. Listing is
 the default, because stopping a server ends that client's session with it.
 And every MCP answer carries `certo_version`, plus `stale: true` with a note
 when the server's code is older than the package installed.
+
+**Every call has a deadline.** Each tool call runs under a run deadline
+(`CERTO_MCP_CALL_S`, 600 s by default) that every engine reads, so it ends
+with TIMEOUT and what it had; a call that does not return 15 s after it is
+answered by the watchdog instead, and once two such calls are still running
+the server refuses new work (`CircuitOpen`) until they end or it is
+restarted. `timeout_ms` keeps its meaning: one solver call's budget.
 
 An **orphaned** server is one whose client is gone: nobody can talk to it
 again. Since 0.26.2 a server exits when its parent does (a parent that exits

@@ -171,8 +171,12 @@ def oneline(*fields) -> str:
 
 
 def emit(res: Result, args) -> int:
-    # Provenance: tie the certificate to the spec and version that made it.
+    # Provenance: tie the certificate to the spec and version that made it,
+    # and carry what the spec DECLARED about its role (`certo.card`).
     if res.certificate is not None:
+        from . import card as _card
+
+        _card.attach(res.certificate, getattr(args, "spec", None))
         res.certificate.stamp(getattr(args, "spec", None))
 
     # Self-verification, BEFORE anything is printed. A certificate that fails
@@ -186,11 +190,13 @@ def emit(res: Result, args) -> int:
         print(json.dumps(_as_json(res, args), indent=2, ensure_ascii=False))
     elif getattr(args, "oneline", False):
         c = res.certificate
+        pend = len(((c.payload or {}).get("card") or {}).get("pending") or []) \
+            if c is not None else 0
         print(oneline("invalid" if selfcheck is False else res.verdict.value,
                       res.status.value, c.kind if c is not None else None,
                       c.digest() if c is not None else None,
                       getattr(args, "cert", None) if c is not None else None,
-                      res.detail))
+                      res.detail, *(["pending={}".format(pend)] if pend else [])))
     else:
         head = banner(res)
         if selfcheck is False:
@@ -2303,10 +2309,15 @@ def cmd_verify(args):
                 else explain.proof_summary(cert))
         if rows:
             out["explained"] = rows
+        from . import card as _card
+
+        out["card"] = _card.card_of(cert, rep)
         print(json.dumps(out, indent=2, ensure_ascii=False))
     elif getattr(args, "oneline", False):
+        pend = len(((cert.payload or {}).get("card") or {}).get("pending") or [])
         print(oneline("valid" if rep.ok else "invalid", rep.degree, rep.kind,
-                      cert.digest(), args.certificate, rep.detail))
+                      cert.digest(), args.certificate, rep.detail,
+                      *(["pending={}".format(pend)] if pend else [])))
     else:
         print(t("cli.verify.header",
                 state=t("cli.verify.valid" if rep.ok else "cli.verify.invalid"),
@@ -2328,6 +2339,10 @@ def cmd_verify(args):
             # endorsement of the thing the checks above just refuted.
             print("  " + (rep.detail if rep.ok
                           else t("cli.verify.despite", detail=rep.detail)))
+        from . import card as _card
+
+        for line in _card.lines(_card.card_of(cert, rep)):
+            print("  " + line)
         if rep.ok:
             _print_explained(cert)
     return 0 if rep.ok else 1
@@ -2546,6 +2561,18 @@ def cmd_status(args):
     print(t("cli.status.header", n=rep["certificates"], path=rep["root"]))
     print("  " + "   ".join("{} {}".format(k, v)
                             for k, v in rep["kinds"].items()))
+    # The aggregate a reader needs before the list: how much of this is
+    # checked, what each result is FOR, and how much rests on something
+    # declared pending.
+    if rep.get("degrees"):
+        print("  " + t("cli.status.degrees", counts="   ".join(
+            "{} {}".format(k, v) for k, v in rep["degrees"].items())))
+    if rep.get("roles"):
+        print("  " + t("cli.status.roles", counts="   ".join(
+            "{} {}".format(k, v) for k, v in rep["roles"].items())))
+    if rep.get("resting_on_pending"):
+        print("  !! " + t("cli.status.resting", n=rep["resting_on_pending"],
+                          total=rep["certificates"]))
 
     _rows(t("cli.status.results", n=len(rep["results"])), rep["results"],
           lambda n: ["  {:<16} {:<30} {}".format(

@@ -170,6 +170,7 @@ def run(command: str, spec, limits=None, *, spec_path=None,
         raise TypeError("{} needs {}".format(
             command, ", ".join("`{}=`".format(m) for m in missing)))
 
+    declared_on = spec
     spec = routing.prepared(spec)
     wants = routing.SPEC_OF.get(command)
     got = type(spec).__name__
@@ -192,6 +193,10 @@ def run(command: str, spec, limits=None, *, spec_path=None,
 
     res = fn(spec, **call)
 
+    if res.certificate is not None:
+        from . import card as _card
+
+        _card.attach(res.certificate, spec_path, spec=declared_on)
     if res.certificate is not None and spec_path is not None:
         res.certificate.stamp(spec_path)
     if self_check and res.certificate is not None:

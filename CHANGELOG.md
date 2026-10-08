@@ -6,6 +6,66 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.27.0] — 2026-10-08
+
+**What a result is, one clock for a run, and an exact LP that closes.**
+No new commands (59) or kinds (57); the schema stays 5, with one optional
+field on every kind (`card`).
+
+### New
+
+- **The card.** A spec declares its result's role (`consumer`, `existence`,
+  `refutation`, `finite_check`), the link of the chain it belongs to, and
+  what it is still PENDING on: `s.role(...).link(...).pending("CP7")`, on
+  every spec type, or `"card": {...}` in a JSON spec. The certificate
+  carries it (optional field `card`, in the digest); `verify` prints the
+  card -- kind, degree, role and link, scope, hypotheses used and cited,
+  what is NOT established here, and the provenance (producing and verifying
+  versions, schema, id; interpreter and package in `--json`, the MCP and the
+  API). All of it labelled DECLARED: nothing about it is checked.
+- **Aggregates that say how much is checked.** `status` counts the degrees
+  (with `--verify`), the declared roles, and how many certificates rest on
+  something pending -- a PASS there is conditional -- and lists pending
+  dependencies and cited hypotheses with what is still owed. `--oneline`
+  adds a seventh field, `pending=k`, only when there is something pending.
+- **The regime that matters.** `s.regime("l_ge_6", l >= 6, integers=["l"])`
+  declares where the result is meant, which is not a hypothesis; `prove`
+  reports for each regime whether the hypotheses are inhabited there or
+  EMPTY (the theorem vacuous where it was meant). `check --hypotheses-only
+  --regime NAME`, and `--integers`.
+- **One clock for a run.** `--deadline` (and each MCP call) sets a run
+  deadline that every solver call, the engines with clocks of their own
+  (`ideal`, the exact LP, `profile`, CEGIS), sweeps and branch and bound
+  read: a run stops with TIMEOUT and what it had -- a sweep with the items
+  not reached named, branch and bound with its frontier certificate --
+  instead of being killed. Children (`geng`, `cbc`, `lake`) end with certo.
+  The hard stop stays as the backstop. `--timeout-ms` keeps its meaning.
+- **The MCP server under a watchdog.** Each tool call has a run deadline
+  (`CERTO_MCP_CALL_S`, 600 s); a call that does not come back is answered
+  without it, and past two such calls still running the server refuses new
+  work until they end (`CircuitOpen`).
+- **`cliques_of`**: every clique of a graph as a candidate, for "no
+  partition into k cliques" (`examples/clique_partition.py`).
+- **FLINT for large polynomial products** (`fmpq_mpoly`), exact, with the
+  Python loop as the fallback (`CERTO_NO_FLINT=1`): the parametric examples
+  run in 8.2 s instead of 11.7.
+
+### Fixed
+
+- **The exact LP on a large degenerate quotient closes.** A 4130-column
+  program never certified in a two-minute budget; the float dual is basic,
+  and its basis is now solved exactly (denominators past the ladder, 2598216
+  here), the primal from the float support: 3.5 s, verified complete. The
+  exact simplex solves a wide program as its primal, pivots sparsely, and its
+  phase 2 keeps the deadline (it ran past budgets).
+- **A Farkas core with an equality failed its own self-check.** An equality
+  is two rows and one name; requiring a name per row made `prove` report
+  INVALID for a correct proof.
+- A `check` model was labelled with a CNF witness line whose `{n}` and
+  `{names}` were never filled.
+- Branch and bound stopped by the run's deadline before its first design
+  says so, instead of blaming the residual LP.
+
 ## [0.26.3] — 2026-10-07
 
 **Corrections from four reports on 0.26.2, two of them wrong answers.**

@@ -2090,5 +2090,17 @@
   "mcp.watchdog": "`{tool}` did not return within {seconds} s, past the run deadline every engine reads: answered without it. Its thread may still be running; it cannot be stopped from here",
   "mcp.breaker": "{n} earlier calls passed the watchdog and are still running in this server: refusing new work until they end",
   "mcp.breaker.hint": "wait, or restart the server (`certo mcp restart --yes`, then reconnect the client); lower timeout_ms or CERTO_MCP_CALL_S to stop sooner",
-  "engine.bb.deadline_before_start": "TIMEOUT: the run's deadline passed before a starting design was found. Inconclusive -- nothing searched"
+  "engine.bb.deadline_before_start": "TIMEOUT: the run's deadline passed before a starting design was found. Inconclusive -- nothing searched",
+  "card.bad_role": "the role `{role}` is not one of: {known}",
+  "card.header": "CARD -- {kind}, verified {degree}",
+  "card.role": "role: {role}; link: {link}",
+  "card.scope": "about: {scope}",
+  "card.hypotheses": "hypotheses used: {n} ({cited} cited, external and not audited)",
+  "card.pending": "PENDING, NOT established here: {names}",
+  "card.provenance": "produced by certo {produced}, verified by {verified}; schema {schema}; id {digest}",
+  "card.declared": "(role, link and pending are DECLARED by the spec, not checked)",
+  "cli.status.degrees": "degrees: {counts}",
+  "cli.status.roles": "roles (declared): {counts}",
+  "cli.status.resting": "{n} of {total} certificates rest on something declared PENDING: a PASS here is conditional",
+  "status.owed.pending": "declared pending: not established by this certificate"
 }

@@ -16569,6 +16569,102 @@ def test_0_27_the_mcp_watchdog_answers_and_the_breaker_opens():
         assert not M._abandoned_alive()
 
 
+_CARD_SPEC = """import z3
+from certo import Spec
+R, R2, l = z3.Reals("R R2 l")
+def spec():
+    s = Spec()
+    s.assume("gain", R2 >= R + 1 - l)
+    s.assume("loss", l <= 1, cite="Lemma CP5")
+    s.claim(R2 >= R)
+    return s.role("consumer").link("retention, step 2").pending("CP7", "realisation")
+"""
+
+
+def test_0_27_a_spec_card_travels_with_its_certificate():
+    """Role, link and pending: declared in the spec, carried in the payload
+    (and its digest), shown by verify, --oneline and status as DECLARED."""
+    import io
+    import tempfile
+    from contextlib import redirect_stdout
+
+    from certo import card, store
+    from certo.certificate import Certificate, verify
+    from certo.cli import main
+    from certo.status_report import scan as report
+
+    d = pathlib.Path(tempfile.mkdtemp(prefix="certo_card_"))
+    f = d / "ret.py"
+    f.write_text(_CARD_SPEC, encoding="utf-8")
+    out = d / "ret.json"
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert main(["prove", str(f), "--cert", str(out), "--oneline"]) == 0
+    fields = buf.getvalue().strip().split("\t")
+    assert fields[0] == "proved" and fields[-1] == "pending=2", fields
+
+    cert = Certificate.from_dict(store.read_json(str(out)))
+    assert cert.payload["card"] == {"role": "consumer", "link": "retention, step 2",
+                                    "pending": ["CP7", "realisation"]}
+    rep = verify(cert)
+    assert rep.ok and rep.degree == "complete"   # declared, so not graded
+    c = card.card_of(cert, rep)
+    assert c["pending"] == ["CP7", "realisation"] and c["cited"] == {"loss": "Lemma CP5"}
+    assert c["provenance"]["produced_by"] and c["provenance"]["verified_by"]
+    assert c["provenance"]["digest"] == cert.digest()
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        main(["verify", str(out)])
+    text = buf.getvalue()
+    assert "CP7" in text and "DECLARED" in text
+
+    rep = report(str(d), verify_all=True)
+    assert rep["roles"] == {"consumer": 1} and rep["resting_on_pending"] == 1
+    assert rep["degrees"] == {"complete": 1}
+    owed = {(o["sort"], o["name"]) for o in rep["owed"]}
+    assert {("pending", "CP7"), ("pending", "realisation"), ("cited", "loss")} <= owed
+
+    # the card is part of the content: its digest moves with it
+    bare = cert.to_dict()
+    bare["payload"].pop("card")
+    assert Certificate.from_dict(bare).digest() != cert.digest()
+
+
+def test_0_27_a_card_through_the_api_and_a_json_spec():
+    import json
+    import tempfile
+
+    import z3
+
+    from certo import Spec, api, card
+    from certo.spec import load_spec
+
+    x = z3.Int("x")
+    s = Spec()
+    s.assume("h", x >= 3)
+    s.claim(x >= 1)
+    card.declare(s, role="existence", pending=["P"])
+    res = api.run("prove", s)
+    assert res.certificate.payload["card"]["role"] == "existence"
+
+    try:
+        card.declare(Spec(), role="theorem")
+    except ValueError as e:
+        assert "consumer" in str(e)
+    else:
+        raise AssertionError("an unknown role was accepted")
+
+    d = pathlib.Path(tempfile.mkdtemp(prefix="certo_card_json_"))
+    f = d / "s.json"
+    root = pathlib.Path(__file__).resolve().parent.parent
+    data = json.loads((root / "examples" / "lp_as_data.json").read_text(encoding="utf-8"))
+    data["card"] = {"role": "finite_check", "pending": ["Q"]}
+    f.write_text(json.dumps(data), encoding="utf-8")
+    obj = load_spec(str(f))
+    assert card.declared(obj) == {"role": "finite_check", "pending": ["Q"]}
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

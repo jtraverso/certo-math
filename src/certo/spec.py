@@ -593,9 +593,13 @@ def load_spec(path, expected=None, safe=False):
             raise PermissionError(t("spec.outside_root", path=str(p),
                                     root=str(r)))
 
+    from . import card as _card
+
     if p.suffix.lower() == ".json":
         from .dataspec import load as _load_data
-        return _load_data(p, expected)
+        obj = _load_data(p, expected)
+        _card.remember(p, obj)
+        return obj
     # The environment can force it for a whole process, which is how the MCP
     # server is protected with one line in `.mcp.json` rather than a parameter
     # on each of forty-six tools -- and a setting a caller cannot forget.
@@ -625,6 +629,7 @@ def load_spec(path, expected=None, safe=False):
     if expected is not None and not isinstance(obj, expected):
         raise TypeError(t("spec.wrong_type", got=type(obj).__name__,
                           want=expected.__name__))
+    _card.remember(p, obj)
     return obj
 
 

@@ -51,6 +51,12 @@ The ladder, with Ramsey numbers as the example:
 - Quantifier elimination over the reals is doubly exponential and hangs on
   textbook examples. That is why `qe` is not among the commands.
 
+- A `card` -- role, link, pending -- is **declared**, never checked: it says
+  what the author meant the result for, and a PASS that rests on something
+  pending is conditional.
+- An exact LP solved from the float solver's basis is still **checked**, not
+  believed: `check_lp` decides, whatever the route that found it.
+
 **The niche is clear:** discover objects, destroy false formulations and
 minimise hypotheses before paying the cost of formalising them.
 

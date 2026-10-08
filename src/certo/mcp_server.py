@@ -434,6 +434,9 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
     `recorded` between the run and its own verification.
     """
     if spec_file is not None and res.certificate is not None:
+        from . import card as _card
+
+        _card.attach(res.certificate, spec_file)
         res.certificate.stamp(spec_file)
 
     # Nothing may be printed here -- stdout is the protocol -- so the coverage
@@ -2552,7 +2555,9 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000) -> dict:
     # bridge that is asserted rather than derived, a vacuous proof, a sweep
     # whose predicate nothing certified. An ok=True with those removed is the
     # overclaim this tool exists to prevent.
-    return rep.to_dict()
+    from . import card as _card
+
+    return dict(rep.to_dict(), card=_card.card_of(cert, rep))
 
 
 @mcp.tool(description=(
