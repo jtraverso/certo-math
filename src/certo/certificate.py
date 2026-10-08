@@ -862,6 +862,60 @@ def ideal_certificate(variables, equations, claim, cofactors, inconsistent,
     )
 
 
+def propositional_refutation_certificate(core_smt2, names, dropped, proof,
+                                         nvars, nclauses, citations=None) -> Certificate:
+    """A Boolean core and a DRUP proof refuting its encoding (`boolenc`):
+    `verify` encodes the core again and checks the proof by unit propagation
+    -- no solver."""
+    from .boolenc import ENCODING
+
+    import z3
+
+    from . import z3util
+
+    # Each name WITH its formula: a list of names beside a list of formulas
+    # can be reordered without either changing, and a reader would quote a
+    # hypothesis for another's role.
+    fs = list(z3.parse_smt2_string(core_smt2))
+    pairs = [[n, z3util.smt2(f)] for n, f in zip(names, fs)]
+    payload = {"core_smt2": core_smt2, "names": names, "core": pairs,
+               "dropped": dropped, "encoding": ENCODING, "proof": proof,
+               "nvars": nvars, "nclauses": nclauses}
+    if citations:
+        payload["citations"] = dict(citations)
+    return Certificate(kind="propositional_refutation", solver_free=True,
+                       payload=payload,
+                       note_key="cert.note.propositional_refutation")
+
+
+def recurrence_table_certificate(universe, candidates, exact, table, minimum,
+                                 chosen) -> Certificate:
+    """The minimum number of candidates covering (or partitioning) the
+    universe, with the whole recurrence table over masks as its proof."""
+    return Certificate(
+        kind="recurrence_table",
+        solver_free=True,
+        payload={"universe": universe, "candidates": candidates,
+                 "exact": bool(exact), "minimum": minimum, "chosen": chosen,
+                 "table": [[format(M, "x"), v, j] for M, (v, j) in sorted(table.items())]},
+        note_key="cert.note.recurrence_table",
+    )
+
+
+def repair_refusal_certificate(universe, cliques, repair, step, problems) -> Certificate:
+    """A change of a partition that is NOT admissible, and why: the step
+    that fails and its problems -- an edge taken from an owner not withdrawn,
+    a frozen owner touched, a balance that is not the real one. `verify`
+    re-runs the same check and requires the same refusal."""
+    return Certificate(
+        kind="repair_refusal",
+        solver_free=True,
+        payload={"universe": universe, "cliques": bool(cliques),
+                 "repair": repair, "step": step, "problems": problems},
+        note_key="cert.note.repair_refusal",
+    )
+
+
 def cover_certificate(universe, parts, exact, cliques, multiplicities,
                       part_report=None, max_size=None, title="") -> Certificate:
     """Every element of the universe in exactly one part, and how many parts.
@@ -2071,7 +2125,7 @@ def obligations_of(sub: dict):
     import z3
 
     kind, p = sub.get("kind"), sub.get("payload", {})
-    if kind == "unsat_core":
+    if kind in ("unsat_core", "propositional_refutation"):
         return list(z3.parse_smt2_string(p["core_smt2"]))
     if kind == "farkas":
         from fractions import Fraction
@@ -3905,17 +3959,65 @@ def _verify_dependency_cycle(cert, limits) -> VerifyReport:
     )
 
 
+class _StatesMode(Exception):
+    """A binding that states its certificate discharges no hypothesis."""
+
+
 def _verify_lean_binding(cert, limits) -> VerifyReport:
     """Re-ask the entailment from the formulas the payload carries."""
     from . import binding
 
     p = cert.payload
-    got = binding.check(p, limits)
-    checks = [
-        (t("verify.bind.entails"), got["agrees"],
-         t("verify.bind.covers" if got["covers"] else "verify.bind.gap",
-           name=p["discharges"], decl=p["declaration"] or "-")),
-    ]
+    states = p.get("mode") == "states"
+    if states:
+        # No entailment: the binding is "this declaration states that
+        # certificate", decided by Lean. `covers` must be what was recorded.
+        lean0 = p.get("lean") or {}
+        checks = [(t("verify.bind.states"),
+                   bool(p.get("covers")) == (lean0.get("correspondence") == "kernel_checked"),
+                   lean0.get("correspondence") or "-")]
+    else:
+        got = binding.check(p, limits)
+        checks = [
+            (t("verify.bind.entails"), got["agrees"],
+             t("verify.bind.covers" if got["covers"] else "verify.bind.gap",
+               name=p["discharges"], decl=p["declaration"] or "-")),
+        ]
+    lean_notes = []
+    lean = p.get("lean")
+    kc = False
+    if isinstance(lean, dict):
+        from . import leanbind
+
+        kc = lean.get("correspondence") == "kernel_checked"
+        # What was recorded is consistent with what it claims...
+        consistent = (not kc) or (lean.get("compared_with_export") and
+                                  lean.get("axioms") is not None and
+                                  "sorryAx" not in (lean.get("axioms") or []))
+        checks.append((t("verify.bind.lean_recorded"), bool(consistent),
+                       "{} -- {}".format(lean.get("correspondence"),
+                                         (lean.get("elaborated_type") or "?")[:120])))
+        # ... and, when asked, Lean says it again.
+        if leanbind.wanted():
+            export = binding.export_for_check(p["source"]) if isinstance(
+                p.get("source"), dict) else None
+            res = leanbind.elaborate(lean.get("project") or ".", p["declaration"],
+                                     lean_file=lean.get("file") or None,
+                                     module=lean.get("module") or None,
+                                     export_text=export)
+            if res.get("ran"):
+                same = (res.get("type_sha256") == lean.get("type_sha256") and
+                        leanbind.correspondence(res) == lean.get("correspondence"))
+                checks.append((t("verify.bind.lean_again"), same,
+                               (res.get("type") or "?")[:120]))
+            else:
+                lean_notes.append(t("verify.bind.lean_not_run",
+                                    reason=res.get("reason", "")))
+        else:
+            lean_notes.append(t("verify.bind.lean_not_reread"))
+        if not kc:
+            lean_notes.append(_note("assumed", "verify.bind.user_asserted",
+                                    decl=p["declaration"] or "-"))
     # The certificate this binding is ABOUT, when it travelled. Without it the
     # payload named a path and nothing else: a binding pointing at a file that
     # does not exist, of a kind it never was, verified exactly like an honest
@@ -3952,6 +4054,8 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
         import z3
 
         try:
+            if states:
+                raise _StatesMode()
             sp = src.get("payload") or {}
             names = list(sp.get("names") or [])
             core = list(z3.parse_smt2_string(sp.get("core_smt2") or ""))
@@ -3959,20 +4063,31 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
             i = names.index(p["discharges"])
             named = (len(core) == len(names) and len(needed) == 1
                      and core[i].eq(needed[0]))
+        except _StatesMode:
+            named = None
         except (ValueError, KeyError, IndexError, z3.Z3Exception):
             named = False
-        checks.append((t("verify.bind.discharges"), named, p.get("discharges")))
+        if named is not None:
+            checks.append((t("verify.bind.discharges"), named, p.get("discharges")))
 
-    warnings = [t("verify.bind.bridge", decl=p["declaration"] or "-")]
+    # A bridge -- unless Lean established that the declaration's type IS the
+    # export of this certificate, in which case it is said as that.
+    warnings = [t("verify.bind.kernel_checked", decl=p["declaration"] or "-")
+                if kc else t("verify.bind.bridge", decl=p["declaration"] or "-")]
+    warnings += lean_notes
     if p["spec"].get("stale"):
         warnings.append(_note("partial", "verify.bind.stale", path=p["spec"]["path"]))
     if not p["covers"]:
-        warnings.append(t("verify.bind.does_not_cover", name=p["discharges"]))
+        warnings.append(t("verify.bind.does_not_state", decl=p["declaration"] or "-")
+                        if states else
+                        t("verify.bind.does_not_cover", name=p["discharges"]))
     return VerifyReport(
         all(x[1] for x in checks), "lean_binding", False, checks=checks,
         warnings=warnings, method_key="verify.bind.method",
-        detail=t("verify.bind.detail", decl=p["declaration"] or "-",
-                 name=p["discharges"], covers=str(p["covers"])),
+        detail=(t("verify.bind.detail_states", decl=p["declaration"] or "-",
+                  states=str(p["covers"])) if states else
+                t("verify.bind.detail", decl=p["declaration"] or "-",
+                  name=p["discharges"], covers=str(p["covers"]))),
     )
 
 
@@ -4762,9 +4877,36 @@ def _verify_ideal(cert, limits) -> VerifyReport:
         checks.append((t("verify.ideal.expands"), got == lhs,
                        t("verify.ideal.difference", d=str(got - lhs)[:60])))
 
+    # The substitutions, replayed: each must be the definition its equation
+    # IS at that point, so an edited one is refused even though the
+    # cofactors -- on the original equations -- would still expand.
+    if p.get("eliminated"):
+        from .polynomials import linear_definition, substitute
+
+        cur, ok_steps, active = list(gs), True, set(range(len(gs)))
+        for step in p["eliminated"]:
+            k, var = step.get("equation"), step.get("var")
+            if not isinstance(k, int) or k not in active or var not in variables:
+                ok_steps = False
+                break
+            r = Poly.parse(variables, step.get("by"))
+            d = linear_definition(cur[k]) if cur[k] else None
+            if d is None or d[0] != var or d[2] != r:
+                ok_steps = False
+                break
+            active.discard(k)
+            for j in active:
+                cur[j] = substitute(cur[j], var, r)
+        checks.append((t("verify.ideal.eliminated"), ok_steps,
+                       ", ".join(str(s.get("var")) for s in p["eliminated"])))
+
     warnings = []
     if p["inconsistent"]:
         warnings.append(t("verify.ideal.field"))
+    if p.get("nonzero"):
+        nz = [str(Poly.parse(variables, z)) for z in p["nonzero"]]
+        warnings.append(_note("assumed", "verify.ideal.nonzero",
+                              polys="; ".join(n + " != 0" for n in nz)[:300]))
     return VerifyReport(
         all(c[1] for c in checks), "ideal", True, checks=checks,
         warnings=warnings,
@@ -6339,6 +6481,131 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
     return rep
 
 
+def _verify_propositional_refutation(cert, limits) -> VerifyReport:
+    import z3
+
+    from . import boolenc, drup
+    from .limits import Limits
+
+    lim = limits or Limits()
+    p = cert.payload
+    fs = list(z3.parse_smt2_string(p["core_smt2"]))
+    names = list(p.get("names") or [])
+    pairs = list(p.get("core") or [])
+    named = (len(names) == len(fs) and len(set(names)) == len(names)
+             and len(pairs) == len(fs)
+             and [n for n, _s in pairs] == names)
+    if named:
+        try:
+            named = all(len(g) == 1 and g[0].eq(f) for (_n, s1), f in zip(pairs, fs)
+                        for g in [list(z3.parse_smt2_string(s1))])
+        except z3.Z3Exception:
+            named = False
+    known = p.get("encoding") == boolenc.ENCODING
+    try:
+        cnf = boolenc.encode(fs)
+        encoded, why = True, ""
+    except boolenc.NotPropositional as e:
+        cnf, encoded, why = None, False, str(e)
+    same = encoded and cnf.nvars == p.get("nvars") and len(cnf.clauses) == p.get("nclauses")
+    rep = drup.check(cnf.clauses, p.get("proof") or [],
+                     timeout_s=max(1.0, lim.timeout_ms / 1000)) if encoded else None
+    checks = [
+        (t("verify.core.named"), named, str(len(names))),
+        (t("verify.propref.encoding"), known and encoded and same,
+         why or "{} vars, {} clauses".format(p.get("nvars"), p.get("nclauses"))),
+        (t("verify.drat.steps"), bool(rep and rep.ok),
+         (rep.detail if rep else "")[:160]),
+        (t("verify.drat.empty"), bool(rep and rep.derived_empty), ""),
+    ]
+    out = VerifyReport(
+        all(c[1] for c in checks), "propositional_refutation", True,
+        checks=checks, warnings=_core_warnings(cert),
+        detail=t("verify.propref.detail", n=len(names),
+                 names=", ".join(n for n in names if n != "__goal__")[:200]))
+    out.timed_out = bool(rep is not None and getattr(rep, "timed_out", False))
+    return out
+
+
+def _verify_recurrence_table(cert, limits) -> VerifyReport:
+    """Every entry of the table against the recurrence; the minimum and the
+    chosen parts read off it. No search, no solver."""
+    from . import recurrence as R
+
+    p = cert.payload
+    universe = p["universe"]
+    n = len(universe)
+    _index, masks = R.masks_of(universe, p["candidates"])
+    table = {}
+    dup = False
+    for h, v, j in p["table"]:
+        M = int(h, 16)
+        dup = dup or M in table
+        table[M] = (v, j)
+    problems = R.check(n, masks, bool(p.get("exact", True)), table)
+    full = (1 << n) - 1
+    value = table.get(full, (None,))[0]
+    chosen = R.reconstruct(table, masks, n) if not problems else None
+    union = 0
+    for j in chosen or []:
+        union |= masks[j]
+    checks = [
+        (t("verify.recurrence.entries"), not problems and not dup,
+         ", ".join(sorted({k for k, _M in problems}))[:160]
+         or t("verify.recurrence.n", n=len(table))),
+        (t("verify.recurrence.minimum"), value == p.get("minimum"),
+         str(p.get("minimum"))),
+        (t("verify.recurrence.chosen"),
+         (value is None and not p.get("chosen")) or
+         (chosen == p.get("chosen") and union == full and len(chosen) == value),
+         str(len(p.get("chosen") or []))),
+    ]
+    ok = all(c[1] for c in checks)
+    return VerifyReport(
+        ok, "recurrence_table", True, checks=checks,
+        detail=(t("verify.recurrence.detail", k=value, n=n, c=len(masks))
+                if value is not None else
+                t("verify.recurrence.none", n=n, c=len(masks))))
+
+
+def _verify_repair_refusal(cert, limits) -> VerifyReport:
+    """Re-run the repair check; the refusal must be the one claimed -- same
+    step, same problems -- not merely SOME refusal."""
+    import json as _json
+
+    from .cover import check_repairs, repair_text
+
+    p = cert.payload
+    universe = [tuple(u) if isinstance(u, list) else u for u in p["universe"]]
+
+    def back(x):
+        # JSON lists back to the tuples `check_repair` keys resources by
+        if isinstance(x, dict):
+            return {k: back(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [tuple(e) if isinstance(e, list) else back(e) for e in x]
+        return x
+
+    repair = back(p["repair"]) if isinstance(p["repair"], dict) \
+        else [back(s) for s in p["repair"]]
+    rep = check_repairs(repair, universe, cliques=bool(p.get("cliques")))
+    got = _json.loads(_json.dumps([[k, v] for k, v in rep["problems"]], default=list))
+    refused = not rep["ok"]
+    same_step = rep.get("step") == p.get("step")
+    canon = lambda xs: sorted(_json.dumps(x, sort_keys=True) for x in xs)  # noqa: E731
+    same = canon(got) == canon(p.get("problems") or [])
+    checks = [
+        (t("verify.repair_refusal.refused"), refused, ""),
+        (t("verify.repair_refusal.step"), same_step,
+         str((p.get("step") or 0) + 1) if p.get("step") is not None else "-"),
+        (t("verify.repair_refusal.problems"), refused and same,
+         repair_text(rep["problems"])[:200]),
+    ]
+    return VerifyReport(
+        refused and same_step and same, "repair_refusal", True, checks=checks,
+        detail=t("verify.repair_refusal.detail", why=repair_text(rep["problems"])))
+
+
 def _verify_cnf_model(cert, limits) -> VerifyReport:
     from .cnf import CNF
 
@@ -7230,6 +7497,9 @@ VERIFIERS = {
     "integer_peak": _verify_integer_peak,
     "parametric_bound": _verify_parametric_bound,
     "exact_cover": _verify_exact_cover,
+    "repair_refusal": _verify_repair_refusal,
+    "recurrence_table": _verify_recurrence_table,
+    "propositional_refutation": _verify_propositional_refutation,
     "sos": _verify_sos,
     "number": _verify_number,
     "mixed_design": _verify_mixed_design,

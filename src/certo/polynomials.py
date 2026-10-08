@@ -391,7 +391,8 @@ def spoly(f: Poly, g: Poly):
     return mf * f - mg * g, mf, mg
 
 
-def groebner(gens, max_pairs=20_000, max_terms=20_000, deadline=None):
+def groebner(gens, max_pairs=20_000, max_terms=20_000, deadline=None,
+             progress=None, stats=None):
     """Buchberger, keeping each basis element written in the generators.
 
     The tracking is the reason this is not a call to a library. Knowing that
@@ -414,7 +415,22 @@ def groebner(gens, max_pairs=20_000, max_terms=20_000, deadline=None):
 
     pairs = list(combinations(range(len(basis)), 2))
     seen = 0
+    t_start = time.monotonic()
+    last = [t_start]
+
+    def report(final=False):
+        # At most once a second, and only sizes: no expression is printed.
+        now = time.monotonic()
+        if progress is None or (not final and now - last[0] < 1.0):
+            return
+        last[0] = now
+        progress({"phase": "search", "pairs_done": seen,
+                  "pairs_pending": len(pairs), "basis": len(basis),
+                  "max_terms": max((len(b.terms) for b in basis), default=0),
+                  "elapsed_s": round(now - t_start, 1), "final": final})
+
     while pairs:
+        report()
         i, j = pairs.pop()
         seen += 1
         if seen > max_pairs:
@@ -435,7 +451,125 @@ def groebner(gens, max_pairs=20_000, max_terms=20_000, deadline=None):
         basis.append(rem)
         track.append(row)
         pairs.extend((k, len(basis) - 1) for k in range(len(basis) - 1))
+    report(final=True)
+    if stats is not None:
+        stats.update({"pairs": seen, "basis": len(basis),
+                      "max_terms": max((len(b.terms) for b in basis), default=0)})
     return basis, track
+
+
+# --- linear definitions, eliminated and put back --------------------------
+
+
+def substitute(p: Poly, var: str, r: Poly) -> Poly:
+    """`p` with `var` replaced by `r` (which must not contain `var`)."""
+    vi = p.vars.index(var)
+    out = Poly(p.vars)
+    powers = {0: Poly.const(p.vars, 1)}
+    for e, c in p.terms.items():
+        d = e[vi]
+        if d not in powers:
+            powers[d] = r ** d
+        rest = list(e)
+        rest[vi] = 0
+        out = out + Poly(p.vars, {tuple(rest): c}) * powers[d]
+    return out
+
+
+def quotient_by_substitution(p: Poly, var: str, r: Poly) -> Poly:
+    """`q` with `p - p[var := r] = q * (var - r)`, exactly: for each term
+    `a * var^d`, `var^d - r^d = (var - r) * sum_{i<d} var^i r^(d-1-i)`."""
+    vi = p.vars.index(var)
+    v = Poly.var(p.vars, var)
+    q = Poly(p.vars)
+    for e, c in p.terms.items():
+        d = e[vi]
+        if d == 0:
+            continue
+        rest = list(e)
+        rest[vi] = 0
+        a = Poly(p.vars, {tuple(rest): c})
+        s = Poly(p.vars)
+        for i in range(d):
+            s = s + (v ** i) * (r ** (d - 1 - i))
+        q = q + a * s
+    return q
+
+
+def linear_definition(g: Poly, skip=()):
+    """`(var, c, r)` with `g = c * (var - r)`, `c` a non-zero RATIONAL and `r`
+    free of `var` -- a definition that can be substituted without dividing by
+    anything that might vanish -- or None. The first such variable in ring
+    order, so the choice is deterministic."""
+    for vi, var in enumerate(g.vars):
+        if var in skip:
+            continue
+        with_v = {e: c for e, c in g.terms.items() if e[vi]}
+        if len(with_v) != 1:
+            continue
+        (e, c), = with_v.items()
+        if e[vi] != 1 or any(x for k, x in enumerate(e) if k != vi):
+            continue
+        rest = Poly(g.vars, {e2: c2 for e2, c2 in g.terms.items() if not e2[vi]})
+        return var, c, rest.scaled(-1 / c)
+    return None
+
+
+def eliminate_linear(gs, target):
+    """Substitute every linear definition among `gs`, one at a time.
+
+    Returns `(steps, active, reduced_gs, reduced_target)`: `steps` is
+    `[(k, var, c, r, gs_before, target_before, active_before)]`, enough to put
+    the cofactors back (`lift`); `active` the indices of the equations left."""
+    cur = list(gs)
+    tgt = target
+    active = list(range(len(gs)))
+    steps = []
+    while True:
+        found = None
+        for k in active:
+            d = linear_definition(cur[k]) if cur[k] else None
+            if d is not None:
+                found = (k,) + d
+                break
+        if found is None:
+            break
+        k, var, c, r = found
+        steps.append((k, var, c, r, list(cur), tgt, list(active)))
+        active = [j for j in active if j != k]
+        for j in active:
+            cur[j] = substitute(cur[j], var, r)
+        tgt = substitute(tgt, var, r)
+    return steps, active, cur, tgt
+
+
+def lift(steps, active, hs_active, n):
+    """Cofactors of the reduced system (`hs_active[i]` for equation
+    `active[i]`) back to all `n` original equations, through the steps in
+    reverse: `f = sum h_j g_j + (q_f - sum h_j q_j) (v - r)` and
+    `v - r = g_k / c`."""
+    variables = None
+    h = {}
+    for j, hj in zip(active, hs_active):
+        h[j] = hj
+    for k, var, c, r, gs_before, tgt_before, active_before in reversed(steps):
+        variables = tgt_before.vars
+        qf = quotient_by_substitution(tgt_before, var, r)
+        acc = qf
+        for j in active_before:
+            if j == k or j not in h:
+                continue
+            acc = acc - h[j] * quotient_by_substitution(gs_before[j], var, r)
+        h[k] = acc.scaled(1 / c)
+    zero = None
+    out = []
+    for j in range(n):
+        if j in h:
+            out.append(h[j])
+        else:
+            zero = zero or Poly(variables or hs_active[0].vars)
+            out.append(zero)
+    return out
 
 
 def cofactors(f: Poly, gens, **budget):

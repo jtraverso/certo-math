@@ -164,8 +164,34 @@ def _with_farkas(cert, formulas, names, limits):
     return cert
 
 
-def prove(spec, limits: Limits | None = None) -> Result:
-    """Negate the claim and look for unsat. unsat => proved."""
+def _drat_of_core(smt2, names, dropped, lim, citations=None):
+    """The core, encoded by `boolenc` and refuted by the internal CDCL with a
+    DRUP proof checked here: `(certificate, None)`, or `(None, why not)`."""
+    from .. import boolenc, cdcl, drup
+    from ..certificate import propositional_refutation_certificate
+
+    fs = list(z3.parse_smt2_string(smt2))
+    try:
+        cnf = boolenc.encode(fs)
+    except boolenc.NotPropositional as e:
+        return None, str(e)
+    r = cdcl.solve(cnf.nvars, [c[:] for c in cnf.clauses],
+                   max_conflicts=lim.conflict_budget,
+                   timeout_s=max(1.0, lim.timeout_ms / 1000))
+    if r.status != "unsat" or not r.proof:
+        return None, t("engine.prove.drat_unsolved", detail=r.detail or r.status)
+    rep = drup.check(cnf.clauses, r.proof, timeout_s=max(1.0, lim.timeout_ms / 1000))
+    if not rep.ok or not rep.derived_empty:
+        return None, t("engine.prove.drat_bad", detail=rep.detail)
+    return propositional_refutation_certificate(
+        smt2, names, dropped, list(r.proof), cnf.nvars, len(cnf.clauses),
+        citations=citations), None
+
+
+def prove(spec, limits: Limits | None = None, drat: bool = False) -> Result:
+    """Negate the claim and look for unsat. unsat => proved. With `drat`, a
+    Boolean core comes back refuted by a DRUP proof over its own encoding,
+    checkable without a solver (`propositional_refutation`)."""
     lim = limits or Limits()
     t0 = time.perf_counter()
     s, ind, formulas = _tracked(spec, negate_goal=True)
@@ -196,6 +222,19 @@ def prove(spec, limits: Limits | None = None) -> Result:
                          total=len(spec.assumptions)))
         meta = {"hypotheses_used": used, "hypotheses_dropped": dropped,
                 "vacuous": vacuous, "clash": clash}
+        if drat:
+            alt, why = _drat_of_core(z3util.smt2(*[formulas[n] for n in core]),
+                                     core, dropped, lim, _cited(spec, core))
+            if alt is not None:
+                alt.payload["vacuous"] = bool(vacuous)
+                alt.payload["clash"] = clash or []
+                cert = alt
+                meta["drat"] = {"proof_lines": len(alt.payload["proof"]),
+                                "clauses": alt.payload["nclauses"]}
+            else:
+                # Not refused: the proof is still proved, with the core the
+                # old way, and the reason the DRAT route did not apply is said.
+                meta["drat_refused"] = why
         regimes = regime_report(spec, lim)
         if regimes:
             meta["regime_report"] = regimes

@@ -400,73 +400,12 @@ def support_candidates(P, x_float, y_float, y_alts=(), tol=1e-7):
                 yield None, y
 
 
-def dual_from_basis(A, c, y_float, tol=1e-7):
-    """The exact dual on the float dual's basis, or None.
-
-    Unknowns: the rows where `y_float` is non-zero (the rest are 0).
-    Equations: `sum_i A[i][j] y_i = c_j` for every column the float dual makes
-    TIGHT, `|reduced cost| <= tol (1 + |c_j|)`. Solved by elimination in
-    `Fraction`; None unless the system pins every unknown and is consistent.
-    Feasibility and optimality are NOT checked here -- `check_lp` decides.
-    """
-    m, n = len(A), len(c)
-    yf = [float(v or 0.0) for v in y_float]
-    S = [i for i in range(m) if abs(yf[i]) > tol]
-    if not S:
-        return None
-    tight = []
-    for j in range(n):
-        rc = sum(float(A[i][j]) * yf[i] for i in S) - float(c[j])
-        if abs(rc) <= tol * (1 + abs(float(c[j]))):
-            tight.append(j)
-    if len(tight) < len(S):
-        return None
-    M = [[Fraction(A[i][j]) for i in S] + [Fraction(c[j])] for j in tight]
+def _eliminate(M, unknowns):
+    """Gauss-Jordan on the rows `M` (coefficients, then the right-hand side),
+    in `Fraction`: the unique solution, or None when an unknown is not
+    pinned or the rows disagree."""
     r, piv = 0, []
-    for col in range(len(S)):
-        p = next((k for k in range(r, len(M)) if M[k][col] != 0), None)
-        if p is None:
-            return None                       # an unknown the columns do not pin
-        M[r], M[p] = M[p], M[r]
-        inv = Fraction(1) / M[r][col]
-        M[r] = [v * inv for v in M[r]]
-        for k in range(len(M)):
-            if k != r and M[k][col]:
-                f = M[k][col]
-                M[k] = [a - f * bb for a, bb in zip(M[k], M[r])]
-        piv.append(col)
-        r += 1
-    if any(M[k][-1] != 0 for k in range(r, len(M))):
-        return None                           # the tight columns disagree
-    y = [Fraction(0)] * m
-    for k, col in enumerate(piv):
-        y[S[col]] = M[k][-1]
-    return y
-
-
-def primal_from_basis(A, b, x_float, y, tol=1e-7):
-    """The exact primal on the float primal's SUPPORT, or None.
-
-    Unknowns: the columns where `x_float` is positive (the rest are 0).
-    Equations: every row the float primal makes tight, and every row the
-    exact dual `y` prices. On a degenerate vertex complementary slackness
-    alone leaves many columns free and `primal_from_dual` picks one solution
-    of an underdetermined system -- which violated rows it did not look at.
-    The float support pins the vertex. Unique or None; `check_lp` decides.
-    """
-    m, n = len(A), len(x_float)
-    xf = [float(v or 0.0) for v in x_float]
-    T = [j for j in range(n) if xf[j] > tol]
-    rows = []
-    for i in range(m):
-        slack = float(b[i]) - sum(float(A[i][j]) * xf[j] for j in T)
-        if y[i] > 0 or abs(slack) <= tol * (1 + abs(float(b[i]))):
-            rows.append(i)
-    if not T:
-        return [Fraction(0)] * n
-    M = [[Fraction(A[i][j]) for j in T] + [Fraction(b[i])] for i in rows]
-    r, piv = 0, []
-    for col in range(len(T)):
+    for col in range(unknowns):
         p = next((k for k in range(r, len(M)) if M[k][col] != 0), None)
         if p is None:
             return None
@@ -481,9 +420,92 @@ def primal_from_basis(A, b, x_float, y, tol=1e-7):
         r += 1
     if any(M[k][-1] != 0 for k in range(r, len(M))):
         return None
-    x = [Fraction(0)] * n
+    out = [None] * unknowns
     for k, col in enumerate(piv):
-        x[T[col]] = M[k][-1]
+        out[col] = M[k][-1]
+    return out
+
+
+def _sparse(A, b, c):
+    """`A` as a `Prepared`, for the routes below: they read rows and columns
+    sparsely and never build the dense matrix -- 218 rows by 66 017 columns
+    is fourteen million entries."""
+    if isinstance(A, Prepared):
+        return A
+    return Prepared(A, b if b is not None else [0] * len(A), c)
+
+
+def dual_from_basis(A, c, y_float, tol=1e-7):
+    """The exact dual on the float dual's basis, or None.
+
+    Unknowns: the rows where `y_float` is non-zero (the rest are 0).
+    Equations: `sum_i A[i][j] y_i = c_j` for every column the float dual makes
+    TIGHT, `|reduced cost| <= tol (1 + |c_j|)`. Solved by elimination in
+    `Fraction`; None unless the system pins every unknown and is consistent.
+    Feasibility and optimality are NOT checked here -- `check_lp` decides.
+    """
+    P = _sparse(A, None, c)
+    m, n = len(P.rows), len(P.c)
+    yf = [float(v or 0.0) for v in y_float]
+    S = [i for i in range(m) if abs(yf[i]) > tol]
+    if not S:
+        return None
+    pos = {i: k for k, i in enumerate(S)}
+    tight = []
+    for j in range(n):
+        rc = sum(float(f) * yf[i] for i, f in P.cols[j] if i in pos) - float(P.c[j])
+        if abs(rc) <= tol * (1 + abs(float(P.c[j]))):
+            tight.append(j)
+    if len(tight) < len(S):
+        return None
+    M = []
+    for j in tight:
+        row = [Fraction(0)] * len(S) + [P.c[j]]
+        for i, f in P.cols[j]:
+            if i in pos:
+                row[pos[i]] = f
+        M.append(row)
+    sol = _eliminate(M, len(S))
+    if sol is None:
+        return None
+    y = [Fraction(0)] * m
+    for k, i in enumerate(S):
+        y[i] = sol[k]
+    return y
+
+
+def primal_from_basis(A, b, x_float, y, tol=1e-7):
+    """The exact primal on the float primal's SUPPORT, or None.
+
+    Unknowns: the columns where `x_float` is positive (the rest are 0).
+    Equations: every row the float primal makes tight, and every row the
+    exact dual `y` prices. On a degenerate vertex complementary slackness
+    alone leaves many columns free and `primal_from_dual` picks one solution
+    of an underdetermined system -- which violated rows it did not look at.
+    The float support pins the vertex. Unique or None; `check_lp` decides.
+    """
+    P = _sparse(A, b, [0] * len(x_float))
+    m, n = len(P.rows), len(x_float)
+    xf = [float(v or 0.0) for v in x_float]
+    T = [j for j in range(n) if xf[j] > tol]
+    if not T:
+        return [Fraction(0)] * n
+    pos = {j: k for k, j in enumerate(T)}
+    M = []
+    for i in range(m):
+        slack = float(P.b[i]) - sum(float(f) * xf[j] for j, f in P.rows[i] if j in pos)
+        if y[i] > 0 or abs(slack) <= tol * (1 + abs(float(P.b[i]))):
+            row = [Fraction(0)] * len(T) + [P.b[i]]
+            for j, f in P.rows[i]:
+                if j in pos:
+                    row[pos[j]] = f
+            M.append(row)
+    sol = _eliminate(M, len(T))
+    if sol is None:
+        return None
+    x = [Fraction(0)] * n
+    for k, j in enumerate(T):
+        x[j] = sol[k]
     return x
 
 
@@ -569,11 +591,14 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
     # support, then the primal by complementary slackness, then `check_lp`.
     for y_try in (y_float, *y_alts):
         _late(deadline)
-        y = dual_from_basis(A_dense(), c, y_try)
+        y = dual_from_basis(P, c, y_try)
         if y is None:
             continue
-        for x in (primal_from_basis(A_dense(), b, x_float, y),
-                  primal_from_dual(A_dense(), b, c, y)):
+        # The support first, sparsely; complementary slackness -- which
+        # needs the dense matrix -- only if the support does not pin it.
+        for route in (lambda: primal_from_basis(P, b, x_float, y),
+                      lambda: primal_from_dual(A_dense(), b, c, y)):
+            x = route()
             if x is None:
                 continue
             rep = check_lp(P, b, c, x, y)

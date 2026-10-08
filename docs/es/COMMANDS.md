@@ -50,6 +50,17 @@ REFUTADO  [sat]
   certificado: model (no necesita solver, id 1a76b821f2cafa42)
 ```
 
+**`--drat`: un núcleo booleano sin solver.** Cuando el núcleo es booleano --
+incidencias, `And`/`Or`/`Implies`, `If`, `AtMost`/`AtLeast`, y conteos
+`Sum(If(b, 1, 0)) <= k` en cualquier parte de una fórmula -- `prove --drat` lo
+codifica con la codificación determinista de certo (un contador secuencial
+por conteo), lo refuta con el CDCL interno y devuelve un
+`propositional_refutation`: el núcleo, cada nombre con su fórmula, y una prueba
+DRUP. `verify` vuelve a codificar el núcleo y comprueba la prueba por
+propagación unitaria -- sin solver en la base de confianza
+(`examples/hall_drat.py`). Un núcleo que no es booleano conserva su
+certificado `unsat_core` y la corrida dice por qué (`drat_refused`).
+
 ### `certo core`
 
 **Pregunta** — ¿Qué hipótesis necesita realmente?
@@ -1809,6 +1820,19 @@ respuesta negativa es `REFUTADO`, no `unknown_solver`. Eso es raro en esta
 herramienta y vale la pena usarlo: `prove` sobre un sistema de igualdades
 polinomiales puede atascarse donde esto responde.
 
+**Los cofactores que ya tienes** van en el spec, `IdealSpec(cofactors=[...])`,
+uno por ecuación (0 donde no se usa): certo expande la combinación -- la
+comprobación que hace `verify` -- y no busca nada; un cofactor equivocado
+vuelve con su residuo (`examples/ideal_supplied.py`). **`--eliminate-linear`**
+(o `eliminate_linear=True`) sustituye primero cada definición con pivote
+RACIONAL no nulo, resuelve el sistema menor y devuelve los cofactores a las
+ecuaciones ORIGINALES; cada sustitución se registra y `verify` la reproduce,
+rechazando una editada. **`nonzero=[...]`** declara los denominadores
+limpiados para llegar a los polinomios: la identidad vale donde no se anulan,
+el grado es `relative`, y `status` los lista como deuda. **`--progress`**
+imprime, a lo más una vez por segundo, los pares hechos y pendientes, el
+tamaño de la base y el mayor número de términos -- nunca una expresión.
+
 ### `certo eliminate`
 
 **Pregunta** — Quita `t` y dime la condición sobre `s`
@@ -1995,6 +2019,22 @@ certificado de inadmisibilidad.
 
 ---
 
+**`--minimum`: el óptimo, no una cota.** Con `candidates` (cliques de
+`cliques_of`, por ejemplo), `cover --minimum` demuestra el MÍNIMO número de
+candidatos que parten el universo (que lo cubren, con `exact=False`) por una
+recurrencia sobre máscaras -- el menor elemento restante debe estar en alguna
+parte elegida, así que ramificar sobre sus candidatos no pierde nada. El
+certificado `recurrence_table` lleva cada estado que alcanzó la recurrencia,
+con su valor y su elección, y `verify` comprueba cada uno contra sus hijos:
+optimalidad y exhaustividad, sin solver
+(`examples/clique_partition_minimum.py`: el octaedro necesita cuatro cliques).
+Hasta 62 elementos; `--max-states` acota la tabla.
+
+**Una reparación rechazada queda sellada.** Una reparación no admisible
+devuelve un certificado `repair_refusal` -- el cambio, el paso que falla y por
+qué -- y `verify` vuelve a ejecutar la misma comprobación y exige el mismo
+rechazo (`examples/repair_refused.py`).
+
 ## Construir, ensamblar, conservar
 
 ### `certo synth`
@@ -2169,6 +2209,23 @@ pueda contarlo.
 **Un spec que se movió se reporta obsoleto** en vez de leerse como si no. El
 certificado lleva el hash del archivo del que salió, y una vinculación
 comprobada contra un enunciado que ha cambiado sería peor que ninguna.
+
+**Lean lee la declaración.** Con `lean_project` y `lean_file` (o
+`lean_module`) en el `BindSpec`, `bind` ejecuta Lean una vez: se registran el
+tipo ELABORADO de la declaración, su hash y sus axiomas. Dos modos:
+
+* **con `discharges`** -- la declaración aporta una hipótesis, como antes:
+  `provides` sigue siendo tu transcripción, y la correspondencia es
+  `user_asserted`; el tipo registrado detecta un enunciado que cambia.
+* **sin `discharges`** -- la declaración ENUNCIA el certificado: certo
+  regenera su propia exportación del certificado y le pregunta al kernel de
+  Lean `type_of% @D = type_of% @Export := rfl`. Aceptado, sin `sorryAx`, el
+  enlace queda DEMOSTRADO y `kernel_checked`; si no, REFUTADO -- una identidad
+  correcta enlazada al teorema equivocado, o a uno cuya hipótesis cambió.
+
+`verify --elaborate` (o `CERTO_LEAN_ELABORATE=1`) vuelve a ejecutar Lean y
+rechaza un tipo que cambió. La importación de Mathlib hace que cada corrida
+tome un minuto o más.
 
 ### `certo export`
 

@@ -852,12 +852,13 @@ def _spec_tool(engine_call, expected=None):
     "counterexample that verifies without a solver."))
 @_guard
 async def prove(spec_path: str | None = None, spec_source: str | None = None,
-                timeout_ms: int = 10_000, rlimit: int = 20_000_000) -> dict:
+                timeout_ms: int = 10_000, rlimit: int = 20_000_000,
+                drat: bool = False) -> dict:
     from .engines import smt
     from .spec import Spec
 
     return await _spec_tool(smt.prove, Spec)(spec_path, spec_source,
-                                             timeout_ms, rlimit)
+                                             timeout_ms, rlimit, drat=drat)
 
 
 @mcp.tool(description=(
@@ -1047,13 +1048,14 @@ async def mixed(spec_path: str | None = None, spec_source: str | None = None,
     "grinding on polynomial equalities."))
 @_guard
 async def ideal(spec_path: str | None = None, spec_source: str | None = None,
-                timeout_ms: int = 60_000) -> dict:
+                timeout_ms: int = 60_000, eliminate_linear: bool = False) -> dict:
     from .engines import algebra
     from .spec import IdealSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     sp = await _off(load_spec, f, IdealSpec)
-    res = await _off(algebra.ideal, sp, _limits(timeout_ms), str(f))
+    res = await _off(algebra.ideal, sp, _limits(timeout_ms), str(f), None,
+                     True if eliminate_linear else None)
     out = _emit(res, spec_file=f)
     out["cofactors"] = res.meta.get("cofactors")
     return out
@@ -1074,15 +1076,21 @@ async def ideal(spec_path: str | None = None, spec_source: str | None = None,
 async def cover(spec_path: str | None = None, spec_source: str | None = None,
                 timeout_ms: int = 60_000, optimize: bool = False,
                 prove_optimal: bool = False, max_nodes: int = 5000,
-                wall_timeout_ms: int | None = None) -> dict:
+                wall_timeout_ms: int | None = None, minimum: bool = False,
+                max_states: int | None = None) -> dict:
     """`optimize` adds the other side: the relaxation's bound on the cover
     number and, with `prove_optimal`, the integer optimum by branch and
-    bound -- each labelled with what it IS."""
+    bound -- each labelled with what it IS. `minimum` proves the minimum
+    number of `candidates` by a recurrence over masks, the whole table its
+    certificate (solver-free)."""
     from .engines import algebra
     from .spec import CoverSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), CoverSpec)
+    if minimum:
+        return _emit(await _off(algebra.cover_minimum, spec, _limits(timeout_ms),
+                                str(f), max_states), spec_file=f)
     res = await _off(algebra.cover, spec, _limits(timeout_ms), str(f))
     out = _emit(res, spec_file=f)
     if optimize and res.certificate is not None:

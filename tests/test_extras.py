@@ -16665,6 +16665,248 @@ def test_0_27_a_card_through_the_api_and_a_json_spec():
     assert card.declared(obj) == {"role": "finite_check", "pending": ["Q"]}
 
 
+def test_0_28_a_boolean_core_is_refuted_by_drat_without_a_solver():
+    """`prove --drat`: a Hall core with capacities, encoded by certo,
+    refuted by a DRUP proof that `verify` re-checks by unit propagation."""
+    import z3
+
+    from certo import Spec
+    from certo.certificate import verify
+    from certo.engines import smt
+
+    x = {(i, o): z3.Bool("x_%d_%d" % (i, o)) for i in range(5) for o in range(2)}
+    s = Spec()
+    for i in range(5):
+        s.assume("item%d" % i, z3.Or([x[i, o] for o in range(2)]))
+    for o in range(2):
+        s.assume("cap%d" % o, z3.Sum([z3.If(x[i, o], 1, 0) for i in range(5)]) <= 2)
+    s.claim(z3.BoolVal(False))
+    res = smt.prove(s, drat=True)
+    cert = res.certificate
+    assert cert.kind == "propositional_refutation" and cert.solver_free
+    rep = verify(cert)
+    assert rep.ok and rep.degree == "complete", rep.detail
+    # a proof that stops short of the empty clause is refused
+    d = cert.to_dict()
+    d["payload"]["proof"] = d["payload"]["proof"][:1]
+    assert not verify(d).ok
+    # a core edited to something weaker no longer encodes to what the proof refutes
+    d = cert.to_dict()
+    d["payload"]["core_smt2"] = d["payload"]["core_smt2"].replace("2", "3", 1)
+    assert not verify(d).ok
+
+    # a core that is not Boolean keeps unsat_core, and says why
+    r = z3.Real("r")
+    s2 = Spec()
+    s2.assume("pos", r > 1)
+    s2.claim(r > 0)
+    out = smt.prove(s2, drat=True)
+    assert out.certificate.kind == "unsat_core" and "drat_refused" in out.meta
+
+
+def test_0_28_the_boolean_encoding_agrees_with_z3():
+    import random
+
+    import z3
+
+    from certo import boolenc, cdcl, drup
+
+    rng = random.Random(3)
+    V = z3.Bools("a b c d")
+
+    def rnd(d):
+        if d == 0 or rng.random() < 0.3:
+            return rng.choice(V)
+        k = rng.choice(["and", "or", "not", "imp", "iff", "xor", "ite", "am", "cnt"])
+        if k == "and":
+            return z3.And(rnd(d - 1), rnd(d - 1))
+        if k == "or":
+            return z3.Or(rnd(d - 1), rnd(d - 1))
+        if k == "not":
+            return z3.Not(rnd(d - 1))
+        if k == "imp":
+            return z3.Implies(rnd(d - 1), rnd(d - 1))
+        if k == "iff":
+            return rnd(d - 1) == rnd(d - 1)
+        if k == "xor":
+            return z3.Xor(rnd(d - 1), rnd(d - 1))
+        if k == "ite":
+            return z3.If(rnd(d - 1), rnd(d - 1), rnd(d - 1))
+        xs = rng.sample(V, rng.randint(1, 4))
+        if k == "am":
+            return z3.AtMost(*xs, rng.randint(0, 4))
+        return z3.Sum([z3.If(v, 1, 0) for v in xs]) == rng.randint(0, 4)
+
+    for _ in range(150):
+        fs = [rnd(3) for _ in range(rng.randint(1, 3))]
+        sol = z3.Solver()
+        sol.add(*fs)
+        cnf = boolenc.encode(fs)
+        r = cdcl.solve(cnf.nvars, [c[:] for c in cnf.clauses])
+        assert (r.status == "sat") == (sol.check() == z3.sat), fs
+        if r.status == "unsat":
+            rep = drup.check(cnf.clauses, r.proof)
+            assert rep.ok and rep.derived_empty
+        assert boolenc.encode(fs).clauses == cnf.clauses
+
+
+def test_0_28_a_refused_repair_is_a_certificate():
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import load_spec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    res = algebra.cover(load_spec(str(root / "examples" / "repair_refused.py")))
+    assert res.verdict is Verdict.REFUTED
+    cert = res.certificate
+    assert cert is not None and cert.kind == "repair_refusal"
+    assert verify(cert).ok
+    # a refusal for another reason than the real one is refused
+    d = cert.to_dict()
+    d["payload"]["problems"] = [["cover.repair.balance", {"declared": 3, "real": 2}]]
+    assert not verify(d).ok
+    # an admissible repair cannot be sealed as refused
+    d = cert.to_dict()
+    d["payload"]["repair"]["insert"] = {"A1": [0, 1, 2]}
+    d["payload"]["repair"]["balance"] = 0
+    assert not verify(d).ok
+
+
+def test_0_28_the_minimum_by_a_recurrence_over_masks():
+    import itertools
+    import random
+
+    from certo import recurrence as R
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import load_spec
+
+    rng = random.Random(9)
+    for _ in range(120):
+        n, k = rng.randint(1, 7), rng.randint(1, 8)
+        masks = [rng.randint(1, (1 << n) - 1) for _ in range(k)]
+        for exact in (True, False):
+            tab = R.solve(n, masks, exact=exact)
+            best = None
+            for r in range(1, k + 1):
+                for comb in itertools.combinations(range(k), r):
+                    u, ok = 0, True
+                    for j in comb:
+                        if exact and u & masks[j]:
+                            ok = False
+                            break
+                        u |= masks[j]
+                    if ok and u == (1 << n) - 1:
+                        best = r
+                        break
+                if best:
+                    break
+            assert tab[(1 << n) - 1][0] == best
+            assert not R.check(n, masks, exact, tab)
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    res = algebra.cover_minimum(load_spec(str(root / "examples" / "clique_partition_minimum.py")))
+    assert res.verdict is Verdict.PROVED and res.meta["minimum"] == 4
+    cert = res.certificate
+    assert cert.kind == "recurrence_table" and verify(cert).ok
+    # a better value claimed somewhere is caught by its own recurrence
+    d = cert.to_dict()
+    row = next(r for r in d["payload"]["table"] if r[1] and r[1] > 1)
+    row[1] -= 1
+    assert not verify(d).ok
+    # a state dropped from the table leaves a parent without its child
+    d = cert.to_dict()
+    d["payload"]["table"] = [r for r in d["payload"]["table"] if r[1] != 1]
+    assert not verify(d).ok
+    d = cert.to_dict()
+    d["payload"]["minimum"] = 3
+    assert not verify(d).ok
+
+
+def test_0_28_ideal_supplied_eliminated_and_nonzero():
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import IdealSpec, load_spec
+
+    import z3
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = load_spec(str(root / "examples" / "ideal_supplied.py"))
+    res = algebra.ideal(spec)
+    assert res.verdict is Verdict.PROVED and res.meta["searched"] is False
+    assert verify(res.certificate).ok
+    spec.cofactors = [spec.cofactors[0] + 1, spec.cofactors[1]]
+    bad = algebra.ideal(spec)
+    assert bad.verdict is Verdict.INCONCLUSIVE and bad.meta["residue"]
+
+    a, b, x, y = z3.Reals("a b x y")
+    spec = IdealSpec(variables=["a", "b", "x", "y"],
+                     equations=[a - x - y, 2 * b - 4 * x + 6, x * y - 1],
+                     claim=a * b - (x + y) * (2 * x - 3) + x * y - 1,
+                     nonzero=[x], eliminate_linear=True)
+    events = []
+    res = algebra.ideal(spec, progress=events.append)
+    assert res.verdict is Verdict.PROVED and res.meta["eliminated"] == ["a", "b"]
+    assert events and events[-1]["final"]
+    cert = res.certificate
+    rep = verify(cert)
+    assert rep.ok and rep.degree == "relative"          # x != 0 is assumed
+    d = cert.to_dict()
+    d["payload"]["eliminated"][0]["by"] = d["payload"]["eliminated"][1]["by"]
+    assert not verify(d).ok                             # an edited substitution
+    plain = algebra.ideal(IdealSpec(variables=["a", "b", "x", "y"],
+                                    equations=spec.equations, claim=spec.claim))
+    assert plain.verdict is Verdict.PROVED
+
+
+def test_0_28_the_float_basis_routes_are_sparse():
+    """The exact LP from the float basis reads rows and columns sparsely:
+    218 x 66 017 built densely is fourteen million entries."""
+    from certo import exact
+
+    A = [[Fraction(7), Fraction(3)], [Fraction(2), Fraction(9)]]
+    b = [Fraction(1), Fraction(1)]
+    c = [Fraction(1), Fraction(1)]
+    P = exact.Prepared(A, b, c)
+    built = []
+    real = exact.Prepared.dense
+    exact.Prepared.dense = lambda self: built.append(1) or real(self)
+    try:
+        y = exact.dual_from_basis(P, c, [7 / 57, 4 / 57])
+        x = exact.primal_from_basis(P, b, [6 / 57, 5 / 57], y)
+    finally:
+        exact.Prepared.dense = real
+    assert y == [Fraction(7, 57), Fraction(4, 57)]
+    assert x == [Fraction(6, 57), Fraction(5, 57)] and not built
+
+
+def test_0_28_a_binding_reads_lean_and_decides_what_a_declaration_states():
+    """Lean is mocked here (the toolchain takes minutes): the decision rule
+    -- kernel_checked only with the export's type and no sorryAx -- and
+    the verifier's reading of a recorded binding."""
+    from certo import leanbind
+
+    text = ("CERTO_TYPE_BEGIN\nProd.lemmaA : \u2200 (x y : \u211d), x \u2264 y\n"
+            "CERTO_TYPE_END\n'Prod.lemmaA' depends on axioms: [propext, Quot.sound]\n"
+            "'CertoBindCheck.same' depends on axioms: [propext]\n")
+    got = leanbind.parse(text, "Prod.lemmaA", True)
+    assert got["type"].startswith("\u2200 (x y") and got["same_type"]
+    assert got["axioms"] == ["propext", "Quot.sound"]
+    assert leanbind.correspondence(got) == "kernel_checked"
+    wrong = leanbind.parse(text.replace("'CertoBindCheck.same' depends on axioms: [propext]",
+                                        "error: type mismatch"), "Prod.lemmaA", True)
+    assert leanbind.correspondence(wrong) == "user_asserted"
+    sorry = leanbind.parse(text.replace("[propext, Quot.sound]", "[sorryAx]"),
+                           "Prod.lemmaA", True)
+    assert leanbind.correspondence(sorry) == "user_asserted"
+    # a type equality that FAILED is still added by Lean, closed by sorry
+    failed = leanbind.parse(text.replace("'CertoBindCheck.same' depends on axioms: [propext]",
+                                         "'CertoBindCheck.same' depends on axioms: [sorryAx]"),
+                            "Prod.lemmaA", True)
+    assert not failed["same_type"]
+    assert leanbind.correspondence(failed) == "user_asserted"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

@@ -110,23 +110,20 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P2** | An optimal support that is DIFFUSE: among the optimal solutions of an LP, one minimising the largest joint load of any pair of resources (a second LP with the optimum fixed), certified by its dual -- so "this support concentrates" can be told from "every optimal support does" | **M** | med | low | user feedback (gap-cordal, T327): the current primal has pair load 1, which fails the hypothesis a rounding theorem needs; whether another optimal support is diffuse is the open question |
+| **P2** | The objective of a minimisation shown twice, canonical and declared, with their signs; and an `exact: false` that blocks quoting a constant from a `partial` result in every reader | **S** | high | low | user feedback (gap-cordal 110): a harness confused the canonical -1/8 with the declared 1/8 |
+| **P3** | Certificate transformations for a promoted leaf (loss of exactly 1, resources and virtuals kept), and promotion tracking by leaf identity | **M** | low | med | user feedback (gap-cordal 110); belongs with the construction-contracts row |
 | **P2** | Composition with PORTS: gadgets, projection contracts (each global partition induces a valid local state), refusing to add minima of incompatible states; an owner change certified relative to a previous packing; a Kempe trace with lists; integer balances derived from the trace, not re-entered | **L** | med | high | two reports, thirteen sections; acceptance tests in the feedback (two IN2 give 4/5, not 9/10 + 9/10). Joins the Tuza contracts row |
-| **P2** | A propositional `Spec` refuted by a DRAT proof checked in-process, not by re-solving the SMT core | **M** | med | med | user feedback: a 116-formula boolean Hall core verifies only with a solver |
 | **P3** | Localisation and quotient maps as typed obligations (base ring, inverted elements, images of generators, both compositions, a cancelled factor's unit condition), and component transport across charts with the four presence cases | **L** | **low** | med | user feedback (E11); joins the isomorphism-of-localised-quotients row |
 | **P3** | Single asks from one report: simplified rational counterexamples, symmetry/orbit quotient certificates with lifting, a public stable list of kinds, a documented monomial key reader, typed external theorems beyond `cite`, an LP-relaxation-lost-everything warning | **S-M each** | med | low | user feedback (gap-cordal 49-78) |
 | **P2** | Hypergraph matching and transversal, triangle packing and covering of a graph, as native commands: certified branch and bound with the LP dual, and a data spec (`{"hypergraph": ...}`) instead of generated `.py` files | **M-L** | med | med | user feedback (0.26.1): what Jacobian refuses past 20 edges. Joins the branch-and-bound rows below. 0.26.2 points `find` to the 0-1 program |
 | **P3** | On a refutation, the best constant computed: `range` run inside `prove` when the claim bounds a variable linearly | **S-M** | med | low | user feedback (0.26.1); 0.26.2 names the command beside the counterexample |
-| **P2** | A refused repair as a small CERTIFICATE of inadmissibility (step, edge, owner, balance), so negatives seal like positives; a synthesised decision linked to its repair id, certificate and literal resource; the first context that does not pay when a domain grows | **S-M** | med | low | user feedback (b0): negatives are REFUTED without a certificate today, which is right but cannot be sealed |
-| **P2** | Solver-free certificates for recurrence tables over masks: the clique domain (K2/K3/K4), the one-edge transition, the values and the reconstruction -- optimality and exhaustiveness, which covers alone do not give | **M** | med | med | user feedback (b0): lower bounds checked with Z3 and a second exact auditor |
-| **P1** | `ideal`: progress events (pairs, basis size, terms), cofactors SUPPLIED in the spec and only checked, linear definitions eliminated with each substitution recorded, cleared denominators with their non-vanishing and sign obligations | **M** | med | med | user feedback (erdos_1017), one row of acceptance criteria each |
 | **P1** | Contracts across a construction (Tuza split): resources transported from a parent graph to a child, catalogue coverage by extensions (one omitted extension invalidates it), joint rational credit with owners and a common cut distribution, assignment with physical conflicts (a matching per host) | **L** | med | high | user feedback with acceptance criteria; the user asks for ONE vertical example first, not more commands |
 | **P2** | Parametric feasibility certificates: a family of bases with rational formulas and regions, `A(t) w(t) = d(t)`, `w(t) >= 0`, the regions covering the domain and their frontiers | **L** | low | med | user feedback (erdos_1017): the crux after the cost identities |
 | **P3** | Jacobian as a PROPOSER: its witnesses (linear systems, Smith/Hermite, inertia, cofactors, isomorphism maps, root intervals) checked by certo's verifiers; what certo cannot check enters `compose` as a cited lemma with Jacobian's operation, version and digest | **S-M** | med | med | the user's question; 1791 operations in Jacobian 0.23, exact but not certificates |
 | **P3** | Signed certificates (Ed25519 / JWS, detached, over the digest): WHO produced a certificate, for a chain of custody | **M** | med | low | external suggestion. A signature attests provenance, never correctness: `verify` re-derives the mathematics whoever signed, and an edited certificate already fails it unless the edit is itself a valid certificate. Keys are the user's; optional, and never a substitute for `verify` |
 | **P2** | No code from a spec is evaluated where a model wrote it -- an AST-checked or declarative notation instead of `exec` | **(the declarative notation row)** | | | external suggestion, merged into the declarative spec notation row above. Today: specs are Python by design and run on load; `CERTO_NO_EXEC=1` and the ten JSON spec types run nothing, and the MCP confines paths -- not a sandbox, and `SECURITY.md` says so |
 | **P3** | Conditional channels and moment laws with an explicit domain; Cramer by intervals; positivity of formal series; comparing algebraic roots by signs; a Bernstein tensor imported with its change of variables | **L** | **low** | med | user feedback across sessions 25-33; research-shaped, each one an engine before it is a checker |
-| **P2** | `bind` reading the ELABORATED type of the Lean declaration (and its axioms), hashed; `user_asserted` and `kernel_checked` correspondence kept apart | **M-L** | med | med | user feedback: `provides` is a transcription the user writes, and `bind` does not read the declaration |
-| **P2** | `ideal`: linear definitions eliminated first, traceably (each substitution recorded and checked), and Groebner progress -- pairs, sizes, why it stopped | **M** | med | low | user feedback: identities with many implicit relations ran out of a 60 s budget until the definitions were substituted by hand |
 | **P3** | An isomorphism certificate for localised quotients: the ideal each way, both compositions, the domains, denominators kept before cancelling | **M-L** | **low** | med | user feedback (same formalisation); a typed cocycle certificate and descent obligations in `status` follow it |
 | **P3** | Bernstein data with a small Lean checker against a pinned Mathlib, before any automatic export of `polynomial_nonneg` | **L** | **low** | med | user feedback: no `sorry`, no heuristic tactic -- the kernel checks the identities and signs of the data |
 | **P3** | A weighted combinatorial transport as a parametric certificate, with the bridge from single classes to the reduced model | **L** | **low** | med | user feedback, still loosely specified: a replacement rule preserving every edge demand, legality, non-negativity and cost for any number of classes |
@@ -373,6 +370,8 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Boolean cores refuted by DRUP over certo's own encoding; minimum partitions by a recurrence table; refused repairs sealed | `prove --drat`, `cover --minimum`, `repair_refusal`, **0.28.0** |
+| `ideal`: supplied cofactors, linear elimination lifted back, `nonzero` obligations, progress; `bind` reading Lean (`kernel_checked` / `user_asserted`) | **0.28.0** |
 | A result card (role, link, pending; provenance), aggregates by degree and role, non-vacuity in a declared regime | `s.role/link/pending/regime`, `verify`, `status`, **0.27.0** |
 | One run clock across solver calls, engines and loops; the MCP watchdog and breaker; children ending with `--deadline` | `certo.clock`, **0.27.0** |
 | The exact LP from the float basis (a 4130-column quotient in 3.5 s); FLINT products; every clique as a candidate | **0.27.0** |
@@ -1089,7 +1088,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.27.0**, with **57 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.28.0**, with **60 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1099,7 +1098,7 @@ lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
 `ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`; in 0.26.1 `helpers`
-(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind).
+(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

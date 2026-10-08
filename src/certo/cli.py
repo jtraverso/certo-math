@@ -1071,7 +1071,8 @@ def cmd_prove(args):
     from .engines import smt
     from .spec import Spec, load_spec
 
-    return emit(smt.prove(load_spec(args.spec, Spec), limits_from(args)), args)
+    return emit(smt.prove(load_spec(args.spec, Spec), limits_from(args),
+                          drat=getattr(args, "drat", False)), args)
 
 
 def cmd_check(args):
@@ -1368,7 +1369,14 @@ def cmd_ideal(args):
     from .spec import IdealSpec, load_spec
 
     spec = load_spec(args.spec, IdealSpec)
-    res = algebra.ideal(spec, limits_from(args), spec_path=args.spec)
+
+    def progress(ev):
+        print(t("cli.ideal.progress", **ev), file=sys.stderr, flush=True)
+
+    res = algebra.ideal(spec, limits_from(args), spec_path=args.spec,
+                        progress=progress if getattr(args, "progress", False) else None,
+                        eliminate_linear=True if getattr(args, "eliminate_linear", False)
+                        else None)
     rc = emit(res, args)
     if not args.json and res.meta.get("cofactors"):
         print("  " + t("cli.ideal.cofactors"))
@@ -1382,6 +1390,10 @@ def cmd_cover(args):
     from .spec import CoverSpec, load_spec
 
     spec = load_spec(args.spec, CoverSpec)
+    if getattr(args, "minimum", False):
+        return emit(algebra.cover_minimum(spec, limits_from(args), spec_path=args.spec,
+                                          max_states=getattr(args, "max_states", None)),
+                    args)
     res = algebra.cover(spec, limits_from(args), spec_path=args.spec)
     rc = emit(res, args)
     if res.certificate is None:
@@ -2296,6 +2308,8 @@ def cmd_verify(args):
 
     if getattr(args, "tamper", False):
         return _tamper(cert, args)
+    if getattr(args, "elaborate", False):
+        os.environ["CERTO_LEAN_ELABORATE"] = "1"
 
     rep = verify_cert(cert, limits_from(args))
     if getattr(args, "md", False):
@@ -2891,6 +2905,13 @@ def build_parser():
     ):
         sp = add(name, helptext)
         sp.add_argument("spec", help=".py file with a spec() function")
+        if name == "prove":
+            sp.add_argument("--drat", action="store_true",
+                            help="a Boolean core refuted by a DRUP proof over "
+                                 "certo's own encoding (counts of Booleans "
+                                 "included): verified by unit propagation, no "
+                                 "solver. A core that is not Boolean keeps the "
+                                 "unsat_core certificate, and says why")
         sp.set_defaults(func=fn)
 
     #  no longer fits the three-liner block above: asking whether the
@@ -3259,6 +3280,17 @@ def build_parser():
     sp = add("ideal", "polynomial equations: refute them outright, or certify "
                       "what follows, with Groebner cofactors")
     sp.add_argument("spec", help=".py file returning an IdealSpec")
+    sp.add_argument("--eliminate-linear", action="store_true",
+                    dest="eliminate_linear",
+                    help="substitute linear definitions (a variable with a "
+                         "non-zero rational coefficient) before the search; "
+                         "the cofactors are put back on the ORIGINAL "
+                         "equations and each substitution is recorded and "
+                         "re-checked")
+    sp.add_argument("--progress", action="store_true",
+                    help="one line on stderr at most each second while the "
+                         "Groebner search runs: pairs done and pending, "
+                         "basis size, largest term count -- no expressions")
     sp.set_defaults(func=cmd_ideal)
 
     sp = add("cover", "is this an exact cover -- every element in exactly "
@@ -3273,6 +3305,14 @@ def build_parser():
                     help="and prove the integer optimum by branch and bound, "
                          "which may not finish")
     sp.add_argument("--max-nodes", type=int, default=5000, dest="max_nodes")
+    sp.add_argument("--minimum", action="store_true",
+                    help="the MINIMUM number of `candidates` partitioning the "
+                         "universe (covering it, with exact=False), proved by "
+                         "a recurrence over masks whose whole table is the "
+                         "certificate -- solver-free. Up to 62 elements")
+    sp.add_argument("--max-states", type=int, default=None, dest="max_states",
+                    help="with --minimum: how many states the table may hold "
+                         "(default 2,000,000)")
     sp.add_argument("--wall-timeout-ms", type=int, default=None,
                     dest="wall_timeout_ms", metavar="MS",
                     help="a budget for the whole search")
@@ -3466,6 +3506,10 @@ def build_parser():
                          "was made from, by hash. Verifying an old "
                          "certificate correctly while believing it describes "
                          "the spec on your screen is the failure this catches")
+    sp.add_argument("--elaborate", action="store_true",
+                    help="for a lean_binding: run Lean again on the bound "
+                         "declaration and refuse a type that changed (minutes: "
+                         "Mathlib is imported). Or CERTO_LEAN_ELABORATE=1")
     sp.add_argument("--tamper", action="store_true",
                     help="forge this certificate one payload field at a time "
                          "and report which changes the verifier catches. A "
@@ -3616,6 +3660,14 @@ def main(argv=None) -> int:
                   file=sys.stderr)
             args.explore = False
     json_mode = bool(getattr(args, "json", False))
+    # ONE LINE MEANS ONE LINE. Several commands print extra lines after the
+    # result -- a binding's pair, an ideal's cofactors -- and with --oneline
+    # those reached a script reading one line. Only the tab-separated line
+    # goes through.
+    one_mode = bool(getattr(args, "oneline", False)) and not json_mode
+    if one_mode:
+        one_tap = _OneLine(sys.stdout)
+        sys.stdout = one_tap
     if json_mode:
         out_tap, err_tap = _Tap(sys.stdout), _Tap(sys.stderr)
         sys.stdout, sys.stderr = out_tap, err_tap
@@ -3632,6 +3684,8 @@ def main(argv=None) -> int:
     finally:
         if json_mode:
             sys.stdout, sys.stderr = out_tap.inner, err_tap.inner
+        if one_mode:
+            sys.stdout = one_tap.inner
     if json_mode and rc not in (0, None) and not out_tap.wrote:
         said = [ln for ln in err_tap.text().splitlines() if ln.strip()]
         print(json.dumps({"command": getattr(args, "cmd", None),
@@ -3640,6 +3694,28 @@ def main(argv=None) -> int:
                           "message": said[-1].strip() if said else "",
                           "exit": rc}, ensure_ascii=False))
     return rc
+
+
+class _OneLine:
+    """Stdout for --oneline: only lines with a tab -- the result line --
+    are written; the rest of what a command prints is dropped."""
+
+    def __init__(self, inner):
+        self.inner, self._buf = inner, ""
+
+    def write(self, s):
+        self._buf += s
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            if "\t" in line:
+                self.inner.write(line + "\n")
+        return len(s)
+
+    def flush(self):
+        return self.inner.flush()
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
 
 
 class _Tap:

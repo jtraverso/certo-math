@@ -1047,6 +1047,18 @@ class IdealSpec:
     claim: object = None             # a z3 term or Poly, or None
     max_pairs: int = 20_000
     title: str = ""
+    # SUPPLIED cofactors, one per equation (0 where unused): checked by
+    # expanding, with no Groebner search. A combination that does not give
+    # the claim is reported with its residue, not searched around.
+    cofactors: object = None
+    # Substitute every linear definition (a variable with a non-zero RATIONAL
+    # coefficient, nowhere else in its equation) before the search, and put
+    # the cofactors back on the ORIGINAL equations. Each substitution is
+    # recorded and re-checked by `verify`.
+    eliminate_linear: bool = False
+    # The denominators cleared to reach these polynomials: the identity holds
+    # where they do not vanish, and the certificate says so (relative).
+    nonzero: list = field(default_factory=list)
 
 
 @dataclass
@@ -1755,6 +1767,12 @@ class BindSpec:
     discharges: str = ""             # the hypothesis it is meant to supply
     provides: object = None          # a z3 formula: what the lemma gives
     title: str = ""
+    # LEAN READS THE DECLARATION when these are given: its elaborated type,
+    # its axioms, and whether that type IS the type of certo's own export of
+    # the certificate (`kernel_checked`) or not (`user_asserted`).
+    lean_project: str = ""           # a Lean project with Mathlib built
+    lean_file: str = ""              # the .lean file declaring it, or
+    lean_module: str = ""            # the module to import instead
 
 
 @dataclass

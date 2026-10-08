@@ -914,6 +914,13 @@ def named(text: str, name: str) -> str:
         if len(ns.findall(text)) == 2:
             return ns.sub(lambda m: "{} {}".format(m.group(1), name), text)
         raise NotExportable(t("lean.theorem.nothing", name=name))
+    # THE NAME ASKED FOR IS THE NAME LEAN SEES. The exporters wrap their
+    # statements in `namespace Certo`, which made `--theorem E11.B` declare
+    # `Certo.E11.B` -- a name nobody asked for, and not the one a binding
+    # then looked up. Named theorems are written outside it.
+    ns = re.compile(r"^(namespace|end) Certo\n", re.M)
+    if len(ns.findall(text)) == 2:
+        text = ns.sub("", text)
     if n == 1:
         return head.sub("theorem " + name, text)
     count = iter(range(1, n + 1))

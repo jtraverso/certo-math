@@ -89,8 +89,21 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             why = repair_text(rep["problems"])
             if rep.get("step") is not None:
                 why = t("engine.cover.repair_step", k=rep["step"] + 1) + why
+            # THE REFUSAL IS A CERTIFICATE. A refused repair came back with
+            # nothing to seal: right, and not something a project could keep
+            # beside its accepted repairs. It carries the change and what is
+            # wrong with it, and `verify` re-derives exactly that.
+            from ..certificate import repair_refusal_certificate
+
+            steps = [repair] if isinstance(repair, dict) else list(repair)
+            serial = (_serial_repair(repair) if isinstance(repair, dict)
+                      else [_serial_repair(s) for s in steps])
+            cert = repair_refusal_certificate(
+                [list(u) if isinstance(u, (tuple, list)) else u for u in universe],
+                bool(spec.cliques), serial, rep.get("step"),
+                _serial_problems(rep["problems"]))
             return Result("cover", Status.SAT, Verdict.REFUTED, ENGINE_COVER,
-                          (time.perf_counter() - t0) * 1000, None,
+                          (time.perf_counter() - t0) * 1000, cert,
                           detail=t("engine.cover.repair_refused", why=why),
                           meta={"repair_problems": [k for k, _v in rep["problems"]]})
         given = [rep["final"][o] for o in rep["order"]]
@@ -147,6 +160,73 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             detail += " " + t("engine.cover.repair_steps", n=len(steps))
     return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms,
                   cert, detail=detail, meta=meta)
+
+
+def cover_minimum(spec, limits: Limits | None = None, spec_path: str = "",
+                  max_states=None) -> Result:
+    """The MINIMUM number of candidates partitioning (or covering) the
+    universe, proved by the recurrence over masks -- an optimum, not a
+    bound, and every subset it reached in the certificate."""
+    from .. import clock
+    from .. import recurrence as R
+    from ..certificate import recurrence_table_certificate
+    from ..cover import edges_of
+
+    t0 = time.perf_counter()
+    lim = limits or Limits()
+
+    def ms():
+        return (time.perf_counter() - t0) * 1000
+
+    universe = [list(u) if isinstance(u, (tuple, list)) else u for u in spec.universe]
+    cands = list(spec.candidates or spec.parts or [])
+    if spec.cliques:
+        cands = [edges_of(c) for c in cands]
+    cands = [[list(e) if isinstance(e, (tuple, list)) else e for e in c] for c in cands]
+    if not universe or not cands:
+        return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None, detail=t("recurrence.empty"))
+    if len(universe) > 62:
+        return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None,
+                      detail=t("recurrence.too_wide", n=len(universe)))
+    try:
+        _index, masks = R.masks_of(universe, cands)
+    except ValueError as e:
+        return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None, detail=str(e))
+    deadline = clock.cap(time.monotonic() + lim.timeout_ms / 1000
+                         if lim.timeout_ms else None)
+    try:
+        table = R.solve(len(universe), masks, exact=spec.exact,
+                        max_states=max_states or R.MAX_STATES, deadline=deadline)
+    except R.TooLarge as e:
+        return Result("cover", Status.RESOURCE_EXHAUSTED, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None, detail=str(e),
+                      meta={"stopped_by": "time" if "clock" in str(e).lower() else "states"})
+    full = (1 << len(universe)) - 1
+    value = table[full][0]
+    chosen = R.reconstruct(table, masks, len(universe))
+    cert = recurrence_table_certificate(universe, cands, spec.exact, table,
+                                        value, chosen or [])
+    meta = {"states": len(table), "candidates": len(cands)}
+    if value is None:
+        return Result("cover", Status.UNSAT, Verdict.UNSATISFIABLE, ENGINE_COVER,
+                      ms(), cert, detail=t("recurrence.none_found",
+                                           n=len(universe), c=len(cands)),
+                      meta=meta)
+    meta["minimum"] = value
+    meta["parts"] = [cands[j] for j in chosen]
+    return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms(), cert,
+                  detail=t("recurrence.proved", k=value, n=len(universe),
+                           c=len(cands), states=len(table)),
+                  meta=meta)
+
+
+def _serial_problems(problems) -> list:
+    """`[(key, values)]` as JSON: tuples become lists, so a re-derived list
+    compares equal to the one written."""
+    return json.loads(json.dumps([[k, v] for k, v in problems], default=list))
 
 
 def _serial_repair(repair) -> dict:
@@ -1178,6 +1258,23 @@ def lean_binding(spec, limits: Limits | None = None,
     cert = lean_binding_certificate(out, title=spec.title).stamp(
         spec_path or None)
 
+    if out.get("mode") == "states":
+        lean = out.get("lean") or {}
+        return Result(
+            "bind", Status.UNSAT if out["covers"] else Status.SAT,
+            Verdict.PROVED if out["covers"] else Verdict.REFUTED, ENGINE_BIND,
+            ms, cert,
+            detail=t("engine.bind.states" if out["covers"] else "engine.bind.states_not",
+                     decl=out["declaration"] or "-",
+                     kind=out.get("certificate_kind") or "?",
+                     why=("; ".join(lean.get("errors") or [])[:200] or
+                          t("engine.bind.no_export") if not lean.get("compared_with_export")
+                          else "")),
+            meta={"covers": out["covers"], "declaration": out["declaration"],
+                  "correspondence": lean.get("correspondence"),
+                  "elaborated_type": lean.get("elaborated_type"),
+                  "axioms": lean.get("axioms")})
+
     if out["covers"]:
         return Result(
             "bind", Status.UNSAT, Verdict.PROVED, ENGINE_BIND, ms, cert,
@@ -1866,7 +1963,14 @@ def eliminate(spec, limits: Limits | None = None,
                   meta=dict(meta, case="condition"))
 
 
-def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+def ideal(spec, limits: Limits | None = None, spec_path: str = "",
+          progress=None, eliminate_linear=None) -> Result:
+    """Membership in a polynomial ideal, with the cofactors as certificate.
+
+    `progress`, a callable, receives at most one event a second during the
+    search -- pairs done and pending, basis size, the largest term count,
+    elapsed seconds -- and never an expression. `eliminate_linear` (or the
+    spec's field) substitutes linear definitions first and lifts back."""
     from ..linarith import NotPolynomial
 
     lim = limits or Limits()
@@ -1876,12 +1980,22 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     try:
         gs = [_poly(e, variables) for e in spec.equations]
         claim = None if spec.claim is None else _poly(spec.claim, variables)
+        nonzero = [_poly(e, variables) for e in (getattr(spec, "nonzero", None) or [])]
     except NotPolynomial as e:
         return Result("ideal", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_IDEAL, 0.0, None,
                       detail=t("engine.ideal.not_polynomial", detail=str(e)))
 
     target = claim if claim is not None else Poly.const(variables, 1)
+    extra = {}
+    if nonzero:
+        extra["nonzero"] = [z.serialize() for z in nonzero]
+
+    # SUPPLIED cofactors: checked, never searched around.
+    supplied = getattr(spec, "cofactors", None)
+    if supplied is not None:
+        return _ideal_supplied(spec, variables, gs, claim, target, supplied,
+                               extra, t0, spec_path)
     # The time budget, honoured INSIDE the search: `max_pairs` bounds the
     # steps, not what one step costs, and a 3-second ideal ran ten minutes.
     from .. import clock
@@ -1894,9 +2008,29 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         # what users were faking with an unused `anchor = 0`. It used to die
         # on an IndexError.
         return _ideal_identity(spec, variables, claim, t0, spec_path)
+    from ..polynomials import eliminate_linear as _elim, lift as _lift
+
+    stats = {}
+    steps, active = [], list(range(len(gs)))
+    red_gs, red_target = gs, target
+    if eliminate_linear if eliminate_linear is not None else \
+            getattr(spec, "eliminate_linear", False):
+        steps, active, red_gs, red_target = _elim(gs, target)
     try:
-        hs, in_ideal = cofactors(target, gs, max_pairs=spec.max_pairs,
-                                 deadline=deadline)
+        if steps:
+            reduced = [red_gs[j] for j in active]
+            if not any(reduced):
+                hs_red, in_ideal = [Poly(variables) for _ in reduced], not red_target
+            else:
+                hs_red, in_ideal = cofactors(red_target, reduced,
+                                             max_pairs=spec.max_pairs,
+                                             deadline=deadline, progress=progress,
+                                             stats=stats)
+            hs = _lift(steps, active, hs_red, len(gs)) if in_ideal else None
+        else:
+            hs, in_ideal = cofactors(target, gs, max_pairs=spec.max_pairs,
+                                     deadline=deadline, progress=progress,
+                                     stats=stats)
     except TimeBudget:
         return Result("ideal", Status.TIMEOUT, Verdict.INCONCLUSIVE,
                       ENGINE_IDEAL, (time.perf_counter() - t0) * 1000, None,
@@ -1921,7 +2055,9 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             from ..polynomials import normal_form
 
             try:
-                residue = normal_form(claim, gs, max_pairs=spec.max_pairs,
+                residue = normal_form(red_target if steps else claim,
+                                      [red_gs[j] for j in active] if steps else gs,
+                                      max_pairs=spec.max_pairs,
                                       deadline=deadline)
                 meta["residue"] = str(residue)
                 detail = detail.rstrip(". ") + ". " + t(
@@ -1931,22 +2067,82 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         return Result("ideal", Status.SAT, Verdict.REFUTED, ENGINE_IDEAL, ms,
                       None, detail=detail, meta=meta)
 
+    if steps:
+        extra["eliminated"] = [{"equation": k, "var": var, "by": r.serialize()}
+                               for k, var, _c, r, *_rest in steps]
     cert = ideal_certificate(
         variables=variables,
         equations=[g.serialize() for g in gs],
         claim=None if claim is None else claim.serialize(),
         cofactors=[h.serialize() for h in hs],
         inconsistent=claim is None, title=spec.title,
-    ).stamp(spec_path or None)
+    )
+    cert.payload.update(extra)
+    cert.stamp(spec_path or None)
 
     used = [str(h) for h in hs if h]
+    detail = (t("engine.ideal.inconsistent") if claim is None
+              else t("engine.ideal.member", n=len(used)))
+    if steps or nonzero:
+        detail = detail.rstrip(". ") + "."
+    if steps:
+        detail += " " + t("engine.ideal.eliminated", n=len(steps),
+                          names=", ".join(s[1] for s in steps))
+    if nonzero:
+        detail += " " + t("engine.ideal.nonzero", n=len(nonzero))
     return Result(
         "ideal", Status.UNSAT, Verdict.PROVED, ENGINE_IDEAL, ms, cert,
-        detail=(t("engine.ideal.inconsistent") if claim is None
-                else t("engine.ideal.member", n=len(used))),
+        detail=detail,
         meta={"cofactors": {str(i): str(h) for i, h in enumerate(hs) if h},
-              "equations": len(gs), "degree": target.degree},
+              "equations": len(gs), "degree": target.degree,
+              "search": dict(stats, max_pairs=spec.max_pairs,
+                             timeout_ms=lim.timeout_ms),
+              **({"eliminated": [s[1] for s in steps]} if steps else {})},
     )
+
+
+def _ideal_supplied(spec, variables, gs, claim, target, supplied, extra, t0,
+                    spec_path):
+    """The SUPPLIED cofactors, checked by expanding the combination -- the
+    same check `verify` makes, and no search at all."""
+    from ..linarith import NotPolynomial
+    from ..polynomials import combination
+
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    supplied = list(supplied)
+    if len(supplied) != len(gs):
+        return Result("ideal", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_IDEAL, ms(), None,
+                      detail=t("engine.ideal.supplied_count", h=len(supplied),
+                               g=len(gs)))
+    try:
+        from fractions import Fraction as _F
+
+        hs = [Poly.const(variables, _F(h))
+              if isinstance(h, (int, _F)) and not isinstance(h, bool)
+              else _poly(h, variables) for h in supplied]
+    except NotPolynomial as e:
+        return Result("ideal", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_IDEAL, ms(), None,
+                      detail=t("engine.ideal.not_polynomial", detail=str(e)))
+    got = combination(hs, gs, variables) if gs else Poly(variables)
+    residue = target - got
+    if residue:
+        return Result("ideal", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      ENGINE_IDEAL, ms(), None,
+                      detail=t("engine.ideal.supplied_wrong",
+                               residue=str(residue)[:300]),
+                      meta={"residue": str(residue), "searched": False})
+    cert = ideal_certificate(
+        variables=variables, equations=[g.serialize() for g in gs],
+        claim=None if claim is None else claim.serialize(),
+        cofactors=[h.serialize() for h in hs],
+        inconsistent=claim is None, title=spec.title)
+    cert.payload.update(extra)
+    cert.stamp(spec_path or None)
+    return Result("ideal", Status.UNSAT, Verdict.PROVED, ENGINE_IDEAL, ms(), cert,
+                  detail=t("engine.ideal.supplied_ok", n=len(gs)),
+                  meta={"searched": False, "equations": len(gs)})
 
 
 def _ideal_identity(spec, variables, claim, t0, spec_path):

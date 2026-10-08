@@ -6,6 +6,41 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.28.0] — 2026-10-08
+
+**Negatives and Boolean refutations as certificates, an ideal you can steer,
+and Lean reading the declaration a binding names.** No new commands (59);
+three new kinds (60): `propositional_refutation`, `recurrence_table`,
+`repair_refusal`. The schema stays 5, with optional fields (`eliminated`,
+`nonzero` on `ideal`; `lean`, `mode` on `lean_binding`).
+
+### New
+
+- **`prove --drat`**: a Boolean core -- incidences and counts `Sum(If(b, 1,
+  0)) <= k` included -- encoded by certo and refuted by a DRUP proof that
+  `verify` checks by unit propagation, with no solver in the trusted base.
+- **`cover --minimum`**: the minimum number of candidates partitioning (or
+  covering) a universe, proved by a recurrence over masks whose whole table
+  is the certificate -- optimality and exhaustiveness, solver-free.
+- **A refused repair is a certificate** (`repair_refusal`): the step and the
+  reasons, re-derived by `verify`.
+- **`ideal`**: SUPPLIED cofactors checked with no search; linear definitions
+  eliminated first and the cofactors lifted back to the original equations,
+  each substitution replayed by `verify`; `nonzero` denominators as declared
+  obligations (relative degree, owed in `status`); `--progress`.
+- **`bind` with Lean**: the elaborated type, its hash and its axioms are
+  recorded; a binding without `discharges` asks Lean's kernel whether the
+  declaration's type IS certo's export of the certificate -- PROVED and
+  `kernel_checked`, or REFUTED. `verify --elaborate` asks again.
+
+### Fixed
+
+- **`export --theorem NAME` declared `Certo.NAME`**: the exporters' namespace
+  wrapped the named theorem. Named theorems are written outside it.
+- **The exact LP from the float basis reads the matrix sparsely**: a 66 017 x
+  218 program certified its exact optimum (218) where 0.27 stopped partial at
+  its budget, never building the dense matrix.
+
 ## [0.27.0] — 2026-10-08
 
 **What a result is, one clock for a run, and an exact LP that closes.**

@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The fifty-seven kinds
+## The sixty kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -83,6 +83,9 @@ answers"*. The table below is the map; the header is the territory.
 | `lean_binding` | what a certificate assumed, against what a declaration provides | no, re-asks the entailment |
 | `cegis` | the object has no counterexamples in the bounded domain | no, re-solves |
 | `cegis_none` | NO implementation exists: its constraints and the contract at the counterexamples are unsatisfiable; the counterexamples assign inputs only | no, re-solves |
+| `propositional_refutation` | a Boolean core is contradictory: each name with its formula, re-encoded by certo, and a DRUP proof | **yes**, unit propagation |
+| `recurrence_table` | the minimum number of candidates partitioning (or covering) a universe: every state of the recurrence over masks, each the minimum over its children | **yes**, comparing integers |
+| `repair_refusal` | a change of a partition is NOT admissible, at the step and for the reasons recorded -- re-checked by the rules that accept repairs | **yes**, counting |
 | `synth_proved` | the bounded discovery **and** the universal statement | no, re-solves |
 | `proof` | the lemmas, **and** that each is used as its certificate allows | no, re-solves |
 | `induction` | the base cases, the step, **and** that they chain without a gap | no, re-solves |

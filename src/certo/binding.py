@@ -77,6 +77,25 @@ def certify(spec, limits=None, root=".") -> dict:
 
     cert = store.read_json(cert_path)
 
+    # THE DECLARATION STATES THE CERTIFICATE -- no hypothesis named: the
+    # binding is "this Lean theorem is that result", and only Lean can say
+    # so. Kernel-checked or refused; there is no transcription to trust.
+    if not str(getattr(spec, "discharges", "") or ""):
+        if not str(getattr(spec, "lean_project", "") or ""):
+            raise NotBindable(_t("bind.states_needs_lean"))
+        lean = _read_lean(spec, cert)
+        return {
+            "mode": "states",
+            "certificate": str(getattr(spec, "certificate", "")),
+            "certificate_kind": cert.get("kind"),
+            "source": cert,
+            "declaration": str(getattr(spec, "declaration", "") or ""),
+            "discharges": "", "needed_smt2": "", "provides_smt2": "",
+            "covers": lean["correspondence"] == "kernel_checked",
+            "spec": {}, "lean": lean,
+            "title": getattr(spec, "title", ""),
+        }
+
     prov = _provenance(cert)
     spec_path = prov.get("path")
     if not spec_path:
@@ -100,7 +119,9 @@ def certify(spec, limits=None, root=".") -> dict:
 
     covers = entails(provided, [needed], limits)
 
-    return {
+    lean = _read_lean(spec, cert)
+
+    out = {
         "certificate": str(getattr(spec, "certificate", "")),
         "certificate_kind": cert.get("kind"),
         # THE CERTIFICATE ITSELF, not a path to it. A binding says "this is
@@ -122,6 +143,60 @@ def certify(spec, limits=None, root=".") -> dict:
                  "sha256_now": _digest(source),
                  "sha256_then": prov.get("sha256")},
         "title": getattr(spec, "title", ""),
+    }
+    if lean is not None:
+        # Optional, which the frozen schema allows: what Lean said about the
+        # declaration, and how the correspondence was established.
+        out["lean"] = lean
+    return out
+
+
+def export_for_check(cert: dict):
+    """certo's own Lean for `cert`, as ONE theorem named for the type check,
+    or None when its kind has no exporter or its export is not one theorem."""
+    from . import leanbind, leanexport
+    from .certificate import Certificate
+
+    exporter = leanexport.EXPORTERS.get(cert.get("kind"))
+    if exporter is None:
+        return None
+    data = dict(cert)
+    data["digest"] = Certificate.from_dict(cert).digest()
+    try:
+        text = exporter(data, "certo bind")
+        if text.count("\nexample") + text.startswith("example") != 1:
+            return None
+        return leanexport.named(text, leanbind.CHECK_NAME)
+    except Exception:  # noqa: BLE001 -- declined or unexpected: no check
+        return None
+
+
+def _read_lean(spec, cert):
+    """Ask Lean about the declaration, when a project is named."""
+    project = str(getattr(spec, "lean_project", "") or "")
+    if not project:
+        return None
+    from . import leanbind
+
+    decl = str(getattr(spec, "declaration", "") or "")
+    lean_file = str(getattr(spec, "lean_file", "") or "")
+    module = str(getattr(spec, "lean_module", "") or "")
+    export = export_for_check(cert)
+    res = leanbind.elaborate(project, decl, lean_file=lean_file or None,
+                             module=module or None, export_text=export)
+    if not res.get("ran"):
+        raise NotBindable(_t("bind.lean_not_run", reason=res.get("reason", "")))
+    return {
+        "project": str(pathlib.Path(project).resolve()),
+        "file": str(pathlib.Path(lean_file).resolve()) if lean_file else "",
+        "module": module,
+        "lean_version": leanbind.lean_version(project),
+        "elaborated_type": res.get("type"),
+        "type_sha256": res.get("type_sha256"),
+        "axioms": res.get("axioms"),
+        "compared_with_export": export is not None,
+        "correspondence": leanbind.correspondence(res),
+        "errors": res.get("errors") or [],
     }
 
 

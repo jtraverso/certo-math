@@ -51,6 +51,16 @@ REFUTED  [sat]
   certificate: model (no solver needed, id 1a76b821f2cafa42)
 ```
 
+**`--drat`: a Boolean core without a solver.** When the core is Boolean --
+incidences, `And`/`Or`/`Implies`, `If`, `AtMost`/`AtLeast`, and counts
+`Sum(If(b, 1, 0)) <= k` anywhere in a formula -- `prove --drat` encodes it
+with certo's own deterministic encoding (a sequential counter per count),
+refutes it with the internal CDCL, and returns a `propositional_refutation`:
+the core, each name with its formula, and a DRUP proof. `verify` encodes the
+core again and checks the proof by unit propagation -- no solver in the trusted
+base (`examples/hall_drat.py`). A core that is not Boolean keeps its
+`unsat_core` certificate and the run says why (`drat_refused`).
+
 ### `certo core`
 
 **Question** — Which of my hypotheses does it actually need?
@@ -1774,6 +1784,19 @@ it's in the ideal" leaves you with nothing but its word.
 `REFUTED`, not `unknown_solver`. That is rare in this tool and worth using:
 `prove` on a system of polynomial equalities can grind where this answers.
 
+**Cofactors you already have** go in the spec, `IdealSpec(cofactors=[...])`,
+one per equation (0 where unused): certo expands the combination -- the
+check `verify` makes -- and runs no search; a wrong cofactor comes back with
+its residue (`examples/ideal_supplied.py`). **`--eliminate-linear`** (or
+`eliminate_linear=True`) substitutes every definition with a non-zero
+RATIONAL pivot first, solves the smaller system, and puts the cofactors back
+on the ORIGINAL equations; each substitution is recorded and replayed by
+`verify`, which refuses an edited one. **`nonzero=[...]`** declares the
+denominators cleared to reach the polynomials: the identity holds where they
+do not vanish, the degree is `relative`, and `status` lists them as owed.
+**`--progress`** prints, at most once a second, the pairs done and pending,
+the basis size and the largest term count -- never an expression.
+
 ### `certo eliminate`
 
 **Question** — Get rid of `t` and tell me the condition on `s`
@@ -1952,6 +1975,22 @@ rejection of the data, not a certificate of inadmissibility.
 
 ---
 
+**`--minimum`: the optimum, not a bound.** With `candidates` (cliques from
+`cliques_of`, say), `cover --minimum` proves the MINIMUM number of candidates
+partitioning the universe (covering it, with `exact=False`) by a recurrence
+over masks -- the lowest element left must be in some chosen part, so
+branching on its candidates loses nothing. The `recurrence_table`
+certificate holds every state the recurrence reached, each with its value and
+choice, and `verify` checks each against its children: optimality and
+exhaustiveness, solver-free (`examples/clique_partition_minimum.py`: the
+octahedron needs four cliques). Up to 62 elements; `--max-states` bounds the
+table.
+
+**A refused repair is sealed.** A repair that is not admissible returns a
+`repair_refusal` certificate -- the change, the step that fails and why -- and
+`verify` re-runs the same check and requires the same refusal
+(`examples/repair_refused.py`).
+
 ## Build it, assemble it, keep it
 
 ### `certo synth`
@@ -2124,6 +2163,22 @@ that `status` can count it.
 **A spec that has moved is reported stale** rather than read as if it had not.
 The certificate carries the hash of the file it was made from, and a binding
 checked against a statement that has since changed would be worse than none.
+
+**Lean reads the declaration.** With `lean_project` and `lean_file` (or
+`lean_module`) in the `BindSpec`, `bind` runs Lean once: the declaration's
+ELABORATED type, its hash and its axioms are recorded. Two modes:
+
+* **with `discharges`** -- the declaration supplies a hypothesis, as before:
+  `provides` stays your transcription, and the correspondence is
+  `user_asserted`; the recorded type catches a statement that moves.
+* **without `discharges`** -- the declaration STATES the certificate: certo
+  regenerates its own export of the certificate and asks Lean's kernel
+  `type_of% @D = type_of% @Export := rfl`. Accepted, with no `sorryAx`, the
+  binding is PROVED and `kernel_checked`; otherwise REFUTED -- a correct
+  identity bound to the wrong theorem, or to one whose hypothesis changed.
+
+`verify --elaborate` (or `CERTO_LEAN_ELABORATE=1`) runs Lean again and refuses
+a type that changed. Mathlib's import makes each run take a minute or more.
 
 ### `certo export`
 

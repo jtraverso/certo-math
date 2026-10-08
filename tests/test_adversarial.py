@@ -110,6 +110,25 @@ STRUCTURAL_BENIGN = {
     },
     # the same counterexample twice is the same instance twice
     'cegis_none': {'counterexamples:dup'},
+    # a part's vertices in another order, or one listed twice, are the same
+    # clique; a vertex renamed everywhere at once is another graph, refused
+    # for the same reason, which the verifier re-derives
+    'repair_refusal': {'repair.{}.{}:{}'.format(where, part, how)
+                       for where, parts in (("before", "AB"),
+                                            ("insert", ("A1", "A2", "A3", "C")))
+                       for part in parts for how in ("dup", "reversed")}
+                      | {'=4:coherent', 'repair:dropkey', 'universe:dup',
+                         'universe:reversed'}
+                      | {'universe.{}:reversed'.format(i) for i in range(6)},
+    # the candidates ARE the problem: an edge written the other way round or
+    # an element twice is the same set, and a candidate the table never
+    # chooses, emptied or shortened, leaves a table that proves the minimum
+    # over the changed set -- re-derived by the verifier, and then what the
+    # certificate says
+    'recurrence_table': {'candidates.*.*:reversed', 'candidates.*:dup',
+                         'candidates.*:empty', 'candidates.*:short',
+                         'candidates.*:reversed', 'candidates.*.*:beyond',
+                         'candidates:dup'},
     # a core's `dropped`, `sorts` and provenance are labels; the cores are re-solved
     'core_matrix': {
         '=5:coherent', 'cores.identity.payload.dropped:dup',
@@ -490,6 +509,14 @@ STRUCTURAL_BENIGN = {
     'unsat_core': {
         'multipliers:empty', 'sorts:dropkey', 'sorts:empty',
     },
+    # as an unsat_core's: which hypotheses clash and which were dropped are
+    # labels for the reader; the refutation is the core and its proof
+    'propositional_refutation': {
+        'clash:{}'.format(h) for h in ('dup', 'empty', 'reversed', 'short')
+    } | {'dropped:{}'.format(h) for h in ('dup', 'empty', 'reversed', 'short')}
+    # a proof with a line repeated, or its last lemma gone, that STILL derives
+    # the empty clause is still a proof -- and the check said it does
+    | {'proof:dup', 'proof:short'},
 }
 
 
@@ -1447,6 +1474,9 @@ EXAMPLE_FIXTURES = [
     ("bisect_constant.py", "bisect", ()),
     ("synth_constant.py", "synth", ()),
     ("synth_none.py", "synth", ()),
+    ("clique_partition_minimum.py", "cover", ("--minimum",)),
+    ("repair_refused.py", "cover", ()),
+    ("hall_drat.py", "prove", ("--drat",)),
     ("core_matrix.py", "core", ()),
     ("dependency_cycle.py", "cycle", ()),
     ("equitable_quotient.py", "quotient", ()),

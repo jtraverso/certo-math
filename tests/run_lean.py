@@ -211,8 +211,40 @@ def main() -> int:
                 print("       " + line)
 
     print("\n{}/{} exports compile".format(len(jobs) - failures, len(jobs)))
+    failures += _bind_states(cases, where, tmp)
     _ = json
     return 1 if failures else 0
+
+
+def _bind_states(cases, where, tmp) -> int:
+    """`bind` with Lean, end to end: the export of a certificate under a
+    public name is KERNEL-CHECKED as stating it; the same file with one
+    hypothesis changed -- it still compiles -- is not. Returns failures."""
+    from certo import leanbind, leanexport
+    from certo.binding import export_for_check
+
+    name, cert = next((n, c) for n, c in cases if c.kind == "farkas")
+    data = cert.to_dict()
+    data["digest"] = cert.digest()
+    good = leanexport.named(leanexport.EXPORTERS["farkas"](data), "Prod.stated")
+    lines = good.splitlines()
+    hyp = next(i for i, l in enumerate(lines) if l.strip().startswith("(") and "≤" in l)
+    wrong_line = lines[hyp].replace("≤ 0", "≤ -1", 1)
+    wrong = "\n".join(lines[:hyp] + [wrong_line] + lines[hyp + 1:])
+    export = export_for_check(data)
+    bad = 0
+    for label, text, want in (("good", good, "kernel_checked"),
+                              ("changed", wrong, "user_asserted")):
+        f = tmp / "Bind_{}.lean".format(label)
+        f.write_text(text, encoding="utf-8")
+        res = leanbind.elaborate(str(where), "Prod.stated", lean_file=str(f),
+                                 export_text=export)
+        got = leanbind.correspondence(res) if res.get("ran") else "not run"
+        ok = got == want
+        bad += 0 if ok else 1
+        print("[{}] bind {:<8} {} (want {})".format("ok" if ok else "XX", label,
+                                                    got, want))
+    return bad
 
 
 if __name__ == "__main__":

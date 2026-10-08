@@ -98,6 +98,11 @@ def _owed(data: dict) -> list:
     elif kind == "gap" and p.get("level") != "global_optimum":
         out.append({"sort": "not_claimed", "name": t("status.owed.optimal"),
                     "why": t("status.owed.gap", level=p.get("level", "?"))})
+    if kind == "ideal":
+        for z in p.get("nonzero") or []:
+            out.append({"sort": "nonzero", "name": "{} != 0".format(
+                _poly_text(p.get("variables") or [], z)),
+                "why": t("status.owed.nonzero")})
     # Declared by the spec (`certo.card`), and carried: what this result is
     # still PENDING on, and the published results its proof cited.
     for name in (p.get("card") or {}).get("pending") or []:
@@ -106,6 +111,15 @@ def _owed(data: dict) -> list:
     for name, source in sorted((p.get("citations") or {}).items()):
         out.append({"sort": "cited", "name": name, "why": source})
     return out
+
+
+def _poly_text(variables, data) -> str:
+    try:
+        from .polynomials import Poly
+
+        return str(Poly.parse(tuple(variables), data))
+    except Exception:  # noqa: BLE001
+        return str(data)
 
 
 def _hollow(data: dict) -> list:
