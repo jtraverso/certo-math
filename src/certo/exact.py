@@ -403,7 +403,29 @@ def support_candidates(P, x_float, y_float, y_alts=(), tol=1e-7):
 def _eliminate(M, unknowns):
     """Gauss-Jordan on the rows `M` (coefficients, then the right-hand side),
     in `Fraction`: the unique solution, or None when an unknown is not
-    pinned or the rows disagree."""
+    pinned or the rows disagree. FLINT's `fmpq_mat.rref` does it when
+    python-flint is there and the system is not tiny -- the same rationals."""
+    if M and len(M) * (unknowns + 1) >= 400:
+        from .polynomials import _flint
+
+        fl = _flint()
+        if fl is not None:
+            R, rank = fl.fmpq_mat([[fl.fmpq(v.numerator, v.denominator)
+                                    for v in row] for row in M]).rref()
+            rows = R.tolist()
+            # pinned: rank == unknowns with the pivots on the first columns;
+            # consistent: no row reads 0 = c with c != 0
+            if rank != unknowns or any(rows[i][unknowns] != 0
+                                       for i in range(rank, len(rows))):
+                return None
+            out = []
+            for i in range(unknowns):
+                if rows[i][i] != 1 or any(rows[i][j] != 0
+                                          for j in range(unknowns) if j != i):
+                    return None
+                q = rows[i][unknowns]
+                out.append(Fraction(int(q.p), int(q.q)))
+            return out
     r, piv = 0, []
     for col in range(unknowns):
         p = next((k for k in range(r, len(M)) if M[k][col] != 0), None)

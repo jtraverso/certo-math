@@ -1392,12 +1392,18 @@ def cmd_cover(args):
     spec = load_spec(args.spec)
     if type(spec).__name__ == "HypergraphSpec":
         # A transversal IS a cover: the hyperedges, each vertex the set of
-        # hyperedges it meets.
-        spec = spec.to_cover()
+        # hyperedges it meets; a matching IS a packing.
+        spec = spec.to_packing() if spec.problem == "matching" else spec.to_cover()
     elif not isinstance(spec, CoverSpec):
         print("cover needs a CoverSpec or a transversal HypergraphSpec; spec() "
               "returned " + type(spec).__name__, file=sys.stderr)
         return 1
+    if getattr(args, "maximum", False):
+        return emit(algebra.cover_sat(spec, limits_from(args), spec_path=args.spec,
+                                      maximum=True), args)
+    if getattr(args, "minimum", False) and getattr(args, "sat", False):
+        return emit(algebra.cover_sat(spec, limits_from(args), spec_path=args.spec),
+                    args)
     if getattr(args, "minimum", False):
         return emit(algebra.cover_minimum(spec, limits_from(args), spec_path=args.spec,
                                           max_states=getattr(args, "max_states", None)),
@@ -1497,7 +1503,15 @@ def cmd_exists(args):
     from .engines import algebra
     from .spec import CoverSpec, load_spec
 
-    spec = load_spec(args.spec, CoverSpec)
+    spec = load_spec(args.spec)
+    if type(spec).__name__ == "HypergraphSpec":
+        # A transversal of at most k vertices IS a cover with at most k
+        # parts: `--max-parts k` refuted is tau > k, by DRAT.
+        spec = spec.to_cover()
+    elif not isinstance(spec, CoverSpec):
+        print("exists needs a CoverSpec or a transversal HypergraphSpec; spec() "
+              "returned " + type(spec).__name__, file=sys.stderr)
+        return 1
     res = algebra.exists(spec, limits_from(args), spec_path=args.spec,
                          max_parts=args.max_parts)
     rc = emit(res, args)
@@ -3329,6 +3343,15 @@ def build_parser():
                          "universe (covering it, with exact=False), proved by "
                          "a recurrence over masks whose whole table is the "
                          "certificate -- solver-free. Up to 62 elements")
+    sp.add_argument("--sat", action="store_true",
+                    help="with --minimum: the optimum by SAT with a DRUP proof of "
+                         "the bound below it (sat_optimum) instead of the "
+                         "recurrence -- the route past 62 elements, taken "
+                         "there by itself")
+    sp.add_argument("--maximum", action="store_true",
+                    help="the MAXIMUM number of pairwise disjoint candidates "
+                         "(a packing; a hypergraph matching), by SAT with a "
+                         "DRUP proof that one more is impossible")
     sp.add_argument("--max-states", type=int, default=None, dest="max_states",
                     help="with --minimum: how many states the table may hold "
                          "(default 2,000,000)")

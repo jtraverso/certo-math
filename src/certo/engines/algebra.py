@@ -187,9 +187,8 @@ def cover_minimum(spec, limits: Limits | None = None, spec_path: str = "",
         return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_COVER, ms(), None, detail=t("recurrence.empty"))
     if len(universe) > 62:
-        return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
-                      ENGINE_COVER, ms(), None,
-                      detail=t("recurrence.too_wide", n=len(universe)))
+        # Past bit-indexing: the same optimum by SAT, with a proof.
+        return cover_sat(spec, lim, spec_path)
     try:
         _index, masks = R.masks_of(universe, cands)
     except ValueError as e:
@@ -236,6 +235,43 @@ def cover_minimum(spec, limits: Limits | None = None, spec_path: str = "",
         pass
     return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms(), cert,
                   detail=detail, meta=meta)
+
+
+def cover_sat(spec, limits: Limits | None = None, spec_path: str = "",
+              maximum: bool = False) -> Result:
+    """The optimum by SAT, with a proof of the bound beyond it: a minimum
+    cover or partition, or (`maximum`) a maximum packing -- past what the
+    recurrence over masks can tabulate."""
+    from .. import satopt
+    from ..certificate import sat_optimum_certificate
+    from ..cover import edges_of
+
+    t0 = time.perf_counter()
+    lim = limits or Limits()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    universe = [list(u) if isinstance(u, (tuple, list)) else u for u in spec.universe]
+    cands = list(spec.candidates or spec.parts or [])
+    if spec.cliques:
+        cands = [edges_of(c) for c in cands]
+    cands = [[list(e) if isinstance(e, (tuple, list)) else e for e in c] for c in cands]
+    problem = "packing" if maximum else ("partition" if spec.exact else "cover")
+    try:
+        out = satopt.optimum(problem, universe, cands,
+                             timeout_s=max(1.0, lim.timeout_ms / 1000))
+    except RuntimeError as e:
+        none = "satopt.none" in str(e) or "no " in str(e).lower()
+        if problem != "packing" and none:
+            return Result("cover", Status.UNSAT, Verdict.UNSATISFIABLE, ENGINE_COVER,
+                          ms(), None, detail=str(e))
+        return Result("cover", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None, detail=str(e))
+    cert = sat_optimum_certificate(problem, universe, cands, out["k"], out["chosen"],
+                                   out["bound"], out["proof"])
+    return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms(), cert,
+                  detail=t("satopt.proved." + problem, k=out["k"], n=len(universe),
+                           c=len(cands), lines=len(out["proof"])),
+                  meta={"optimum": out["k"], "parts": [cands[j] for j in out["chosen"]],
+                        "proof_lines": len(out["proof"]), "problem": problem})
 
 
 def _serial_problems(problems) -> list:

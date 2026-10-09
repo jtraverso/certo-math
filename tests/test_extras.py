@@ -17011,6 +17011,159 @@ def test_0_29_hypergraphs_and_the_triangle_numbers():
         raise AssertionError("an unknown problem was accepted")
 
 
+def test_0_30_an_optimum_by_sat_with_a_proof():
+    """Cover, partition and packing optima: the chosen parts counted, the
+    bound beyond refuted by DRUP over certo's own encoding."""
+    import itertools
+    import random
+
+    from certo import recurrence as R, satopt
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.hypergraph import triangle_cover, triangle_packing
+
+    rng = random.Random(21)
+    for _ in range(60):
+        n, k = rng.randint(1, 6), rng.randint(1, 7)
+        U = list(range(n))
+        C = [sorted(rng.sample(U, rng.randint(1, n))) for _ in range(k)]
+        masks = [sum(1 << v for v in c) for c in C]
+        for prob in ("cover", "partition"):
+            want = R.solve(n, masks, exact=(prob == "partition"))[(1 << n) - 1][0]
+            try:
+                got = satopt.optimum(prob, U, C)["k"]
+            except RuntimeError:
+                got = None
+            assert got == want, (prob, C, want, got)
+        best = max((r for r in range(k + 1) for comb in itertools.combinations(range(k), r)
+                    if len({v for j in comb for v in C[j]}) == sum(len(C[j]) for j in comb)),
+                   default=0)
+        assert satopt.optimum("packing", U, C)["k"] == best, C
+
+    oct_edges = [(a, b) for a, b in itertools.combinations(range(6), 2)
+                 if (a, b) not in {(0, 1), (2, 3), (4, 5)}]
+    nu = algebra.cover_sat(triangle_packing(6, oct_edges).to_packing(), maximum=True)
+    tau = algebra.cover_sat(triangle_cover(6, oct_edges).to_cover())
+    assert nu.meta["optimum"] == 4 and tau.meta["optimum"] == 4
+    for res in (nu, tau):
+        assert res.certificate.kind == "sat_optimum" and verify(res.certificate).ok
+    # a better optimum claimed: the chosen parts no longer count to it
+    d = tau.certificate.to_dict()
+    d["payload"]["optimum"] = 3
+    assert not verify(d).ok
+    # a proof that refutes nothing
+    d = nu.certificate.to_dict()
+    d["payload"]["proof"] = d["payload"]["proof"][:1]
+    assert not verify(d).ok
+
+
+def test_0_30_the_fast_rationals_give_the_same_answers():
+    import random
+
+    from certo import lattice, polynomials as P, rational, simplex as S
+    from certo import exact
+
+    rng = random.Random(4)
+    for _ in range(30):
+        m, n = rng.randint(2, 8), rng.randint(3, 25)
+        A = [[Fraction(rng.choice([0, 1, 2, -1]), rng.choice([1, 2])) for _ in range(n)]
+             for _ in range(m)]
+        b = [Fraction(rng.randint(-2, 8)) for _ in range(m)]
+        c = [Fraction(rng.randint(-3, 6)) for _ in range(n)]
+        try:
+            y = S.minimise(A, b, c)
+        except S.SimplexLimit:
+            continue
+        assert all(isinstance(v, Fraction) for v in y)      # Fraction out
+        assert all(v >= 0 for v in y)
+        assert all(sum(A[i][j] * y[i] for i in range(m)) >= c[j] for j in range(n))
+    assert rational.to_fraction(rational.Q(3, 4)) == Fraction(3, 4)
+    # the FLINT routes against pure Python
+    M = [[Fraction(rng.randint(-3, 3)) for _ in range(6)] for _ in range(30)]
+    sol = [Fraction(rng.randint(-5, 5), 3) for _ in range(5)]
+    for row in M:
+        row[5] = sum(a * x for a, x in zip(row[:5], sol))
+    fast = exact._eliminate([r[:] for r in M], 5)
+    saved = list(P._FLINT)
+    P._FLINT[:] = [None]
+    try:
+        slow = exact._eliminate([r[:] for r in M], 5)
+        A2 = [[rng.randint(-4, 4) for _ in range(30)] for _ in range(30)]
+        plain = lattice.multiply(A2, A2)
+    finally:
+        P._FLINT[:] = saved
+    assert fast == slow == sol
+    assert lattice.multiply(A2, A2) == plain
+
+
+def test_0_30_exists_takes_a_transversal():
+    import io
+    from contextlib import redirect_stdout
+
+    from certo.cli import main
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = main(["exists", str(root / "examples" / "triangle_cover.json"),
+                   "--max-parts", "3", "--oneline"])
+    fields = buf.getvalue().strip().split("\t")
+    assert rc == 0 and fields[:3] == ["proved", "unsat", "drat"], fields
+
+
+def test_0_30_an_lp_round_trips_and_a_certificate_is_tied_to_its_program():
+    """A user's serialiser dropped lo/hi; a consumer had no way to ask
+    whether a valid certificate was about ITS program."""
+    import json
+    import tempfile
+
+    from certo import LPSpec
+    from certo.certificate import same_program, verify
+    from certo.engines import lp
+    from certo.spec import load_spec
+
+    s = LPSpec(sense="max")
+    s.variable("v", 1, 1)
+    s.variable("w", 0, 2)
+    s.objective({"v": Fraction(5, 6), "w": 1})
+    s.constraint({"v": 1, "w": 1}, "<=", 3, name="cap")
+    f = pathlib.Path(tempfile.mkdtemp()) / "s.json"
+    f.write_text(json.dumps(s.to_data()), encoding="utf-8")
+    back = load_spec(str(f))
+    assert back.as_leq_system() == s.as_leq_system()
+    res = lp.opt(s)
+    assert res.meta["objective"] == "17/6" and verify(res.certificate).ok
+    assert same_program(res.certificate, back)["same"]
+    t = LPSpec(sense="max")
+    t.variable("v", 1, 1)
+    t.variable("w", 0, 2)
+    t.objective({"v": Fraction(5, 6), "w": 1})
+    t.constraint({"v": 1, "w": 1}, "<=", 4, name="cap")
+    out = same_program(res.certificate, t)
+    assert not out["same"] and any("cap" in d for d in out["differences"])
+    try:
+        s.var("x")
+    except AttributeError as e:
+        assert "variable" in str(e)
+    else:
+        raise AssertionError("var() did not point to variable()")
+    rep = verify(res.certificate)
+    assert rep.method == rep.method_key
+
+
+def test_0_30_a_drat_refutation_with_no_steps_says_why():
+    from certo import CNF
+    from certo.certificate import drat_certificate, verify
+
+    c = CNF()
+    a, b = c.var("a"), c.var("b")
+    c.add(a)
+    c.add(b)
+    c.add(-a, -b)
+    rep = verify(drat_certificate(c.to_dimacs(), [], c.nvars, len(c.clauses)))
+    assert rep.ok and any("unit propagation" in str(w) for w in rep.warnings)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

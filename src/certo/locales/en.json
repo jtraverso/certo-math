@@ -2172,5 +2172,22 @@
   "hypergraph.no_edges": "a HypergraphSpec needs hyperedges",
   "hypergraph.cover_needs_transversal": "`cover` answers a TRANSVERSAL; a matching runs under `opt` or `mixed --prove-optimal`",
   "hypergraph.cover_unweighted": "`cover --minimum` counts vertices; a weighted transversal runs under `mixed --prove-optimal`",
-  "recurrence.proved_cover": "MINIMUM {k}, PROVED: no fewer of the {c} candidates cover the {n} elements, and {k} do. The recurrence's table ({states} states) is the certificate, solver-free."
+  "recurrence.proved_cover": "MINIMUM {k}, PROVED: no fewer of the {c} candidates cover the {n} elements, and {k} do. The recurrence's table ({states} states) is the certificate, solver-free.",
+  "cert.note.sat_optimum": "The optimum of a cover, partition or packing: the chosen parts attain it (counted), and a DRUP proof refutes certo's own encoding of the bound beyond it. No solver is trusted.",
+  "verify.satopt.attained": "the chosen candidates solve the problem with exactly the optimum's count",
+  "verify.satopt.bound": "the bound beyond the optimum is refuted: re-encoded, the proof checked by unit propagation",
+  "verify.satopt.detail": "the {problem} optimum is {k}: {n} elements, {c} candidates",
+  "satopt.bad_problem": "the problem `{problem}` is not one of: {known}",
+  "satopt.none": "NO {problem} of the universe exists with these candidates",
+  "satopt.no_proof": "the refutation of the bound did not come back with a proof ({status})",
+  "satopt.proved.cover": "MINIMUM {k}, PROVED: {k} of the {c} candidates cover the {n} elements, and a DRUP proof ({lines} lines) refutes {k} - 1. Solver-free to verify",
+  "satopt.proved.partition": "MINIMUM {k}, PROVED: {k} of the {c} candidates partition the {n} elements, and a DRUP proof ({lines} lines) refutes {k} - 1. Solver-free to verify",
+  "satopt.proved.packing": "MAXIMUM {k}, PROVED: {k} pairwise disjoint candidates of the {c}, and a DRUP proof ({lines} lines) refutes {k} + 1. Solver-free to verify",
+  "hypergraph.packing_needs_matching": "`cover --maximum` answers a MATCHING; a transversal runs under `cover --minimum`",
+  "doctor.what.gmpy2": "the exact simplex in GMP rationals: the same answers, about four times faster",
+  "doctor.without.gmpy2": "the exact simplex runs in Python's Fraction, about four times slower; pip install gmpy2",
+  "doctor.what.pysat": "cover --minimum --sat / --maximum: a fast SAT search for the optimum (the proof is certo's own)",
+  "doctor.without.pysat": "the optimum search uses certo's internal CDCL, slower on large instances; pip install python-sat",
+  "spec.lp_alias": "LPSpec has no `{name}`: it is `{hint}`",
+  "verify.drat.by_units": "the proof has no steps: unit propagation on the formula alone reaches the contradiction"
 }

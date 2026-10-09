@@ -351,7 +351,7 @@ Common options go **after** the subcommand:
 
 | Option | Does |
 |---|---|
-| `--json` | machine-readable result on stdout |
+| `--json` | machine-readable result on stdout (a `VerifyReport` in the API: `ok`, `degree`, `solver_free`, `method`, `checks`, `warnings`, `detail`) |
 | `--oneline` | one tab-separated line: verdict, status, kind, digest, certificate path, detail (`-` when absent); on `verify`: valid or invalid, degree, kind, digest, path, detail. A seventh field `pending=k` only when the spec declares k pending dependencies |
 | `--cert FILE` | write the certificate here |
 | `--lang` | `en` or `es`; or set `CERTO_LANG` |

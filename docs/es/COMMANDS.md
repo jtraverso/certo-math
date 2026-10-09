@@ -693,6 +693,14 @@ transversal, `cover --minimum`. `certo.hypergraph.triangle_packing(n, edges)` y
 `triangle_cover(n, edges)` dan nu(G) y tau(G) de un grafo
 (`examples/triangle_numbers.py`, `examples/triangle_cover.json`).
 
+**Un programa como datos, y un certificado atado a él.** `LPSpec.to_data()`
+escribe el programa como spec JSON que `load_spec` vuelve a leer -- cotas,
+tipos, sentido, objetivo, restricciones, objetivo declarado y cargas, con
+números exactos -- así una ida y vuelta no puede perder una cota.
+`certo.certificate.same_program(cert, spec)` dice si un certificado LP es de
+ESTE programa y nombra lo que difiere: un lado derecho, un coeficiente, el
+objetivo, el sentido.
+
 ### `certo mixed`
 
 **Pregunta** — …y ¿es realmente óptimo sobre los enteros?
@@ -2064,6 +2072,17 @@ rechazo (`examples/repair_refused.py`).
 `cover --minimum` dice además la cota de la relajación LP junto al mínimo, y la
 brecha entre ambos: el número de cubierta exacto y lo que alcanza un argumento
 fraccional, en una sola salida.
+
+**Más allá de la recurrencia: SAT con prueba.** `cover --minimum --sat` --
+que se toma solo pasados los 62 elementos -- y `cover --maximum` (un
+empaquetado: los más candidatos disjuntos dos a dos; un MATCHING de
+hipergrafo) encuentran el óptimo por SAT (pysat propone, si está instalado) y
+devuelven un `sat_optimum`: los candidatos elegidos, contados, y una prueba
+DRUP que refuta la propia codificación de certo de una parte menos (una más,
+en un empaquetado), recodificada y comprobada por `verify` sin solver
+(`examples/triangle_cover_sat.py`). Un `HypergraphSpec` corre aquí como
+empaquetado (matching) o cubierta (transversal), y `exists --max-parts k`
+acepta un transversal: tau > k por DRAT.
 
 ## Construir, ensamblar, conservar
 

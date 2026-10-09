@@ -110,6 +110,15 @@ STRUCTURAL_BENIGN = {
     },
     # the same counterexample twice is the same instance twice
     'cegis_none': {'counterexamples:dup'},
+    # as a recurrence table's: the candidates ARE the problem -- reordered or
+    # repeated they are the same sets, and one not chosen made smaller is
+    # another problem, whose optimum the re-encoded refutation still proves
+    'sat_optimum': {'candidates.*:reversed', 'candidates.*:short',
+                    'candidates.*:dup', 'candidates:reversed', 'chosen:reversed',
+                    'universe:dup', 'universe:reversed',
+                    # a proof with a line repeated or its last lemma gone that
+                    # STILL refutes the bound is still a proof
+                    'proof:dup', 'proof:short'},
     # a part's vertices in another order, or one listed twice, are the same
     # clique; a vertex renamed everywhere at once is another graph, refused
     # for the same reason, which the verifier re-derives
@@ -1477,6 +1486,7 @@ EXAMPLE_FIXTURES = [
     ("clique_partition_minimum.py", "cover", ("--minimum",)),
     ("repair_refused.py", "cover", ()),
     ("hall_drat.py", "prove", ("--drat",)),
+    ("triangle_cover_sat.py", "cover", ("--maximum",)),
     ("core_matrix.py", "core", ()),
     ("dependency_cycle.py", "cycle", ()),
     ("equitable_quotient.py", "quotient", ()),

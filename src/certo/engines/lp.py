@@ -1132,6 +1132,54 @@ def _opt_from_primal(spec, A, b, c, cons_names, primal, t0, target):
                            for j, v in enumerate(spec.var_names)}})
 
 
+def infeasible_ray(spec, limits=None):
+    """The Farkas ray ALONE, as serialised rationals, or None -- what branch
+    and bound keeps of an infeasible node.
+
+    Sparse end to end: the auxiliary program is built from the rows' non-zeros
+    and solved for its vectors only, and the ray is checked on the sparse rows.
+    `infeasible_certificate` built both the auxiliary's full certificate and
+    a dense one of its own -- a 105 x 1048 matrix serialised twice per
+    infeasible node, most of a node's time -- for a tree that kept the vector.
+    """
+    from .. import exact
+    from ..spec import LPSpec
+
+    rows, b, c, _names = spec.as_leq_sparse()
+    if not rows:
+        return None
+    aux = LPSpec(sense="min", title="farkas ray")
+    ys = ["y{}".format(i) for i in range(len(rows))]
+    for v in ys:
+        aux.variable(v)
+    aux.objective({v: b[i] for i, v in enumerate(ys)})
+    cols = {}
+    for i, r in enumerate(rows):
+        for j, a in r.items():
+            cols.setdefault(j, {})[ys[i]] = a
+    for j in range(len(c)):
+        aux.constraint(cols.get(j, {}), ">=", 0, name="col{}".format(j))
+    aux.constraint({v: 1 for v in ys}, "==", 1, name="norm")
+    res = opt(aux, limits, _ray=False, _vectors_only=True)
+    vec = res.certificate
+    if res.verdict is not Verdict.SATISFIABLE or vec is None or \
+            not res.meta.get("exact"):
+        return None
+    y = [exact.to_fraction(v) for v in vec.payload["primal"]]
+    if len(y) != len(rows) or any(v < 0 for v in y):
+        return None
+    col = [exact.to_fraction(0)] * len(c)
+    for i, r in enumerate(rows):
+        if y[i]:
+            for j, a in r.items():
+                col[j] += a * y[i]
+    if any(v < 0 for v in col):
+        return None
+    if sum((b[i] * y[i] for i in range(len(rows))), exact.to_fraction(0)) >= 0:
+        return None
+    return exact.serialize_all(y)
+
+
 def infeasible_certificate(spec, limits=None):
     """A Farkas ray proving `Ax <= b, x >= 0` has no solution.
 

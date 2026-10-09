@@ -604,6 +604,8 @@ CHECKS = [
     ("numpy", False, lambda: _module("numpy")),
     ("clarabel", False, lambda: _module("clarabel")),
     ("highs", False, lambda: _module("highspy")),
+    ("gmpy2", False, lambda: _module("gmpy2")),
+    ("pysat", False, lambda: _module("pysat.solvers")),
     ("cddlib", False, lambda: _module("cdd.gmp")),
     ("nauty", False, _geng),
     ("cadical", False, lambda: _binary("cadical")),

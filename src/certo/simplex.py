@@ -30,7 +30,7 @@ does.
 """
 from __future__ import annotations
 
-from fractions import Fraction
+from .rational import Q as Fraction, to_fraction
 
 #: Pivots before giving up. Bland's rule cannot cycle, so hitting this means
 #: the problem is genuinely large rather than that the method is stuck.
@@ -254,7 +254,7 @@ def minimise(A, b, c, deadline=None, hint=None, x_hint=None):
     c = [Fraction(v) for v in c]
     m, n = len(A), len(c)                       # y has m entries, n rows
     if n >= WIDE_FROM and n >= WIDE_RATIO * max(m, 1):
-        return _primal_dual(A, b, c, deadline, hint, x_hint)
+        return [to_fraction(v) for v in _primal_dual(A, b, c, deadline, hint, x_hint)]
 
     # `A^T y >= c`  ->  `-A^T y + s = -c`, s >= 0, with an artificial where
     # the right-hand side is negative.
@@ -331,4 +331,4 @@ def minimise(A, b, c, deadline=None, hint=None, x_hint=None):
     for i, bi in enumerate(basis):
         if bi < m:
             y[bi] = T[i][-1]
-    return y
+    return [to_fraction(v) for v in y]

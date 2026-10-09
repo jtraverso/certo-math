@@ -249,6 +249,13 @@ class VerifyReport:
     timed_out: bool = False
 
     @property
+    def method(self) -> str:
+        """How the checking was done -- the same key `to_dict()` calls
+        `method`. A user classified results by `rep.method` and found no
+        such attribute."""
+        return self.method_key
+
+    @property
     def partial(self) -> list:
         return [str(w) for w in self.warnings
                 if getattr(w, "degree", "") == "partial"]
@@ -283,6 +290,45 @@ class VerifyReport:
             "warnings": self.warnings,
             "detail": self.detail,
         }
+
+
+def same_program(cert, spec) -> dict:
+    """Is this LP certificate about THIS program? `{"same", "differences"}`.
+
+    A valid certificate of ANOTHER program -- a right-hand side, a coefficient,
+    the objective or the sense changed -- verifies on its own terms, and a
+    consumer holding its own `LPSpec` had to compare by hand. This rebuilds
+    the normalised system from the spec, exactly as `opt` does, and names what
+    differs. For `lp_dual` certificates (and `gap`'s relaxation).
+    """
+    from .exact import to_fraction
+
+    if isinstance(cert, dict):
+        cert = Certificate.from_dict(cert)
+    p = cert.payload
+    if cert.kind == "gap":
+        p = (p.get("relaxation") or {}).get("payload", p)
+    A, b, c, names = spec.as_leq_system()
+    diffs = []
+    if p.get("sense", "max") != spec.sense:
+        diffs.append("sense: {} in the certificate, {} in the spec".format(
+            p.get("sense"), spec.sense))
+    pa = [[to_fraction(v) for v in row] for row in p.get("A") or []]
+    if [r for r in pa] != [list(r) for r in A]:
+        rows = [i for i in range(min(len(pa), len(A))) if pa[i] != list(A[i])]
+        diffs.append("A: {} rows differ{}".format(
+            len(rows) + abs(len(pa) - len(A)),
+            " ({})".format(", ".join(names[i] for i in rows[:4])) if rows else ""))
+    pb = [to_fraction(v) for v in p.get("b") or []]
+    if pb != list(b):
+        rows = [names[i] for i in range(min(len(pb), len(b))) if pb[i] != b[i]]
+        diffs.append("b: right-hand side differs at {}".format(", ".join(rows[:4]) or "length"))
+    pc = [to_fraction(v) for v in p.get("c") or []]
+    if pc != list(c):
+        diffs.append("c: the objective differs")
+    if list(p.get("names") or []) != list(names):
+        diffs.append("names: the rows are named differently")
+    return {"same": not diffs, "differences": diffs}
 
 
 def _rejection_summary(rep) -> str:
@@ -859,6 +905,22 @@ def ideal_certificate(variables, equations, claim, cofactors, inconsistent,
                  "claim": claim, "cofactors": cofactors,
                  "inconsistent": bool(inconsistent), "title": title},
         note_key="cert.note.ideal",
+    )
+
+
+def sat_optimum_certificate(problem, universe, candidates, k, chosen, bound,
+                            proof) -> Certificate:
+    """The optimum of a cover, partition or packing: `chosen` attains `k`
+    (counted), and a DRUP proof refutes the encoding of the bound beyond it
+    (at most `k - 1` parts, or at least `k + 1`)."""
+    from .satopt import ENCODING
+
+    return Certificate(
+        kind="sat_optimum", solver_free=True,
+        payload={"problem": problem, "universe": universe,
+                 "candidates": candidates, "optimum": k, "chosen": chosen,
+                 "bound": bound, "encoding": ENCODING, "proof": proof},
+        note_key="cert.note.sat_optimum",
     )
 
 
@@ -6481,6 +6543,42 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
     return rep
 
 
+def _verify_sat_optimum(cert, limits) -> VerifyReport:
+    """The chosen parts by counting; the bound by re-encoding it and checking
+    the proof by unit propagation. No solver."""
+    from . import drup, satopt
+    from .limits import Limits
+
+    lim = limits or Limits()
+    p = cert.payload
+    problem = p.get("problem")
+    universe, cands = p["universe"], p["candidates"]
+    k, chosen, bound = p.get("optimum"), list(p.get("chosen") or []), p.get("bound")
+    known = problem in satopt.PROBLEMS and p.get("encoding") == satopt.ENCODING
+    attained = known and satopt.valid(problem, universe, cands, chosen) \
+        and len(chosen) == k
+    expected_bound = (k + 1) if problem == "packing" else (k - 1)
+    checks = [(t("verify.satopt.attained"), attained, str(k))]
+    if problem != "packing" and k == 0:
+        # A minimum of zero: nothing is below it, and nothing to refute.
+        refuted = bound == -1
+        checks.append((t("verify.satopt.bound"), refuted, "-"))
+    else:
+        rep = None
+        if known and bound == expected_bound:
+            cnf = satopt.bound_cnf(problem, universe, cands, bound)
+            rep = drup.check(cnf.clauses, p.get("proof") or [],
+                             timeout_s=max(1.0, lim.timeout_ms / 1000))
+        refuted = bool(rep and rep.ok and rep.derived_empty)
+        checks.append((t("verify.satopt.bound"), refuted,
+                       "{} {}".format(">=" if problem == "packing" else "<=", bound)))
+    out = VerifyReport(
+        all(c[1] for c in checks), "sat_optimum", True, checks=checks,
+        detail=t("verify.satopt.detail", problem=problem, k=k,
+                 n=len(universe), c=len(cands)))
+    return out
+
+
 def _verify_propositional_refutation(cert, limits) -> VerifyReport:
     import z3
 
@@ -6669,8 +6767,13 @@ def _verify_drat(cert, limits) -> VerifyReport:
     ext_stopped = drup.drat_trim_available() and getattr(ext, "timed_out", False)
     stopped = (not ok and checks[0][1] and (rep.timed_out or ext_stopped)
                and (rep.ok or rep.timed_out))
+    notes = []
+    if ok and not rep.steps:
+        # Correct, and worth saying: nothing in the proof was needed, because
+        # unit propagation on the formula alone reaches the contradiction.
+        notes.append(t("verify.drat.by_units"))
     return VerifyReport(
-        ok, "drat", True, checks=checks, timed_out=stopped,
+        ok, "drat", True, checks=checks, timed_out=stopped, warnings=notes,
         detail=t("verify.drat.detail", steps=rep.steps, rup=rep.rup_steps,
                  rat=rep.rat_steps, **{"del": rep.deletions},
                  ms=rep.elapsed_ms),
@@ -7500,6 +7603,7 @@ VERIFIERS = {
     "repair_refusal": _verify_repair_refusal,
     "recurrence_table": _verify_recurrence_table,
     "propositional_refutation": _verify_propositional_refutation,
+    "sat_optimum": _verify_sat_optimum,
     "sos": _verify_sos,
     "number": _verify_number,
     "mixed_design": _verify_mixed_design,

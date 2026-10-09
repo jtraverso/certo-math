@@ -250,12 +250,12 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
 
         if res.status is Status.UNSAT or res.verdict is Verdict.UNSATISFIABLE:
             # Infeasible: the subtree is empty, and the ray says why.
-            ray = lp.infeasible_certificate(node_spec, lim)
+            ray = lp.infeasible_ray(node_spec, lim)
             nodes.append({"fixed": key, "why": "infeasible",
                           # The ray alone. The system it refutes is derived
                           # from the root, so a ray for another node's LP does
                           # not fit here.
-                          "ray": (list(ray.payload["y"]) if ray else None)})
+                          "ray": ray})
             continue
 
         # "No certificate" used to be read here as "infeasible", and it is not

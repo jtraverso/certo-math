@@ -6,6 +6,36 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.30.0] — 2026-10-09
+
+**Optima by SAT with a proof, faster exact arithmetic, and a program tied to
+its certificate.** No new commands (59); one new kind (61), `sat_optimum`;
+the schema stays 5.
+
+### New
+
+- **`cover --minimum --sat` and `cover --maximum`**: the optimum of a cover,
+  partition or packing (a hypergraph matching) by SAT -- pysat proposes, when
+  installed -- certified by the chosen parts, counted, and a DRUP proof
+  refuting certo's own encoding of the bound beyond it (`sat_optimum`).
+  `--minimum` takes this route by itself past 62 elements.
+- **`exists` takes a transversal `HypergraphSpec`**: `--max-parts k` refuted
+  is tau > k, by DRAT.
+- **`LPSpec.to_data()`**: the program as a JSON spec, bounds and kinds kept;
+  **`certificate.same_program(cert, spec)`** names what differs between a
+  certificate's program and yours.
+- `VerifyReport.method`; `LPSpec` points `.var()` and friends to their names;
+  a DRAT refutation with no steps says unit propagation closes it.
+
+### Faster
+
+- **The exact simplex in GMP rationals** (`gmpy2`, optional): the same
+  answers, measured 3.9 times faster. **FLINT** solves the exact systems of
+  the float-basis route and multiplies large integer matrices for `matrix`.
+- **Branch and bound keeps a node's Farkas ray only** -- sparse, never
+  serialising the dense matrix twice per infeasible node -- and reads its
+  discrete variables without walking every column.
+
 ## [0.29.0] — 2026-10-09
 
 **The least concentrated optimum, the best constant, both signs of an

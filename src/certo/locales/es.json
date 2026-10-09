@@ -2172,5 +2172,22 @@
   "hypergraph.no_edges": "un HypergraphSpec necesita hiperaristas",
   "hypergraph.cover_needs_transversal": "`cover` responde un TRANSVERSAL; un matching corre con `opt` o `mixed --prove-optimal`",
   "hypergraph.cover_unweighted": "`cover --minimum` cuenta vértices; un transversal con pesos corre con `mixed --prove-optimal`",
-  "recurrence.proved_cover": "MÍNIMO {k}, DEMOSTRADO: no menos de los {c} candidatos cubren los {n} elementos, y {k} lo hacen. La tabla de la recurrencia ({states} estados) es el certificado, sin solver."
+  "recurrence.proved_cover": "MÍNIMO {k}, DEMOSTRADO: no menos de los {c} candidatos cubren los {n} elementos, y {k} lo hacen. La tabla de la recurrencia ({states} estados) es el certificado, sin solver.",
+  "cert.note.sat_optimum": "El óptimo de una cubierta, partición o empaquetado: las partes elegidas lo alcanzan (contadas), y una prueba DRUP refuta la propia codificación de certo de la cota más allá. No se confía en ningún solver.",
+  "verify.satopt.attained": "los candidatos elegidos resuelven el problema con exactamente la cantidad óptima",
+  "verify.satopt.bound": "la cota más allá del óptimo está refutada: recodificada, la prueba comprobada por propagación unitaria",
+  "verify.satopt.detail": "el óptimo de {problem} es {k}: {n} elementos, {c} candidatos",
+  "satopt.bad_problem": "el problema `{problem}` no es uno de: {known}",
+  "satopt.none": "NO existe {problem} del universo con estos candidatos",
+  "satopt.no_proof": "la refutación de la cota no volvió con una prueba ({status})",
+  "satopt.proved.cover": "MÍNIMO {k}, DEMOSTRADO: {k} de los {c} candidatos cubren los {n} elementos, y una prueba DRUP ({lines} líneas) refuta {k} - 1. Se verifica sin solver",
+  "satopt.proved.partition": "MÍNIMO {k}, DEMOSTRADO: {k} de los {c} candidatos parten los {n} elementos, y una prueba DRUP ({lines} líneas) refuta {k} - 1. Se verifica sin solver",
+  "satopt.proved.packing": "MÁXIMO {k}, DEMOSTRADO: {k} candidatos disjuntos dos a dos de los {c}, y una prueba DRUP ({lines} líneas) refuta {k} + 1. Se verifica sin solver",
+  "hypergraph.packing_needs_matching": "`cover --maximum` responde un MATCHING; un transversal corre con `cover --minimum`",
+  "doctor.what.gmpy2": "el simplex exacto en racionales de GMP: las mismas respuestas, unas cuatro veces más rápido",
+  "doctor.without.gmpy2": "el simplex exacto corre en Fraction de Python, unas cuatro veces más lento; pip install gmpy2",
+  "doctor.what.pysat": "cover --minimum --sat / --maximum: una búsqueda SAT rápida del óptimo (la prueba es la propia de certo)",
+  "doctor.without.pysat": "la búsqueda del óptimo usa el CDCL interno de certo, más lento en instancias grandes; pip install python-sat",
+  "spec.lp_alias": "LPSpec no tiene `{name}`: es `{hint}`",
+  "verify.drat.by_units": "la prueba no tiene pasos: la propagación unitaria sobre la fórmula sola llega a la contradicción"
 }

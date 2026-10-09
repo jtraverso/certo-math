@@ -133,6 +133,11 @@ CONTRACTS = {
         "the matching or transversal written as its 0-1 program (its "
         "relaxation with integer=False, which is a RELAXATION). Same open "
         "obligation: that the rows are the vertices or hyperedges named"),
+    ("HypergraphSpec", "to_packing"): Contract(
+        EQUIVALENT, {},
+        "a matching as a packing: the vertices are the universe, the "
+        "hyperedges the candidates; a maximum packing is a maximum matching. "
+        "Same open obligation"),
     ("HypergraphSpec", "to_cover"): Contract(
         EQUIVALENT, {},
         "a transversal as a cover: the universe is the hyperedges, each "

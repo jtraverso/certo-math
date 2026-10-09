@@ -284,7 +284,7 @@ KIND_OF = {
     "cycle": "dependency_cycle", "bind": "lean_binding",
     "family": "family_extremum", "ratio": "ratio_bound",
     "moment": "first_moment", "entry": "first_entry", "exists": ("drat", "cnf_model", "exact_cover"),
-    "cover": ("exact_cover", "repair_refusal", "recurrence_table"), "sos": "sos", "number": "number",
+    "cover": ("exact_cover", "repair_refusal", "recurrence_table", "sat_optimum"), "sos": "sos", "number": "number",
     # A satisfiable CNF gives a model; an unsatisfiable one gives the proof.
     "cases": ("drat", "cnf_model"), "enum": "graph_set",
     # A sweep over a graph family, any finite domain, or with the orbits of

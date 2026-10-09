@@ -110,6 +110,16 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P2** | HiGHS directly (`highspy`): the optimal BASIS from the solver (no inference from the float support), an IIS for an infeasible LP (smaller Farkas rays), the MIP's dual bound and incumbent to start branch and bound | **M** | med | med | `highspy` is installed and only reached through PuLP |
+| **P2** | Rigorous numerics from FLINT (Arb/Acb): root isolation with error balls plus Sturm counts (comparing algebraic numbers), certified eigenvalue enclosures (spectral bounds of graphs), rigorous integrals in `bounds` | **M** | med | med | `complex_roots`, `acb_mat.eig`, `acb.integral` checked available in python-flint 0.9 |
+| **P3** | Proposers from scipy and networkx: weighted assignment by the Hungarian method (its dual potentials ARE the certificate), graph isomorphism maps by VF2 (checked edge by edge), Bron-Kerbosch for `cliques_of` | **S each** | high | low | installed, unused |
+| **P2** | The recurrence over masks for a PACKING (most disjoint candidates), beside partition and cover | **S-M** | high | low | `cover --maximum` answers it by SAT since 0.30; a solver-free table for small universes is the other route |
+| **P2** | Labels that keep apart a FEASIBLE bound, an LP optimum, a relaxation bound and a written universal proof, on every summary; a cover is an upper bound unless proved minimum | **S-M** | med | low | gap-cordal T328-T345 (seven sections); the card covers role and pending, not this |
+| **P2** | The scope of a synthesis said with it: a scalar model is not the physical object, over-approximated domains recorded, a counterexample marked realisable or not | **S-M** | med | low | gap-cordal T330-T348 (six sections); regimes cover part of it |
+| **P2** | `same_program` beyond LPs: a certificate of an ideal, a cover or a CNF compared with the consumer's model in memory | **S-M** | med | low | gap-cordal T329-T349; LPs since 0.30 |
+| **P3** | Estimate columns and memory before expanding local clique LPs, and route large blocks to parametric templates | **S** | med | low | gap-cordal T331, T334: a user's own expansion passed 2 GiB |
+| **P3** | Certificates of a dynamic programme over a block tree (messages, the cycle-closing bit); oriented multigraphs with multiplicity and exact decoding | **M-L** | low | med | gap-cordal T340, T346, T347 |
+| **P3** | Coherent-metadata mutations in `verify --tamper` (a duplicated part with `size` adjusted, claim+1 with cofactors kept, an UNSAT claim on a SAT CNF with the header fixed) | **S** | high | low | gap-cordal T335, T343, T344: all of them caught today, asked for as a packaged battery |
 | **P3** | Certificate transformations for a promoted leaf (loss of exactly 1, resources and virtuals kept), and promotion tracking by leaf identity | **M** | low | med | user feedback (gap-cordal 110); belongs with the construction-contracts row |
 | **P2** | Composition with PORTS: gadgets, projection contracts (each global partition induces a valid local state), refusing to add minima of incompatible states; an owner change certified relative to a previous packing; a Kempe trace with lists; integer balances derived from the trace, not re-entered | **L** | med | high | two reports, thirteen sections; acceptance tests in the feedback (two IN2 give 4/5, not 9/10 + 9/10). Joins the Tuza contracts row |
 | **P3** | Localisation and quotient maps as typed obligations (base ring, inverted elements, images of generators, both compositions, a cancelled factor's unit condition), and component transport across charts with the four presence cases | **L** | **low** | med | user feedback (E11); joins the isomorphism-of-localised-quotients row |
@@ -155,7 +165,7 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | `certo report --submit`, opt-in | **S** | med | low | phase 1 sends nothing, deliberately |
 | **P3** | PyNormaliz as a proposer for `semigroup --hilbert` | **S** | med | low | Linux-only, no Windows wheel; Normaliz computes, `check_hilbert` already decides. Optional backend like `geng` |
 | **P3** | PySCIPOpt's exact mode and VIPR certificates | **M** | low | **high** | unverified that the wheel ships exact SCIP at all. Check that first, before sizing |
-| **P3** | cypari2 / fpylll: number fields, primality, lattice reduction | **L** | low | med | no Windows wheels. A new domain for cypari2; fpylll proposes what `matrix` already checks |
+| **P2** | PARI through `cypari` (it HAS Windows wheels -- the cypari2 blocker was the wrong package): certified primality (`primecert`, checked by certo's arithmetic) as a kind; factorisations; number-field isomorphisms (`nfisisom`) and lattice reduction (`qflll`), each with a checkable witness; automorphisms of forms (`qfauto`) | **M each** | med | med | installed here, PARI 2.15; proposers, never trusted. fpylll stays without a wheel |
 
 **Not planned: an adapter that runs another tool's operations inside certo.**
 Asked for so that a second checker costs no start-up per call. It is a
@@ -365,6 +375,7 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Optima by SAT with a proof (`sat_optimum`), `exists` on transversals, `LPSpec.to_data` and `same_program`, gmpy2 in the simplex, FLINT for exact systems and integer products, sparse rays in branch and bound | **0.30.0** |
 | The least concentrated optimum (`--diffuse`), the best constant on a refutation, both signs of an objective and `exact` in the card, hypergraphs and the triangle numbers, `cover --minimum` with the LP bound (the exact cover number in one output) | **0.29.0** |
 | Boolean cores refuted by DRUP over certo's own encoding; minimum partitions by a recurrence table; refused repairs sealed | `prove --drat`, `cover --minimum`, `repair_refusal`, **0.28.0** |
 | `ideal`: supplied cofactors, linear elimination lifted back, `nonzero` obligations, progress; `bind` reading Lean (`kernel_checked` / `user_asserted`) | **0.28.0** |
@@ -1084,7 +1095,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.29.0**, with **60 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.30.0**, with **61 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1094,7 +1105,7 @@ lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
 `ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`; in 0.26.1 `helpers`
-(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
+(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.30.0 the kind `sat_optimum`; in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

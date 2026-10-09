@@ -679,6 +679,13 @@ transversal, `cover --minimum`. `certo.hypergraph.triangle_packing(n, edges)`
 and `triangle_cover(n, edges)` give nu(G) and tau(G) of a graph
 (`examples/triangle_numbers.py`, `examples/triangle_cover.json`).
 
+**A program as data, and a certificate tied to it.** `LPSpec.to_data()` writes
+the program as a JSON spec `load_spec` reads back -- bounds, kinds, sense,
+objective, constraints, target and loads kept, numbers exact -- so a round trip
+cannot drop a bound. `certo.certificate.same_program(cert, spec)` says whether
+an LP certificate is about THIS program and names what differs: a right-hand
+side, a coefficient, the objective, the sense.
+
 ### `certo mixed`
 
 **Question** — …and is it really optimal over the integers?
@@ -2020,6 +2027,16 @@ table.
 `cover --minimum` also states the LP relaxation's bound beside the minimum,
 and the gap between them: the exact cover number and what a fractional
 argument reaches, in one output.
+
+**Past the recurrence: SAT with a proof.** `cover --minimum --sat` -- taken by
+itself past 62 elements -- and `cover --maximum` (a packing: the most pairwise
+disjoint candidates; a hypergraph MATCHING) find the optimum by SAT (pysat
+proposes, when installed) and return a `sat_optimum`: the chosen candidates,
+counted, and a DRUP proof refuting certo's own encoding of one part fewer (one
+more, for a packing), re-encoded and checked by `verify` without a solver
+(`examples/triangle_cover_sat.py`). A `HypergraphSpec` runs here as a packing
+(matching) or a cover (transversal), and `exists --max-parts k` takes a
+transversal: tau > k by DRAT.
 
 ## Build it, assemble it, keep it
 

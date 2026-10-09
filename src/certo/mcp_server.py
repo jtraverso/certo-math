@@ -1079,7 +1079,8 @@ async def cover(spec_path: str | None = None, spec_source: str | None = None,
                 timeout_ms: int = 60_000, optimize: bool = False,
                 prove_optimal: bool = False, max_nodes: int = 5000,
                 wall_timeout_ms: int | None = None, minimum: bool = False,
-                max_states: int | None = None) -> dict:
+                max_states: int | None = None, sat: bool = False,
+                maximum: bool = False) -> dict:
     """`optimize` adds the other side: the relaxation's bound on the cover
     number and, with `prove_optimal`, the integer optimum by branch and
     bound -- each labelled with what it IS. `minimum` proves the minimum
@@ -1091,10 +1092,16 @@ async def cover(spec_path: str | None = None, spec_source: str | None = None,
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f))
     if type(spec).__name__ == "HypergraphSpec":
-        spec = spec.to_cover()
+        spec = spec.to_packing() if spec.problem == "matching" else spec.to_cover()
     elif not isinstance(spec, CoverSpec):
         raise TypeError("cover needs a CoverSpec or a transversal "
                         "HypergraphSpec; spec() returned " + type(spec).__name__)
+    if maximum:
+        return _emit(await _off(algebra.cover_sat, spec, _limits(timeout_ms), str(f),
+                                True), spec_file=f)
+    if minimum and sat:
+        return _emit(await _off(algebra.cover_sat, spec, _limits(timeout_ms), str(f)),
+                     spec_file=f)
     if minimum:
         return _emit(await _off(algebra.cover_minimum, spec, _limits(timeout_ms),
                                 str(f), max_states), spec_file=f)
@@ -1711,7 +1718,12 @@ async def exists(spec_path: str | None = None, spec_source: str | None = None,
     from .spec import CoverSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    spec = load_spec(str(f), CoverSpec)
+    spec = load_spec(str(f))
+    if type(spec).__name__ == "HypergraphSpec":
+        spec = spec.to_cover()
+    elif not isinstance(spec, CoverSpec):
+        raise TypeError("exists needs a CoverSpec or a transversal "
+                        "HypergraphSpec; spec() returned " + type(spec).__name__)
     res = await _off(algebra.exists, spec, _limits(timeout_ms), str(f), "internal", max_parts)
     return _emit(res, spec_file=f)
 

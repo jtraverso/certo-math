@@ -99,6 +99,20 @@ class HypergraphSpec:
                           name="e{}".format(i))
         return lp
 
+    def to_packing(self):
+        """A matching as a PACKING: the universe is the vertices, the
+        candidates the hyperedges -- for `cover --maximum`."""
+        from .spec import CoverSpec
+
+        self._check()
+        if self.problem != "matching":
+            raise ValueError(_t("hypergraph.packing_needs_matching"))
+        if self.weights:
+            raise ValueError(_t("hypergraph.cover_unweighted"))
+        return CoverSpec(universe=list(self.vertex_list()), parts=[],
+                         candidates=[list(e) for e in self.edges], exact=False,
+                         title=self.title or "hypergraph matching")
+
     def to_cover(self):
         """A transversal as a COVER: the universe is the hyperedges, each
         vertex the set of hyperedges it meets -- for `cover --minimum`."""

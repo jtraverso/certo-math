@@ -25,7 +25,7 @@ certificado en concreto: *"verificado sin solver"*, *"comprobado contando, sin
 solver"*, *"reejecutando el spec, no confiando en sus respuestas"*. La tabla de
 abajo es el mapa; la cabecera es el territorio.
 
-## Los sesenta tipos
+## Los sesenta y un tipos
 
 | Tipo | Qué atestigua | ¿Sin solver? |
 |---|---|---|
@@ -84,6 +84,7 @@ abajo es el mapa; la cabecera es el territorio.
 | `cegis` | el objeto no tiene contraejemplos en el dominio acotado | no, vuelve a resolver |
 | `cegis_none` | NO existe implementación: sus restricciones y el contrato en los contraejemplos son insatisfacibles; los contraejemplos asignan solo entradas | no, vuelve a resolver |
 | `propositional_refutation` | un núcleo booleano es contradictorio: cada nombre con su fórmula, recodificado por certo, y una prueba DRUP | **sí**, propagación unitaria |
+| `sat_optimum` | el óptimo de una cubierta, partición o empaquetado: las partes elegidas lo alcanzan, y una prueba DRUP refuta la propia codificación de certo de una parte menos (o más) | **sí**, contando y por propagación unitaria |
 | `recurrence_table` | el mínimo número de candidatos que parten (o cubren) un universo: cada estado de la recurrencia sobre máscaras, cada uno el mínimo sobre sus hijos | **sí**, comparando enteros |
 | `repair_refusal` | un cambio de partición NO es admisible, en el paso y por las razones registradas -- comprobado de nuevo con las reglas que aceptan reparaciones | **sí**, contando |
 | `synth_proved` | el descubrimiento acotado **y** el enunciado universal | no, vuelve a resolver |

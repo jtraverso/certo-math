@@ -190,10 +190,49 @@ class LPSpec:
         upper bound" for a 0-1 variable, and the relaxation was the relaxation
         of a different, unbounded program. Settled wherever the bounds are
         read for a search or a certificate."""
-        for v in self.var_names:
-            if self.kinds.get(v) == "binary":
+        for v, kind in self.kinds.items():
+            if kind == "binary":
                 lo, hi = self.bounds.get(v, (0, None))
-                self.bounds[v] = (0 if lo is None else lo, 1 if hi is None else hi)
+                if lo is None or hi is None:
+                    self.bounds[v] = (0 if lo is None else lo,
+                                      1 if hi is None else hi)
+
+    #: Names people reach for, and what they are called here.
+    _ALIASES = {"var": "variable", "add_variable": "variable",
+                "add_var": "variable", "add_constraint": "constraint",
+                "add_cons": "constraint", "set_objective": "objective",
+                "name": "title", "maximize": "sense='max'",
+                "minimize": "sense='min'"}
+
+    def __getattr__(self, name):
+        hint = LPSpec._ALIASES.get(name)
+        if hint is not None:
+            raise AttributeError(t("spec.lp_alias", name=name, hint=hint))
+        raise AttributeError(name)
+
+    def to_data(self) -> dict:
+        """The program as a JSON spec `load_spec` reads back -- bounds, kinds,
+        sense, objective, constraints, target and loads all kept, exact
+        numbers as strings. A user's own serialiser dropped `lo`/`hi`, and a
+        variable fixed to [1, 1] came back as `v >= 0`: certo certified the
+        optimum of THAT program, correctly, and it was not theirs."""
+        from .exact import serialize
+
+        def q(v):
+            return None if v is None else serialize(v)
+
+        out = {"type": "LPSpec", "sense": self.sense, "title": self.title,
+               "integer": bool(self.integer), "var_names": list(self.var_names),
+               "bounds": {v: [q(lo), q(hi)] for v, (lo, hi) in self.bounds.items()},
+               "obj": {v: q(c) for v, c in self.obj.items()},
+               "cons": [[n, {v: q(c) for v, c in co.items()}, s, q(r)]
+                        for n, co, s, r in self.cons],
+               "kinds": dict(self.kinds)}
+        if self.target is not None:
+            out["target"] = q(self.target)
+        if self.load_names:
+            out["load_names"] = list(self.load_names)
+        return out
 
     def kind_of(self, name) -> str:
         """`integer=True` still means what it used to: all of them."""
@@ -203,9 +242,14 @@ class LPSpec:
 
     @property
     def discrete(self) -> list:
+        # Read in branch and bound's loops: 23 000 times in 60 nodes of a
+        # 1048-column program, each walking every variable through `kind_of`.
         self._binary_bounds()
+        if self.integer:
+            return list(self.var_names)
+        kinds = self.kinds
         return [v for v in self.var_names
-                if self.kind_of(v) in ("integer", "binary")]
+                if kinds.get(v) in ("integer", "binary")]
 
     @property
     def continuous(self) -> list:

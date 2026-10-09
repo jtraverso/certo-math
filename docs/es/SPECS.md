@@ -359,7 +359,7 @@ Las opciones comunes van **después** del subcomando:
 
 | Opción | Hace |
 |---|---|
-| `--json` | resultado legible por máquina en stdout |
+| `--json` | resultado legible por máquina en stdout (un `VerifyReport` en la API: `ok`, `degree`, `solver_free`, `method`, `checks`, `warnings`, `detail`) |
 | `--oneline` | una línea separada por tabuladores: veredicto, estado, tipo, digest, ruta del certificado, detalle (`-` si falta); en `verify`: valid o invalid, grado, tipo, digest, ruta, detalle. Un séptimo campo `pending=k` solo cuando el spec declara k dependencias pendientes |
 | `--cert FILE` | escribe aquí el certificado |
 | `--lang` | `en` o `es`; o pon `CERTO_LANG` |

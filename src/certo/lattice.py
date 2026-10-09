@@ -98,10 +98,23 @@ def identity(n) -> list:
     return [[1 if i == j else 0 for j in range(n)] for i in range(n)]
 
 
+#: A product of at least this many multiply-adds goes through FLINT's
+#: `fmpz_mat` when python-flint is there: the same integers, much faster.
+FLINT_FROM = 20_000
+
+
 def multiply(A, B) -> list:
     """Exact integer matrix product: the operation every check reduces to."""
     if len(A[0]) != len(B):
         raise NotAnIntegerMatrix(_t("lattice.shapes", a=shape(A), b=shape(B)))
+    if len(A) * len(B) * len(B[0] if B else []) >= FLINT_FROM:
+        from .polynomials import _flint
+
+        fl = _flint()
+        if fl is not None:
+            prod = fl.fmpz_mat([[int(x) for x in r] for r in A]) * \
+                fl.fmpz_mat([[int(x) for x in r] for r in B])
+            return [[int(x) for x in row] for row in prod.tolist()]
     cols = list(zip(*B))
     return [[sum(a * b for a, b in zip(row, col)) for col in cols]
             for row in A]
