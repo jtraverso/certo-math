@@ -128,6 +128,16 @@ CONTRACTS = {
     ("CoverSpec", "to_lp"): Contract(
         EQUIVALENT, {},
         "the same cover written as a linear program. Same open obligation"),
+    ("HypergraphSpec", "to_lp"): Contract(
+        EQUIVALENT, {},
+        "the matching or transversal written as its 0-1 program (its "
+        "relaxation with integer=False, which is a RELAXATION). Same open "
+        "obligation: that the rows are the vertices or hyperedges named"),
+    ("HypergraphSpec", "to_cover"): Contract(
+        EQUIVALENT, {},
+        "a transversal as a cover: the universe is the hyperedges, each "
+        "vertex the set of hyperedges it meets; a minimum cover is a minimum "
+        "transversal. Same open obligation"),
     ("MultiSpec", "single"): Contract(
         RESTRICTION, {},
         "one goal of the many, under all the same assumptions"),
