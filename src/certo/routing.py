@@ -182,6 +182,8 @@ def prepared(spec):
     """
     if type(spec).__name__ == "PackingSpec":
         return spec.to_lp()
+    if type(spec).__name__ == "HypergraphSpec":
+        return spec.to_lp()
     return spec
 
 

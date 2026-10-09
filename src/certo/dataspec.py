@@ -49,7 +49,7 @@ class NotData(ValueError):
 #: and pretending otherwise would mean inventing an expression language --
 #: which is the thing this project decided not to build.
 BUILDABLE = (
-    "LPSpec", "PackingSpec", "MatrixSpec", "LinearSystemSpec", "ConeSpec",
+    "LPSpec", "PackingSpec", "HypergraphSpec", "MatrixSpec", "LinearSystemSpec", "ConeSpec",
     "CycleSpec", "CoverSpec", "CNFSpec", "NumberSpec", "EquitableQuotientSpec",
 )
 

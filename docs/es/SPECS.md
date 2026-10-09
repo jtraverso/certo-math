@@ -53,6 +53,7 @@ es entero.
 | `SynthSpec` | `synth` |
 | `LPSpec` | `opt`, `mixed` |
 | `PackingSpec` | `opt` |
+| `HypergraphSpec` | `opt`, `mixed`, `cover` (un transversal) |
 | `CNFSpec` | `cases`, `shrink` |
 | `SweepSpec` | `sweep`, `shrink`, `enum` |
 | `DomainSpec` | `sweep`, `cases`, `shrink` sobre cualquier dominio finito |

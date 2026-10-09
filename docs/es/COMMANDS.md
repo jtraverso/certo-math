@@ -61,6 +61,11 @@ propagación unitaria -- sin solver en la base de confianza
 (`examples/hall_drat.py`). Un núcleo que no es booleano conserva su
 certificado `unsat_core` y la corrida dice por qué (`drat_refused`).
 
+**La mejor constante.** Cuando un enunciado refutado acota una variable por una
+constante y las hipótesis son lineales, `prove` ejecuta `range` por sí mismo y
+dice la constante que las hipótesis SÍ dan -- `l <= 7/2` donde se afirmó
+`l <= 3` -- con su certificado `variable_range` en `best_constant`.
+
 ### `certo core`
 
 **Pregunta** — ¿Qué hipótesis necesita realmente?
@@ -666,6 +671,27 @@ no es «no se puede llegar». El veredicto distingue los dos casos.
 `meta.objective` lleva el óptimo bajo el mismo nombre que usa `opt` para el
 mismo número, así que un script lee las dos rutas igual.
 
+**Los dos valores, con su signo.** En una minimización el campo `objective` del
+certificado es CANÓNICO -- el máximo del objetivo negado, `-1/8` para un mínimo
+de `1/8` -- y el valor declarado está en `declared`. `opt` ahora dice ambos
+(`objective_declared`, `objective_canonical`, `sense`), y también la ficha. La
+ficha dice además `exact`: un certificado en flotante verifica (`ok`,
+`solver_free`) y es `partial` -- no es una constante para citar.
+
+**`--diffuse`: el óptimo menos concentrado.** Entre las soluciones ÓPTIMAS, la
+que carga menos su PAR de recursos más cargado, y ese mínimo `t*`, certificado
+por el dual de un segundo programa que mantiene el óptimo y acota la carga
+conjunta de cada par por `t`. Responde si un soporte óptimo concentrado es de
+ESTA solución o de todas -- la hipótesis que necesita un teorema de redondeo.
+Los recursos son las filas `<=` con coeficientes no negativos que no están
+declaradas como cargas.
+
+**Hipergrafos y triángulos.** Un `HypergraphSpec(edges, problem="matching" |
+"transversal", weights)` -- también como JSON -- corre con `opt` (el valor
+fraccional con su dual), `mixed --prove-optimal` (el óptimo entero) y, para un
+transversal, `cover --minimum`. `certo.hypergraph.triangle_packing(n, edges)` y
+`triangle_cover(n, edges)` dan nu(G) y tau(G) de un grafo
+(`examples/triangle_numbers.py`, `examples/triangle_cover.json`).
 
 ### `certo mixed`
 
@@ -2034,6 +2060,10 @@ Hasta 62 elementos; `--max-states` acota la tabla.
 devuelve un certificado `repair_refusal` -- el cambio, el paso que falla y por
 qué -- y `verify` vuelve a ejecutar la misma comprobación y exige el mismo
 rechazo (`examples/repair_refused.py`).
+
+`cover --minimum` dice además la cota de la relajación LP junto al mínimo, y la
+brecha entre ambos: el número de cubierta exacto y lo que alcanza un argumento
+fraccional, en una sola salida.
 
 ## Construir, ensamblar, conservar
 

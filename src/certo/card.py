@@ -151,7 +151,11 @@ def card_of(cert, report=None) -> dict:
     decl = dict(p.get("card") or {})
     prov = cert.provenance or {}
     cited = dict(p.get("citations") or {})
-    used = [n for n in (p.get("names") or []) if n != "__goal__"]
+    # Hypotheses only where the payload's names ARE hypotheses: an LP's row
+    # names are constraints of a program, not assumptions of a proof.
+    used = ([n for n in (p.get("names") or []) if n != "__goal__"]
+            if cert.kind in ("unsat_core", "propositional_refutation", "farkas")
+            else [])
     out = {
         "kind": cert.kind,
         "conclusion": (report.detail if report is not None else cert.note) or "",
@@ -176,6 +180,19 @@ def card_of(cert, report=None) -> dict:
             "package": os.path.dirname(os.path.abspath(__file__)),
         },
     }
+    # THE VALUE, both ways and with their signs, for an LP: what the spec
+    # declared and what the certificate's canonical field holds.
+    if cert.kind == "lp_dual":
+        declared = (p.get("declared") or {}).get("objective")
+        out["objective_declared"] = declared if declared is not None else p.get("objective")
+        out["objective_canonical"] = p.get("objective")
+        out["sense"] = p.get("sense", "max")
+    # EXACT means citable as an exact constant: a valid certificate whose
+    # degree is `partial` (a floating-point dual) is not, whatever `ok` and
+    # `solver_free` say.
+    out["exact"] = (report is not None and report.ok
+                    and report.degree in ("complete", "with_solver", "relative")
+                    and p.get("exact", True) is not False)
     out["external"] = ([{"sort": "cited", "name": n, "source": s}
                         for n, s in sorted(cited.items())]
                        + [{"sort": "pending", "name": n} for n in out["pending"]])
@@ -195,6 +212,12 @@ def lines(card) -> list:
                      cited=len(card["cited"])))
     if card["pending"]:
         out.append(t("card.pending", names="; ".join(card["pending"])))
+    if card.get("objective_canonical") is not None:
+        out.append(t("card.objective", sense=card["sense"],
+                     declared=card["objective_declared"],
+                     canonical=card["objective_canonical"]))
+    if card["degree"] is not None and not card["exact"]:
+        out.append(t("card.not_exact", degree=card["degree"]))
     pv = card["provenance"]
     out.append(t("card.provenance", produced=pv["produced_by"] or "?",
                  verified=pv["verified_by"], digest=pv["digest"],

@@ -2099,3 +2099,9 @@ class OrderSpec:
     var: str = "n"
     expect: object = None            # "decays" | "constant" | "grows" | None
     title: str = ""
+
+
+# A hypergraph's matching and transversal (and the triangle numbers of a
+# graph): an LP the existing commands answer. Defined in its own module,
+# named here so a JSON spec and `load_spec` reach it like every other type.
+from .hypergraph import HypergraphSpec  # noqa: E402,F401

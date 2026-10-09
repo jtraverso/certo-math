@@ -2121,7 +2121,7 @@
   "recurrence.empty": "--minimum needs a universe and candidates",
   "recurrence.too_wide": "{n} elements: --minimum indexes them by bits and takes at most 62",
   "recurrence.none_found": "NO partition of the {n} elements uses only these {c} candidates -- the recurrence's table proves it, solver-free",
-  "recurrence.proved": "MINIMUM {k}, PROVED: no fewer of the {c} candidates partition the {n} elements, and {k} do. The recurrence's table ({states} states) is the certificate, solver-free",
+  "recurrence.proved": "MINIMUM {k}, PROVED: no fewer of the {c} candidates partition the {n} elements, and {k} do. The recurrence's table ({states} states) is the certificate, solver-free.",
   "recurrence.no_target": "the table has no entry for the whole universe",
   "recurrence.bad_base": "the empty set is not worth 0",
   "recurrence.outside": "an entry names elements outside the universe",
@@ -2159,5 +2159,18 @@
   "engine.bind.states": "PROVED: `{decl}` STATES this {kind} certificate -- Lean's kernel accepted its type as the type of certo's own export of it, with no `sorry`",
   "engine.bind.states_not": "REFUTED: `{decl}` does not state this {kind} certificate -- its type is not the export's, or it rests on `sorry`. {why}",
   "engine.bind.no_export": "this kind has no single-theorem export to compare with",
-  "verify.bind.detail_states": "{decl} states the certificate: {states}"
+  "verify.bind.detail_states": "{decl} states the certificate: {states}",
+  "card.objective": "value: {declared} ({sense}, as declared); canonical {canonical} (the certificate's `objective`, a maximum)",
+  "card.not_exact": "NOT EXACT ({degree}): do not quote its constants as exact",
+  "engine.diffuse.no_optimum": "--diffuse needs the exact optimum first, and did not get it: {detail}",
+  "engine.diffuse.no_pairs": "no column uses two resources together: there is no pair load to spread",
+  "engine.diffuse.not_exact": "the second program (the pair loads at the optimum) did not certify exactly: {detail}",
+  "engine.diffuse.proved": "Among the OPTIMAL solutions (value {z}), the least possible largest joint load of a pair of resources is {t}, certified by the dual of the second program ({pairs} pairs). The solver's own optimum loads {l0} on {p0}",
+  "engine.prove.best_constant": "the best constant the hypotheses give: {var} lies in {interval}, so the claim holds with {bound} -- certified by a variable_range certificate (in `best_constant`, or `certo range SPEC --var {var}`)",
+  "recurrence.lp_bound": "The LP relaxation bounds it below by {bound} (dual-certified, `cover --optimize` writes that certificate): gap {gap}.",
+  "hypergraph.bad_problem": "the problem `{problem}` is not one of: {known}",
+  "hypergraph.no_edges": "a HypergraphSpec needs hyperedges",
+  "hypergraph.cover_needs_transversal": "`cover` answers a TRANSVERSAL; a matching runs under `opt` or `mixed --prove-optimal`",
+  "hypergraph.cover_unweighted": "`cover --minimum` counts vertices; a weighted transversal runs under `mixed --prove-optimal`",
+  "recurrence.proved_cover": "MINIMUM {k}, PROVED: no fewer of the {c} candidates cover the {n} elements, and {k} do. The recurrence's table ({states} states) is the certificate, solver-free."
 }

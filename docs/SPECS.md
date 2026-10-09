@@ -52,6 +52,7 @@ counterexamples can be spurious (`nu = -1/2`). Declare them with `z3.Int` /
 | `SynthSpec` | `synth` |
 | `LPSpec` | `opt`, `mixed` |
 | `PackingSpec` | `opt` |
+| `HypergraphSpec` | `opt`, `mixed`, `cover` (a transversal) |
 | `CNFSpec` | `cases`, `shrink` |
 | `SweepSpec` | `sweep`, `shrink`, `enum` |
 | `DomainSpec` | `sweep`, `cases`, `shrink` over any finite domain |

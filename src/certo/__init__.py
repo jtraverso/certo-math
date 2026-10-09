@@ -18,6 +18,7 @@ from .graphs import Graph
 from . import api, doctor, reducers
 from .structures import SetFamily, family_from_masks, mask_to_set, set_to_mask
 from .packing import PackingSpec, loads_from_dual
+from .hypergraph import HypergraphSpec
 from .i18n import set_lang, t
 from .limits import Limits
 from .polynomials import Poly
@@ -29,7 +30,7 @@ from .spec import (BisectSpec, BoundSpec, DomainSpec, IdealSpec,
                    SynthSpec, load_spec)
 from .status import Result, Status, Verdict
 
-__version__ = "0.28.0"
+__version__ = "0.29.0"
 
 # `spec.role(...)`, `.link(...)`, `.pending(...)` on every spec type: the
 # card a certificate carries (`certo.card`).
@@ -46,7 +47,7 @@ __all__ = [
     "Outcome", "load_spec",
     "Limits", "Status", "Verdict", "Result",
     "Certificate", "VerifyReport", "verify",
-    "Graph", "PackingSpec", "loads_from_dual", "doctor", "reducers", "SetFamily",
+    "Graph", "PackingSpec", "HypergraphSpec", "loads_from_dual", "doctor", "reducers", "SetFamily",
     "family_from_masks", "mask_to_set", "set_to_mask", "set_lang", "t",
     "api",
     "__version__",

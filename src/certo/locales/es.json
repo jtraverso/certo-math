@@ -2121,7 +2121,7 @@
   "recurrence.empty": "--minimum necesita un universo y candidatos",
   "recurrence.too_wide": "{n} elementos: --minimum los indexa por bits y admite a lo más 62",
   "recurrence.none_found": "NINGUNA partición de los {n} elementos usa solo estos {c} candidatos -- lo prueba la tabla de la recurrencia, sin solver",
-  "recurrence.proved": "MÍNIMO {k}, DEMOSTRADO: no menos de los {c} candidatos parten los {n} elementos, y {k} lo hacen. La tabla de la recurrencia ({states} estados) es el certificado, sin solver",
+  "recurrence.proved": "MÍNIMO {k}, DEMOSTRADO: no menos de los {c} candidatos parten los {n} elementos, y {k} lo hacen. La tabla de la recurrencia ({states} estados) es el certificado, sin solver.",
   "recurrence.no_target": "la tabla no tiene entrada para el universo completo",
   "recurrence.bad_base": "el conjunto vacío no vale 0",
   "recurrence.outside": "una entrada nombra elementos fuera del universo",
@@ -2159,5 +2159,18 @@
   "engine.bind.states": "DEMOSTRADO: `{decl}` ENUNCIA este certificado {kind} -- el kernel de Lean aceptó su tipo como el de la exportación de certo, sin `sorry`",
   "engine.bind.states_not": "REFUTADO: `{decl}` no enuncia este certificado {kind} -- su tipo no es el de la exportación, o descansa en `sorry`. {why}",
   "engine.bind.no_export": "este tipo no tiene una exportación de un solo teorema con la que comparar",
-  "verify.bind.detail_states": "{decl} enuncia el certificado: {states}"
+  "verify.bind.detail_states": "{decl} enuncia el certificado: {states}",
+  "card.objective": "valor: {declared} ({sense}, como se declaró); canónico {canonical} (el `objective` del certificado, un máximo)",
+  "card.not_exact": "NO EXACTO ({degree}): no cites sus constantes como exactas",
+  "engine.diffuse.no_optimum": "--diffuse necesita primero el óptimo exacto, y no lo obtuvo: {detail}",
+  "engine.diffuse.no_pairs": "ninguna columna usa dos recursos a la vez: no hay carga de pares que repartir",
+  "engine.diffuse.not_exact": "el segundo programa (las cargas de pares en el óptimo) no se certificó en forma exacta: {detail}",
+  "engine.diffuse.proved": "Entre las soluciones ÓPTIMAS (valor {z}), la menor carga conjunta máxima posible de un par de recursos es {t}, certificada por el dual del segundo programa ({pairs} pares). El óptimo del propio solver carga {l0} en {p0}",
+  "engine.prove.best_constant": "la mejor constante que dan las hipótesis: {var} está en {interval}, así que el enunciado vale con {bound} -- certificado por un certificado variable_range (en `best_constant`, o `certo range SPEC --var {var}`)",
+  "recurrence.lp_bound": "La relajación LP la acota por debajo en {bound} (certificada por el dual; `cover --optimize` escribe ese certificado): brecha {gap}.",
+  "hypergraph.bad_problem": "el problema `{problem}` no es uno de: {known}",
+  "hypergraph.no_edges": "un HypergraphSpec necesita hiperaristas",
+  "hypergraph.cover_needs_transversal": "`cover` responde un TRANSVERSAL; un matching corre con `opt` o `mixed --prove-optimal`",
+  "hypergraph.cover_unweighted": "`cover --minimum` cuenta vértices; un transversal con pesos corre con `mixed --prove-optimal`",
+  "recurrence.proved_cover": "MÍNIMO {k}, DEMOSTRADO: no menos de los {c} candidatos cubren los {n} elementos, y {k} lo hacen. La tabla de la recurrencia ({states} estados) es el certificado, sin solver."
 }

@@ -217,10 +217,25 @@ def cover_minimum(spec, limits: Limits | None = None, spec_path: str = "",
                       meta=meta)
     meta["minimum"] = value
     meta["parts"] = [cands[j] for j in chosen]
+    detail = t("recurrence.proved" if spec.exact else "recurrence.proved_cover",
+               k=value, n=len(universe), c=len(cands), states=len(table))
+    # THE EXACT COVER NUMBER IN ONE OUTPUT: the minimum, proved here, beside
+    # the LP relaxation's bound, certified by its dual -- and the gap
+    # between them, which is what a fractional argument cannot close.
+    try:
+        bounds = cover_bounds(spec, lim)
+        if bounds.get("relaxation") is not None:
+            from fractions import Fraction as _F
+
+            lpb = _F(bounds["relaxation"])
+            meta["lp_bound"] = bounds["relaxation"]
+            meta["gap"] = str(_F(value) - lpb)
+            detail += " " + t("recurrence.lp_bound", bound=bounds["relaxation"],
+                              gap=meta["gap"])
+    except Exception:  # noqa: BLE001 -- the bound is a companion, not the answer
+        pass
     return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms(), cert,
-                  detail=t("recurrence.proved", k=value, n=len(universe),
-                           c=len(cands), states=len(table)),
-                  meta=meta)
+                  detail=detail, meta=meta)
 
 
 def _serial_problems(problems) -> list:

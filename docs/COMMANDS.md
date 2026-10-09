@@ -61,6 +61,11 @@ core again and checks the proof by unit propagation -- no solver in the trusted
 base (`examples/hall_drat.py`). A core that is not Boolean keeps its
 `unsat_core` certificate and the run says why (`drat_refused`).
 
+**The best constant.** When a refuted claim bounds one variable by a
+constant and the hypotheses are linear, `prove` runs `range` itself and says
+the constant the hypotheses DO give -- `l <= 7/2` where `l <= 3` was claimed --
+with its `variable_range` certificate in `best_constant`.
+
 ### `certo core`
 
 **Question** — Which of my hypotheses does it actually need?
@@ -652,6 +657,27 @@ two.
 `meta.objective` carries the optimum under the same name `opt` uses for the
 same number, so one script reads both paths.
 
+**Both values, with their signs.** For a minimisation the certificate's
+`objective` field is CANONICAL -- the maximum of the negated objective, `-1/8`
+for a minimum of `1/8` -- and the declared value is in `declared`. `opt` now
+says both (`objective_declared`, `objective_canonical`, `sense`), and so does
+the card. The card also says `exact`: a floating-point certificate verifies
+(`ok`, `solver_free`) and is `partial` -- not a constant to quote.
+
+**`--diffuse`: the least concentrated optimum.** Among the OPTIMAL solutions,
+the one whose most loaded PAIR of resources carries the least, and that least
+value `t*`, certified by the dual of a second program that holds the optimum
+and bounds every pair's joint load by `t`. It answers whether a concentrated
+optimal support is THIS solution's or every one's -- the hypothesis a
+rounding theorem needs. Resources are the `<=` rows with non-negative
+coefficients that are not declared loads.
+
+**Hypergraphs and triangles.** A `HypergraphSpec(edges, problem="matching" |
+"transversal", weights)` -- also as JSON -- runs under `opt` (the fractional
+value with its dual), `mixed --prove-optimal` (the integer optimum) and, for a
+transversal, `cover --minimum`. `certo.hypergraph.triangle_packing(n, edges)`
+and `triangle_cover(n, edges)` give nu(G) and tau(G) of a graph
+(`examples/triangle_numbers.py`, `examples/triangle_cover.json`).
 
 ### `certo mixed`
 
@@ -1990,6 +2016,10 @@ table.
 `repair_refusal` certificate -- the change, the step that fails and why -- and
 `verify` re-runs the same check and requires the same refusal
 (`examples/repair_refused.py`).
+
+`cover --minimum` also states the LP relaxation's bound beside the minimum,
+and the gap between them: the exact cover number and what a fractional
+argument reaches, in one output.
 
 ## Build it, assemble it, keep it
 

@@ -571,6 +571,136 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
         target=None, dual_direction=None, _vectors_only: bool = False,
         round: bool = False, cuts=None, _ray: bool = True,
         exact_required: bool = False, primal=None) -> Result:
+    """See `_opt`. Both objective values are said, each with its sign: the
+    DECLARED one, in the spec's own sense, and the CANONICAL one the
+    certificate's `objective` field holds -- the maximum of the negated
+    objective, for a minimisation. A harness read `-1/8` for a minimum of
+    `1/8`; nothing on screen said which was which."""
+    res = _opt(spec, limits, use_exact, target, dual_direction, _vectors_only,
+               round, cuts, _ray, exact_required, primal)
+    cert = res.certificate
+    if cert is not None and cert.kind == "lp_dual":
+        p = cert.payload
+        declared = (p.get("declared") or {}).get("objective")
+        if declared is not None or p.get("objective") is not None:
+            res.meta["objective_declared"] = declared if declared is not None \
+                else p.get("objective")
+            res.meta["objective_canonical"] = p.get("objective")
+            res.meta["sense"] = p.get("sense", getattr(spec, "sense", "max"))
+            res.meta["canonical_form"] = (
+                "max of the NEGATED objective" if res.meta["sense"] == "min"
+                else "max of the objective")
+    return res
+
+
+def diffuse(spec, limits: Limits | None = None) -> Result:
+    """Among the OPTIMAL solutions, the one whose most loaded PAIR of
+    resources carries the least -- and that least value, certified.
+
+    A rounding theorem asked for a primal in which no two resources are used
+    together by much mass, and the solver's optimum concentrated mass 1 on a
+    pair: is that THIS support, or every optimal one? Two linear programs
+    answer it. The first gives the optimum `z*`, exactly. The second keeps
+    every constraint, holds the objective at `z*`, and minimises `t` with,
+    for every pair of resources some column uses together,
+
+        sum of x_j over the columns using both  <=  t.
+
+    Its exact dual certifies `t*`: no optimal solution does better, and the
+    one returned attains it. Resources are the `<=` rows with non-negative
+    coefficients that are not declared loads.
+    """
+    from .. import exact as _exact
+    from ..spec import LPSpec
+
+    lim = limits or Limits()
+    t0 = time.perf_counter()
+    base = spec.relaxed() if getattr(spec, "discrete", None) else spec
+    first = opt(base, lim)
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    if not first.meta.get("exact") or first.meta.get("objective_declared") is None:
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, ENGINE,
+                      ms(), None, detail=t("engine.diffuse.no_optimum",
+                                           detail=first.detail or ""))
+    zstar = _exact.to_fraction(first.meta["objective_declared"])
+    loads = set(getattr(base, "load_names", None) or [])
+    resources = [name for name, coeffs, sense, _rhs in base.cons
+                 if sense == "<=" and name not in loads
+                 and all(_exact.to_fraction(c) >= 0 for c in coeffs.values())]
+    rset = set(resources)
+    uses = {v: [] for v in base.var_names}
+    for name, coeffs, _s, _r in base.cons:
+        if name in rset:
+            for v, c in coeffs.items():
+                if _exact.to_fraction(c) > 0:
+                    uses[v].append(name)
+    pairs = {}
+    for v, rs in uses.items():
+        rs = sorted(rs)
+        for i in range(len(rs)):
+            for j in range(i + 1, len(rs)):
+                pairs.setdefault((rs[i], rs[j]), []).append(v)
+    if not pairs:
+        return Result("opt", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE, ENGINE,
+                      ms(), None, detail=t("engine.diffuse.no_pairs"))
+
+    aug = LPSpec(sense="min", title=(base.title or "") + " [diffuse]")
+    tname = "__pair_load"
+    while tname in base.var_names:
+        tname += "_"
+    for v in base.var_names:
+        lo, hi = base.bounds.get(v, (0, None))
+        aug.variable(v, lo, hi)
+    aug.variable(tname)
+    aug.objective({tname: 1})
+    for name, coeffs, sense, rhs in base.cons:
+        aug.constraint(dict(coeffs), sense, rhs, name=name)
+    aug.constraint(dict(base.obj), ">=" if base.sense == "max" else "<=", zstar,
+                   name="__optimal")
+    for (r1, r2), vs in sorted(pairs.items()):
+        row = {v: 1 for v in vs}
+        row[tname] = -1
+        aug.constraint(row, "<=", 0, name="pair:{}|{}".format(r1, r2))
+    second = opt(aug, lim)
+    if not second.meta.get("exact"):
+        return Result("opt", second.status, Verdict.INCONCLUSIVE, ENGINE, ms(),
+                      None, detail=t("engine.diffuse.not_exact",
+                                     detail=second.detail or ""))
+    tstar = _exact.to_fraction(second.meta["objective_declared"])
+
+    def most_loaded(sol):
+        best, at = None, None
+        for (r1, r2), vs in pairs.items():
+            load = sum((_exact.to_fraction(sol.get(v, 0)) for v in vs),
+                       _exact.to_fraction(0))
+            if best is None or load > best:
+                best, at = load, (r1, r2)
+        return best, at
+
+    l0, p0 = most_loaded(first.meta.get("solution") or {})
+    l1, p1 = most_loaded(second.meta.get("solution") or {})
+    cert = second.certificate
+    return Result(
+        "opt", Status.UNSAT, Verdict.PROVED, ENGINE, ms(), cert,
+        detail=t("engine.diffuse.proved", t=_exact.serialize(tstar),
+                 z=_exact.serialize(zstar), pairs=len(pairs),
+                 l0=_exact.serialize(l0) if l0 is not None else "?",
+                 p0="{} & {}".format(*p0) if p0 else "-"),
+        meta={"diffuse_load": _exact.serialize(tstar),
+              "optimum": _exact.serialize(zstar),
+              "solver_load": _exact.serialize(l0) if l0 is not None else None,
+              "solver_pair": list(p0) if p0 else None,
+              "diffuse_pair": list(p1) if p1 else None,
+              "pairs": len(pairs), "resources": len(resources),
+              "optimum_certificate": first.certificate.digest()
+              if first.certificate is not None else None,
+              "solution": second.meta.get("solution")})
+
+
+def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
+         target=None, dual_direction=None, _vectors_only: bool = False,
+         round: bool = False, cuts=None, _ray: bool = True,
+         exact_required: bool = False, primal=None) -> Result:
     """`_vectors_only=True` is for callers that keep only the dual and the
     primal -- branch and bound, which derives every node's program from the
     root. Serialising the whole matrix into a certificate at every node was

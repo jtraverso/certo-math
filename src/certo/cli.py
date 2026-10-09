@@ -60,7 +60,7 @@ def scope_note(res: Result):
 _HIDDEN_META = ("self_check", "self_check_ms", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
-                "counterexample", "hint", "hints", "regime_report", "lemmas", "used", "unused", "bridges", "lo", "hi",
+                "counterexample", "hint", "hints", "regime_report", "best_constant", "lemmas", "used", "unused", "bridges", "lo", "hi",
                 "width", "ladder", "lo_float", "hi_float", "vacuous",
                 "banner_key", "level", "orbits", "spot_checks",
                 "by_orbit", "evaluated", "inferred", "cofactors", "squares",
@@ -1389,7 +1389,15 @@ def cmd_cover(args):
     from .engines import algebra
     from .spec import CoverSpec, load_spec
 
-    spec = load_spec(args.spec, CoverSpec)
+    spec = load_spec(args.spec)
+    if type(spec).__name__ == "HypergraphSpec":
+        # A transversal IS a cover: the hyperedges, each vertex the set of
+        # hyperedges it meets.
+        spec = spec.to_cover()
+    elif not isinstance(spec, CoverSpec):
+        print("cover needs a CoverSpec or a transversal HypergraphSpec; spec() "
+              "returned " + type(spec).__name__, file=sys.stderr)
+        return 1
     if getattr(args, "minimum", False):
         return emit(algebra.cover_minimum(spec, limits_from(args), spec_path=args.spec,
                                           max_states=getattr(args, "max_states", None)),
@@ -1647,6 +1655,8 @@ def cmd_mixed(args):
     from .spec import LPSpec, load_spec
 
     spec = load_spec(args.spec)
+    if type(spec).__name__ == "HypergraphSpec":
+        spec = spec.to_lp()
     if isinstance(spec, PackingSpec):
         # A packing whose items are whole-or-nothing IS a mixed design, and
         # making the user write the conversion would be busywork.
@@ -1790,6 +1800,8 @@ def cmd_opt(args):
     from .spec import LPSpec, load_spec
 
     spec = load_spec(args.spec)
+    if type(spec).__name__ == "HypergraphSpec":
+        spec = spec.to_lp()
     if isinstance(spec, PackingSpec):
         if getattr(args, "gap", False):
             return _opt_gap(args, spec)
@@ -1806,6 +1818,8 @@ def cmd_opt(args):
 
         return _explored(args, explore.lp("opt", spec, limits_from(args),
                                           target=args.target))
+    if getattr(args, "diffuse", False):
+        return emit(lp.diffuse(spec, limits_from(args)), args)
     direction = lp.direction_from(getattr(args, "dual_direction", None))
     primal = None
     if getattr(args, "primal", None):
@@ -2938,6 +2952,11 @@ def build_parser():
 
     sp = add("opt", "LP/ILP -> dual certificate in EXACT rationals")
     sp.add_argument("spec", help=".py file with a spec() function")
+    sp.add_argument("--diffuse", action="store_true",
+                    help="among the OPTIMAL solutions, the least possible "
+                         "largest joint load of a pair of resources -- "
+                         "certified by the dual of a second LP that holds the "
+                         "optimum -- against the solver's own optimum")
     sp.add_argument("--no-exact", action="store_true", dest="no_exact",
                     help="skip rational reconstruction; leaves a floating-point "
                          "certificate (faster, NOT citable)")

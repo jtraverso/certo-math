@@ -94,6 +94,8 @@ CASES = [
     ("repair_refused.py", "cover", []),
     ("hall_drat.py", "prove", ["--drat"]),
     ("ideal_supplied.py", "ideal", []),
+    ("triangle_numbers.py", "mixed", ["--prove-optimal"]),
+    ("triangle_cover.json", "cover", ["--minimum"]),
     ("synth_prove_identity.py", "synth", ["--prove-candidate"]),
     ("ramsey.py", "cases", []),
     ("propositional.py", "cases", []),

@@ -6,6 +6,34 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.29.0] — 2026-10-09
+
+**The least concentrated optimum, the best constant, both signs of an
+objective, and hypergraphs.** No new commands (59) or kinds (60); the schema
+stays 5.
+
+### New
+
+- **`opt --diffuse`**: among the optimal solutions, the least possible
+  largest joint load of a pair of resources, certified by the dual of a
+  second program that holds the optimum -- whether a concentrated support is
+  this solution's or every optimal one's.
+- **The best constant on a refutation**: a refuted bound on one variable,
+  with linear hypotheses, comes back with the constant they do give and its
+  `variable_range` certificate (`best_constant`).
+- **`HypergraphSpec`** (matching, transversal; JSON too) under `opt`, `mixed
+  --prove-optimal` and `cover --minimum`; `triangle_packing` and
+  `triangle_cover` give nu(G) and tau(G).
+- **`cover --minimum` with the LP bound** and the gap, in one output.
+
+### Fixed
+
+- **A minimisation's objective, both ways**: `opt` and the card give the
+  declared value and the canonical one the certificate stores, with the sense;
+  a harness read `-1/8` for a minimum of `1/8`. The card says `exact: false`
+  for a valid `partial` certificate.
+- The card no longer counts an LP's row names as hypotheses used.
+
 ## [0.28.0] — 2026-10-08
 
 **Negatives and Boolean refutations as certificates, an ideal you can steer,

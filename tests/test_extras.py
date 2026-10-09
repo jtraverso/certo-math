@@ -16907,6 +16907,110 @@ def test_0_28_a_binding_reads_lean_and_decides_what_a_declaration_states():
     assert leanbind.correspondence(failed) == "user_asserted"
 
 
+def test_0_29_a_minimum_says_both_objective_values_with_their_signs():
+    from certo import LPSpec, card
+    from certo.certificate import verify
+    from certo.engines import lp
+
+    s = LPSpec(sense="min")
+    s.variable("x")
+    s.variable("y")
+    s.objective({"x": 1, "y": 1})
+    s.constraint({"x": 8, "y": 8}, ">=", 1, name="c")
+    res = lp.opt(s)
+    assert res.meta["objective_declared"] == "1/8"
+    assert res.meta["objective_canonical"] == "-1/8"
+    assert res.meta["sense"] == "min"
+    c = card.card_of(res.certificate, verify(res.certificate))
+    assert c["objective_declared"] == "1/8" and c["objective_canonical"] == "-1/8"
+    assert c["exact"] is True
+    assert c["hypotheses_used"] == []            # row names are not hypotheses
+
+    # a floating-point certificate is valid and NOT exact
+    f = lp.opt(s, use_exact=False)
+    rep = verify(f.certificate)
+    assert rep.ok and rep.degree == "partial"
+    assert card.card_of(f.certificate, rep)["exact"] is False
+
+
+def test_0_29_the_least_pair_load_among_optimal_solutions():
+    from certo import LPSpec
+    from certo.certificate import verify
+    from certo.engines import lp
+
+    def two(gain_ab):
+        s = LPSpec(sense="max")
+        for v in ("ab", "a", "b"):
+            s.variable(v)
+        s.objective({"ab": gain_ab, "a": 1, "b": 1})
+        s.constraint({"ab": 1, "a": 1}, "<=", 1, name="ra")
+        s.constraint({"ab": 1, "b": 1}, "<=", 1, name="rb")
+        return s
+
+    # optimum 2 is reached by a + b, with no pair load at all
+    res = lp.diffuse(two(2))
+    assert res.verdict is Verdict.PROVED and res.meta["diffuse_load"] == "0"
+    assert verify(res.certificate).ok
+    # optimum 3 needs ab: every optimal solution loads the pair with 1
+    res = lp.diffuse(two(3))
+    assert res.meta["diffuse_load"] == "1" and res.meta["optimum"] == "3"
+    assert verify(res.certificate).ok
+
+
+def test_0_29_a_refuted_bound_says_the_best_constant():
+    import z3
+
+    from certo import Spec
+    from certo.certificate import Certificate, verify
+    from certo.engines import smt
+
+    sv, l = z3.Reals("s l")
+    s = Spec()
+    s.assume("a", 3 * sv + 2 * l <= 7)
+    s.assume("b", sv >= 0)
+    s.claim(l <= 3)
+    res = smt.prove(s)
+    assert res.verdict is Verdict.REFUTED
+    best = res.meta["best_constant"]
+    assert best["variable"] == "l" and best["bound"] == "7/2"
+    assert verify(Certificate.from_dict(best["certificate"])).ok
+    assert any("7/2" in h for h in res.meta["hints"])
+
+
+def test_0_29_hypergraphs_and_the_triangle_numbers():
+    from itertools import combinations
+
+    from certo.engines import algebra, bb, lp
+    from certo.hypergraph import HypergraphSpec, triangle_cover, triangle_packing
+    from certo.spec import load_spec
+
+    n = 6
+    opposite = {(0, 1), (2, 3), (4, 5)}
+    edges = [(a, b) for a, b in combinations(range(n), 2) if (a, b) not in opposite]
+    nu = bb.prove_optimal(triangle_packing(n, edges).to_lp())
+    assert nu.verdict is Verdict.PROVED and "4" in nu.detail
+    tau = algebra.cover_minimum(triangle_cover(n, edges).to_cover())
+    assert tau.meta["minimum"] == 4 and tau.meta["lp_bound"] == "4"
+    # K4: nu = 1, tau = 2 -- Tuza tight
+    k4 = list(combinations(range(4), 2))
+    assert bb.prove_optimal(triangle_packing(4, k4).to_lp()).meta["optimum"] in ("1", 1)
+    assert algebra.cover_minimum(triangle_cover(4, k4).to_cover()).meta["minimum"] == 2
+    # the fractional value with its dual
+    frac = lp.opt(HypergraphSpec(edges=[[1, 2], [2, 3], [1, 3]]).to_lp(integer=False))
+    assert frac.meta["objective"] == "3/2"
+    # as data, nothing executed
+    root = pathlib.Path(__file__).resolve().parent.parent
+    spec = load_spec(str(root / "examples" / "triangle_cover.json"))
+    assert type(spec).__name__ == "HypergraphSpec"
+    assert algebra.cover_minimum(spec.to_cover()).meta["minimum"] == 4
+    try:
+        HypergraphSpec(edges=[[1]], problem="cover").to_lp()
+    except ValueError as e:
+        assert "transversal" in str(e)
+    else:
+        raise AssertionError("an unknown problem was accepted")
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

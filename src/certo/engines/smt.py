@@ -251,6 +251,14 @@ def prove(spec, limits: Limits | None = None, drat: bool = False) -> Result:
         meta = {"counterexample": {k: v[1] for k, v
                                    in cert.payload["assignment"].items()}}
         hints = refutation_hints(spec, s.model())
+        best = best_constant(spec, lim)
+        if best is not None:
+            # The constant that WOULD hold, computed and certified, in place
+            # of the hint that names the command for it.
+            meta["best_constant"] = best
+            hints = [h for h in hints if "certo range" not in h]
+            hints.insert(0, t("engine.prove.best_constant", var=best["variable"],
+                              bound=best["bound"], interval=best["interval"]))
         if hints:
             meta["hints"] = hints
         return Result(
@@ -269,6 +277,46 @@ def _cited(spec, core) -> dict:
     """The sources of the cited hypotheses the core USED."""
     cites = getattr(spec, "citations", None) or {}
     return {n: cites[n] for n in core if n in cites}
+
+
+def best_constant(spec, lim):
+    """When a refuted claim bounds ONE variable by a constant and the
+    hypotheses are linear: the best constant the hypotheses do give, from
+    `range` -- the interval, the bound on the claimed side, and its
+    certificate (`variable_range`) as data. None when it does not apply."""
+    goal = getattr(spec, "goal", None)
+    if goal is None or not z3.is_app(goal) or goal.num_args() != 2:
+        return None
+    if not (z3.is_le(goal) or z3.is_lt(goal) or z3.is_ge(goal) or z3.is_gt(goal)):
+        return None
+    a, b = goal.arg(0), goal.arg(1)
+
+    def number(e):
+        return z3.is_int_value(e) or z3.is_rational_value(e)
+
+    def variable(e):
+        return z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED
+
+    if variable(a) and number(b):
+        var, upper = a, z3.is_le(goal) or z3.is_lt(goal)
+    elif number(a) and variable(b):
+        var, upper = b, z3.is_ge(goal) or z3.is_gt(goal)
+    else:
+        return None
+    from . import algebra
+
+    try:
+        res = algebra.variable_range(spec, str(var), lim)
+    except Exception:  # noqa: BLE001 -- a hint is never worth a failure
+        return None
+    if res.certificate is None or res.meta.get("empty"):
+        return None
+    bound = res.meta.get("upper" if upper else "lower")
+    if bound is None:
+        return None
+    return {"variable": str(var), "side": "upper" if upper else "lower",
+            "bound": bound, "interval": res.meta.get("interval"),
+            "certificate": res.certificate.to_dict()}
 
 
 def refutation_hints(spec, model) -> list:

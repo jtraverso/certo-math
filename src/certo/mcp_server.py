@@ -1002,6 +1002,8 @@ async def mixed(spec_path: str | None = None, spec_source: str | None = None,
 
     f = _spec_file(spec_path, spec_source)
     sp = await _off(load_spec, f)
+    if type(sp).__name__ == "HypergraphSpec":
+        sp = sp.to_lp()
     if isinstance(sp, PackingSpec):
         # As the CLI does: a packing whose items are whole-or-nothing IS a
         # mixed design. The tool refused one the command accepted.
@@ -1087,7 +1089,12 @@ async def cover(spec_path: str | None = None, spec_source: str | None = None,
     from .spec import CoverSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    spec = load_spec(str(f), CoverSpec)
+    spec = load_spec(str(f))
+    if type(spec).__name__ == "HypergraphSpec":
+        spec = spec.to_cover()
+    elif not isinstance(spec, CoverSpec):
+        raise TypeError("cover needs a CoverSpec or a transversal "
+                        "HypergraphSpec; spec() returned " + type(spec).__name__)
     if minimum:
         return _emit(await _off(algebra.cover_minimum, spec, _limits(timeout_ms),
                                 str(f), max_states), spec_file=f)
@@ -1410,13 +1417,15 @@ async def opt(spec_path: str | None = None, spec_source: str | None = None,
               target: str | None = None, no_exact: bool = False,
               dual_direction: dict | str | None = None,
               exact_required: bool = False,
-              primal: dict | None = None) -> dict:
+              primal: dict | None = None, diffuse: bool = False) -> dict:
     from .engines import lp
     from .packing import PackingSpec
     from .spec import LPSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     sp = await _off(load_spec, f)
+    if type(sp).__name__ == "HypergraphSpec":
+        sp = sp.to_lp()
     if isinstance(sp, PackingSpec):
         packing, sp = sp, sp.to_lp()
     elif isinstance(sp, LPSpec):
@@ -1424,6 +1433,8 @@ async def opt(spec_path: str | None = None, spec_source: str | None = None,
     else:
         raise TypeError("opt needs an LPSpec or a PackingSpec; spec() returned "
                         + type(sp).__name__)
+    if diffuse:
+        return _emit(await _off(lp.diffuse, sp, _limits(timeout_ms)), spec_file=f)
 
     if gap:
         if packing is None:
