@@ -15493,9 +15493,13 @@ def test_a_route_tells_reducing_the_crux_from_closing_another_case():
     with tempfile.TemporaryDirectory() as tmp:
         d = pathlib.Path(tmp)
 
+        said = []
+
         def make(cmd, ex, name):
-            with contextlib.redirect_stdout(io.StringIO()):
-                cli.main([cmd, str(root / "examples" / ex), "--cert", str(d / name)])
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cli.main([cmd, str(root / "examples" / ex), "--cert", str(d / name)])
+            said.append((cmd, rc, buf.getvalue()[-600:]))
 
         # A target that builds on nothing outside this directory: an
         # induction, whose schema is the bridge it owes. (A `compose` proof
@@ -15503,18 +15507,20 @@ def test_a_route_tells_reducing_the_crux_from_closing_another_case():
         # made only later, by the examples.)
         make("induct", "induct_sum.py", "theorem.json")
         before = status_report.route(d / "theorem.json", d, LIM)
-        assert before["kind"] == "induction"
-        assert len(before["nodes"]) > 1
-        assert {o["sort"] for o in before["owed"]} >= {"bridge"}
-        assert before["off_route"] == []
+        assert before["kind"] == "induction", (before["kind"], said)
+        assert len(before["nodes"]) > 1, (before["nodes"], said)
+        assert {o["sort"] for o in before["owed"]} >= {"bridge"}, before["owed"]
+        assert before["off_route"] == [], (before["off_route"], sorted(
+            p.name for p in d.iterdir()))
         # another case closed: it lands OFF the route, and nothing under the
         # target moves
         make("prove", "amgm.py", "side.json")
         now = status_report.route(d / "theorem.json", d, LIM)
-        assert [o["rel"] for o in now["off_route"]] == ["side.json"]
+        assert [o["rel"] for o in now["off_route"]] == ["side.json"], (
+            now["off_route"], sorted(p.name for p in d.iterdir()), said)
         moved = status_report.since(now, before)
-        assert moved["same_target"] and not moved["discharged"]
-        assert not moved["nodes_added"] and moved["off_route_now"] == 1
+        assert moved["same_target"] and not moved["discharged"], moved
+        assert not moved["nodes_added"] and moved["off_route_now"] == 1, moved
 
 
 def test_self_check_all_also_checks_what_needs_a_solver():
