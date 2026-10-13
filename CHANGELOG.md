@@ -6,6 +6,46 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.31.0] — 2026-10-13
+
+**Inputs kept as written, and a certificate tied to its obligation.** No new
+commands (59) and no new kinds (61); the schema stays 5. New optional fields:
+`cleared` (`ideal`) and `scope` (`cegis`, `cegis_none`).
+
+### Fixed
+
+- **A binary variable kept its bounds only above.** `variable("x", 1, 1,
+  kind="binary")` came back as `(0, 1)`, and `opt` certified the minimum of a
+  program where x could be 0. The bounds are now intersected with {0, 1}; an
+  empty range is refused.
+- **Hypergraph and cover labels that print alike were merged.** `[1, 2]` and
+  `["1", "2"]` became one hyperedge (a matching of 2 reported as 1), and a
+  JSON spec read `"1"` as a number. Labels stay as written, and two different
+  elements with the same printed identity are refused before any verdict.
+- **A hypergraph with no hyperedges** (a triangle-free graph) is nu = tau = 0
+  with its certificate, not an error.
+- **The API ran a `HypergraphSpec` as its LP under every command**, so
+  `api.run("cover", h, maximum=True)` was refused; it is now read by the
+  command, and `cover` takes `minimum`, `maximum` and `sat` in the API too.
+- `verify --spec` with the right hash at another path no longer warns that
+  the spec is gone; it says the file moved.
+- `synth`'s `on_round` is also called for the accepted round.
+
+### New
+
+- **`ideal --clear-denominators`**: `N / D` certified as `N`, each `D`
+  recorded in `cleared` and assumed non-zero (`relative`), checked by
+  `verify`.
+- **`verify --obligation SPEC`** and `certo.obligation`: is a certificate
+  about THIS obligation -- ideal, nonneg, cover, CNF, LP, or a `prove` proof
+  hypothesis by hypothesis -- with a canonical fingerprint. A valid
+  certificate of `0 = 0` standing in for a claim is named.
+- **Evidence classes** on every result, the card and `status`: proof,
+  refutation, identity, sign, counterexample, witness, feasible, LP optimum,
+  optimum, relaxation bound, finite check, synthesis, composition, ...
+- **`SynthSpec.scope`**: the model searched, what is over-approximated, and
+  whether counterexamples are realisable, said by the certificate.
+
 ## [0.30.0] — 2026-10-09
 
 **Optima by SAT with a proof, faster exact arithmetic, and a program tied to

@@ -119,6 +119,14 @@ def test_the_runtime_built_key_families_are_complete():
     for which in ("false", "true"):
         assert "cli.check.constant." + which in en, which
 
+    # Every evidence class, and every declared synthesis counterexample kind.
+    from certo.evidence import CLASSES
+
+    for c in CLASSES:
+        assert "evidence." + c in en, c
+    for ce in ("realisable", "relaxation"):
+        assert "scope.synth_ce." + ce in en, ce
+
 
 def test_certificates_carry_the_note_key_not_the_rendered_text():
     """A certificate must read correctly whatever language produced it."""

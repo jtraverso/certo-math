@@ -419,6 +419,12 @@ def _runtime() -> dict:
     return {"python": sys.executable, "certo": str(Path(pkg).parent)}
 
 
+def _evidence(res):
+    from .evidence import evidence_class
+
+    return None if res.certificate is None else evidence_class(res.certificate)
+
+
 def _scope(res) -> list:
     from .scope import scope_of
 
@@ -466,6 +472,9 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
         # What the claim is restricted to, beside it rather than buried in
         # the certificate: a box, a column family, a finite case, bridges.
         "scope": _scope(res),
+        # What KIND of evidence it is: a proof, a feasible bound, an LP
+        # optimum, a relaxation bound, a finite check...
+        "evidence": _evidence(res),
         "engine": res.engine,
         "elapsed_ms": round(res.elapsed_ms, 1),
         "meta": _trim(res.meta),
@@ -1050,14 +1059,16 @@ async def mixed(spec_path: str | None = None, spec_source: str | None = None,
     "grinding on polynomial equalities."))
 @_guard
 async def ideal(spec_path: str | None = None, spec_source: str | None = None,
-                timeout_ms: int = 60_000, eliminate_linear: bool = False) -> dict:
+                timeout_ms: int = 60_000, eliminate_linear: bool = False,
+                clear_denominators: bool = False) -> dict:
     from .engines import algebra
     from .spec import IdealSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     sp = await _off(load_spec, f, IdealSpec)
     res = await _off(algebra.ideal, sp, _limits(timeout_ms), str(f), None,
-                     True if eliminate_linear else None)
+                     True if eliminate_linear else None,
+                     True if clear_denominators else None)
     out = _emit(res, spec_file=f)
     out["cofactors"] = res.meta.get("cofactors")
     return out
@@ -2537,7 +2548,7 @@ async def ask(spec_path: str | None = None, spec_source: str | None = None,
                 if command is None
                 else _t("cli.ask.needs_flags", command=command,
                         got=type(spec).__name__)}
-    ready = prepared(spec)
+    ready = prepared(spec, command)
     if "spec_path" in inspect.signature(fn).parameters:
         res = await _off(fn, ready, _limits(timeout_ms), str(f))
     else:
@@ -2568,7 +2579,10 @@ async def commands() -> dict:
     "without any solver: arithmetic, evaluation or unit propagation. ALWAYS "
     "use this before taking a result as settled."))
 @_guard
-async def verify(certificate_path: str, timeout_ms: int = 60_000) -> dict:
+async def verify(certificate_path: str, timeout_ms: int = 60_000,
+                 obligation: str | None = None) -> dict:
+    """`obligation`, a spec path: is the certificate about the obligation it
+    states? Added to the checks; a certificate of another one is not ok."""
     from .certificate import Certificate
     from .certificate import verify as vc
 
@@ -2587,8 +2601,24 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000) -> dict:
     # whose predicate nothing certified. An ok=True with those removed is the
     # overclaim this tool exists to prevent.
     from . import card as _card
+    from . import obligation as _obl
 
-    return dict(rep.to_dict(), card=_card.card_of(cert, rep))
+    extra = {}
+    if obligation:
+        from .i18n import t as _t
+        from .spec import load_spec
+
+        f = _spec_file(obligation, None)
+        spec = await _off(load_spec, str(f))
+        same = _obl.same_obligation(cert, spec)
+        extra["same_obligation"] = same
+        if same["same"] is not True:
+            rep.ok = False
+            rep.detail = _t("cli.verify.obligation_differs", path=str(f))
+    fp = _obl.fingerprint(cert)
+    if fp:
+        extra["obligation"] = fp
+    return dict(rep.to_dict(), card=_card.card_of(cert, rep), **extra)
 
 
 @mcp.tool(description=(

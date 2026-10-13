@@ -171,7 +171,7 @@ def run(command: str, spec, limits=None, *, spec_path=None,
             command, ", ".join("`{}=`".format(m) for m in missing)))
 
     declared_on = spec
-    spec = routing.prepared(spec)
+    spec = routing.prepared(spec, command)
     wants = routing.SPEC_OF.get(command)
     got = type(spec).__name__
     if (wants and wants != "*" and wants != got

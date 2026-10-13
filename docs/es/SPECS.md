@@ -53,7 +53,7 @@ es entero.
 | `SynthSpec` | `synth` |
 | `LPSpec` | `opt`, `mixed` |
 | `PackingSpec` | `opt` |
-| `HypergraphSpec` | `opt`, `mixed`, `cover` (un transversal) |
+| `HypergraphSpec` | `opt`, `mixed`, `cover` (un matching con `--maximum`, un transversal con `--minimum`), `exists` (un transversal) |
 | `CNFSpec` | `cases`, `shrink` |
 | `SweepSpec` | `sweep`, `shrink`, `enum` |
 | `DomainSpec` | `sweep`, `cases`, `shrink` sobre cualquier dominio finito |
@@ -98,7 +98,10 @@ lp.constraint({"x": 1, "y": 1}, "<=", Fraction(1, 2), name="cap")
 
 El tipo de una variable es `continuous`, `integer` o `binary`:
 `lp.variable("x", kind="binary")`. Una binaria es 0..1 se declare como se
-declare, `kinds["x"] = "binary"` incluido. Una entera necesita cota superior
+declare, `kinds["x"] = "binary"` incluido -- INTERSECADA con las cotas que
+escribiste, así que `lp.variable("x", 1, 1, kind="binary")` es x fijada en 1
+(desde 0.31; antes volvía como 0..1), y un rango sin 0 ni 1 se rechaza. Una
+entera necesita cota superior
 para `mixed --prove-optimal`: `lp.variable("n", 0, 10, kind="integer")`.
 
 Prefiere `Fraction` o la forma de cadena. Un flotante que llega como dato es un
@@ -337,6 +340,16 @@ llamaría no citable.
 descartado en silencio es como desaparece una restricción — este proyecto ya lo
 pagó una vez. Una clave que empieza por `_` es un comentario, ya que JSON no
 tiene y ningún campo de spec empieza así.
+
+**Las etiquetas son etiquetas.** En un `HypergraphSpec` (`edges`,
+`vertices`) y un `CoverSpec` (`universe`, `parts`, `candidates`) una cadena
+sigue siendo cadena: `"1"` es el vértice llamado 1, no el número. Los
+elementos se identifican por cómo se ESCRIBEN (la arista `(3, 1)` es la
+arista `(1, 3)`), así que dos elementos DISTINTOS que se escriben igual --
+`1` y `"1"`, el par `[0, 1]` y la cadena `"0-1"` en un hipergrafo -- se
+rechazan antes de cualquier veredicto, nombrando ambos, en vez de fundirse en
+uno. Se admite un hipergrafo sin hiperaristas: su matching y su número de
+transversal valen 0.
 
 ## Una tabla detrás de cada recuento
 

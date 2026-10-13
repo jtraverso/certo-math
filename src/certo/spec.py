@@ -116,6 +116,42 @@ class SynthSpec:
     universal_behavior: object = None
     universal: object = None
 
+    # --- what the search is ABOUT -------------------------------------------
+    # Said with the result, because a synthesis over a model reads as a fact
+    # about the object it models:
+    #   model            what the formulas stand for ("a scalar model of the
+    #                    load", not the physical configuration)
+    #   relaxed          the domains or constraints that OVER-approximate it,
+    #                    by name
+    #   counterexamples  "realisable" (each one is a real object) or
+    #                    "relaxation" (it may exist only in the relaxed model,
+    #                    so "no candidate" refutes the relaxed contract only)
+    scope: dict = None
+
+    SCOPE_KEYS = ("model", "relaxed", "counterexamples")
+
+    def scope_data(self):
+        """The declared scope, checked, as plain data -- or None."""
+        if not self.scope:
+            return None
+        sc = dict(self.scope)
+        bad = sorted(set(sc) - set(SynthSpec.SCOPE_KEYS))
+        if bad:
+            raise ValueError(t("spec.synth_scope_keys", bad=", ".join(bad),
+                               known=", ".join(SynthSpec.SCOPE_KEYS)))
+        out = {}
+        if sc.get("model"):
+            out["model"] = str(sc["model"])
+        if sc.get("relaxed"):
+            rel = sc["relaxed"]
+            out["relaxed"] = [str(r) for r in ([rel] if isinstance(rel, str) else rel)]
+        ce = sc.get("counterexamples")
+        if ce is not None:
+            if ce not in ("realisable", "relaxation"):
+                raise ValueError(t("spec.synth_scope_ce", got=ce))
+            out["counterexamples"] = ce
+        return out or None
+
     def normalized(self):
         import z3
 
@@ -130,6 +166,25 @@ class SynthSpec:
 # ---------------------------------------------------------------------------
 # opt (LP / ILP)
 # ---------------------------------------------------------------------------
+
+
+def _binary_range(name, lo, hi):
+    """A binary's bounds: the ones written, INTERSECTED with {0, 1}.
+
+    `variable("x", 1, 1, kind="binary")` used to come back as `(0, 1)`: the
+    lower bound was replaced, not kept, and `opt` certified -- correctly -- the
+    minimum of a program in which x could be 0, which was not the one written.
+    A range with no 0 or 1 in it is refused: there is no binary it describes.
+    """
+    import math
+
+    from .exact import to_fraction
+
+    a = 0 if lo is None else max(0, math.ceil(to_fraction(lo)))
+    b = 1 if hi is None else min(1, math.floor(to_fraction(hi)))
+    if a > b:
+        raise ValueError(t("spec.binary_empty", name=name, lo=lo, hi=hi))
+    return a, b
 
 
 @dataclass
@@ -176,9 +231,9 @@ class LPSpec:
         if kind not in LPSpec.KINDS:
             raise ValueError(t("spec.bad_kind", kind=kind,
                                known=", ".join(LPSpec.KINDS)))
-        self.var_names.append(name)
         if kind == "binary":
-            lo, hi = 0, 1 if hi is None else hi
+            lo, hi = _binary_range(name, lo, hi)
+        self.var_names.append(name)
         self.bounds[name] = (lo, hi)
         self.kinds[name] = kind
         return self
@@ -193,9 +248,7 @@ class LPSpec:
         for v, kind in self.kinds.items():
             if kind == "binary":
                 lo, hi = self.bounds.get(v, (0, None))
-                if lo is None or hi is None:
-                    self.bounds[v] = (0 if lo is None else lo,
-                                      1 if hi is None else hi)
+                self.bounds[v] = _binary_range(v, lo, hi)
 
     #: Names people reach for, and what they are called here.
     _ALIASES = {"var": "variable", "add_variable": "variable",
@@ -1103,6 +1156,12 @@ class IdealSpec:
     # The denominators cleared to reach these polynomials: the identity holds
     # where they do not vanish, and the certificate says so (relative).
     nonzero: list = field(default_factory=list)
+    # Clear them FOR you: an equation or claim written with `/` is read as
+    # `N / D`, `N` is what is certified, and every non-constant `D` is
+    # recorded -- in `nonzero`, and in the certificate as what was cleared
+    # from which equation. Exact where the denominators do not vanish, and
+    # said so; nothing is cancelled, so no factor is divided away unseen.
+    clear_denominators: bool = False
 
 
 @dataclass
@@ -1145,6 +1204,31 @@ class CoverSpec:
     # [owners], "new": [resources added], "balance": insert - withdraw}.
     # `parts` is then derived (kept, then inserted) and may be left empty.
     repair: object = None            # a dict, or a LIST of steps
+
+    def __post_init__(self):
+        """Elements are identified by how they print (`cover._key`): two
+        DIFFERENT elements that print alike -- `1` and `"1"` -- are refused
+        here rather than merged in the count."""
+        from .cover import edges_of, refuse_collisions
+
+        def listed(x):
+            return isinstance(x, (list, tuple, set, frozenset))
+
+        elems = list(self.universe) if listed(self.universe) else []
+        for pool in (self.parts, self.candidates):
+            if not listed(pool):
+                continue
+            for part in pool:
+                if not listed(part):
+                    continue
+                if self.cliques:
+                    try:
+                        elems.extend(edges_of(part))
+                    except Exception:  # noqa: BLE001 -- refused where it is used
+                        pass
+                else:
+                    elems.extend(part)
+        refuse_collisions(elems)
 
     def to_lp(self, integral: bool = False):
         """The exact-cover LP: choose the fewest candidates covering everything.

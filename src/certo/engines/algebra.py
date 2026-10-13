@@ -73,8 +73,21 @@ def _poly(expr, variables):
 # ---------------------------------------------------------------------------
 
 
-def cover(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
-    """Is this an exact cover, and how many parts does it use?"""
+def cover(spec, limits: Limits | None = None, spec_path: str = "",
+          minimum: bool = False, maximum: bool = False, sat: bool = False,
+          max_states=None) -> Result:
+    """Is this an exact cover, and how many parts does it use?
+
+    `minimum` proves the fewest `candidates` (the recurrence over masks, or
+    SAT with `sat` or past 62 elements); `maximum` the most pairwise
+    disjoint ones, a packing. The same choices as `cover --minimum`,
+    `--sat` and `--maximum`, so the API reaches what the CLI does."""
+    if maximum:
+        return cover_sat(spec, limits, spec_path, maximum=True)
+    if minimum and sat:
+        return cover_sat(spec, limits, spec_path)
+    if minimum:
+        return cover_minimum(spec, limits, spec_path, max_states=max_states)
     from ..cover import NotACover, check, check_repairs, clique_parts, repair_text
 
     t0 = time.perf_counter()
@@ -183,7 +196,9 @@ def cover_minimum(spec, limits: Limits | None = None, spec_path: str = "",
     if spec.cliques:
         cands = [edges_of(c) for c in cands]
     cands = [[list(e) if isinstance(e, (tuple, list)) else e for e in c] for c in cands]
-    if not universe or not cands:
+    if universe and not cands:
+        # An EMPTY universe is not this case: its minimum is 0, the empty
+        # family, and the table below says so (a triangle-free graph's tau).
         return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_COVER, ms(), None, detail=t("recurrence.empty"))
     if len(universe) > 62:
@@ -255,6 +270,10 @@ def cover_sat(spec, limits: Limits | None = None, spec_path: str = "",
         cands = [edges_of(c) for c in cands]
     cands = [[list(e) if isinstance(e, (tuple, list)) else e for e in c] for c in cands]
     problem = "packing" if maximum else ("partition" if spec.exact else "cover")
+    if not universe and problem != "packing":
+        # Nothing to cover: the minimum is 0, and the recurrence's one-state
+        # table certifies it without encoding anything.
+        return cover_minimum(spec, lim, spec_path)
     try:
         out = satopt.optimum(problem, universe, cands,
                              timeout_s=max(1.0, lim.timeout_ms / 1000))
@@ -2014,14 +2033,46 @@ def eliminate(spec, limits: Limits | None = None,
                   meta=dict(meta, case="condition"))
 
 
+def ideal_polynomials(spec, variables, clear=None):
+    """`(equations, claim, nonzero, cleared)` as polynomials, the way `ideal`
+    reads an `IdealSpec` -- denominators cleared when the spec asks, each
+    non-constant one recorded as `(equation index or "claim", D)` and added
+    to `nonzero`. Shared with the obligation check, which must read a spec
+    exactly as the engine did."""
+    from ..polynomials import rational_function
+
+    if clear is None:
+        clear = getattr(spec, "clear_denominators", False)
+    cleared = []
+
+    def take(e, what):
+        if clear and not isinstance(e, Poly):
+            n, d = rational_function(e, variables)
+            if d.degree > 0:
+                cleared.append((what, d))
+            return n
+        return _poly(e, variables)
+
+    gs = [take(e, i) for i, e in enumerate(spec.equations)]
+    claim = None if spec.claim is None else take(spec.claim, "claim")
+    nonzero = [_poly(e, variables) for e in (getattr(spec, "nonzero", None) or [])]
+    for _what, d in cleared:
+        if d not in nonzero:
+            nonzero.append(d)
+    return gs, claim, nonzero, cleared
+
+
 def ideal(spec, limits: Limits | None = None, spec_path: str = "",
-          progress=None, eliminate_linear=None) -> Result:
+          progress=None, eliminate_linear=None,
+          clear_denominators=None) -> Result:
     """Membership in a polynomial ideal, with the cofactors as certificate.
 
     `progress`, a callable, receives at most one event a second during the
     search -- pairs done and pending, basis size, the largest term count,
     elapsed seconds -- and never an expression. `eliminate_linear` (or the
-    spec's field) substitutes linear definitions first and lifts back."""
+    spec's field) substitutes linear definitions first and lifts back;
+    `clear_denominators` (or the spec's field) reads `/` as a fraction and
+    certifies its numerator, recording the denominator as non-zero."""
     from ..linarith import NotPolynomial
 
     lim = limits or Limits()
@@ -2029,18 +2080,22 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "",
     variables = tuple(spec.variables)
 
     try:
-        gs = [_poly(e, variables) for e in spec.equations]
-        claim = None if spec.claim is None else _poly(spec.claim, variables)
-        nonzero = [_poly(e, variables) for e in (getattr(spec, "nonzero", None) or [])]
+        gs, claim, nonzero, cleared = ideal_polynomials(spec, variables,
+                                                        clear_denominators)
     except NotPolynomial as e:
+        asked = clear_denominators or getattr(spec, "clear_denominators", False)
+        hint = "" if asked else " " + t("engine.ideal.clear_hint")
         return Result("ideal", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_IDEAL, 0.0, None,
-                      detail=t("engine.ideal.not_polynomial", detail=str(e)))
+                      detail=t("engine.ideal.not_polynomial", detail=str(e)) + hint)
 
     target = claim if claim is not None else Poly.const(variables, 1)
     extra = {}
     if nonzero:
         extra["nonzero"] = [z.serialize() for z in nonzero]
+    if cleared:
+        extra["cleared"] = [{"of": what, "denominator": d.serialize()}
+                            for what, d in cleared]
 
     # SUPPLIED cofactors: checked, never searched around.
     supplied = getattr(spec, "cofactors", None)
@@ -2058,7 +2113,7 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "",
         # the zero polynomial -- an identity, certified by expanding it, and
         # what users were faking with an unused `anchor = 0`. It used to die
         # on an IndexError.
-        return _ideal_identity(spec, variables, claim, t0, spec_path)
+        return _ideal_identity(spec, variables, claim, t0, spec_path, extra)
     from ..polynomials import eliminate_linear as _elim, lift as _lift
 
     stats = {}
@@ -2134,11 +2189,16 @@ def ideal(spec, limits: Limits | None = None, spec_path: str = "",
     used = [str(h) for h in hs if h]
     detail = (t("engine.ideal.inconsistent") if claim is None
               else t("engine.ideal.member", n=len(used)))
-    if steps or nonzero:
+    if steps or nonzero or cleared:
         detail = detail.rstrip(". ") + "."
     if steps:
         detail += " " + t("engine.ideal.eliminated", n=len(steps),
                           names=", ".join(s[1] for s in steps))
+    if cleared:
+        detail += " " + t("engine.ideal.cleared", n=len(cleared),
+                          what=", ".join("{} by {}".format(
+                              "the claim" if w == "claim" else "equation {}".format(w),
+                              d) for w, d in cleared)[:300])
     if nonzero:
         detail += " " + t("engine.ideal.nonzero", n=len(nonzero))
     return Result(
@@ -2196,7 +2256,7 @@ def _ideal_supplied(spec, variables, gs, claim, target, supplied, extra, t0,
                   meta={"searched": False, "equations": len(gs)})
 
 
-def _ideal_identity(spec, variables, claim, t0, spec_path):
+def _ideal_identity(spec, variables, claim, t0, spec_path, extra=None):
     """The empty ideal: an identity, or the point where it fails."""
     from itertools import product as _product
 
@@ -2210,7 +2270,11 @@ def _ideal_identity(spec, variables, claim, t0, spec_path):
         cert = ideal_certificate(
             variables=variables, equations=[], claim=claim.serialize(),
             cofactors=[], inconsistent=False, title=spec.title,
-        ).stamp(spec_path or None)
+        )
+        # What was cleared, and assumed non-zero, travels here too: an
+        # identity reached by clearing holds only where they do not vanish.
+        cert.payload.update(extra or {})
+        cert.stamp(spec_path or None)
         return Result("ideal", Status.UNSAT, Verdict.PROVED, ENGINE_IDEAL, ms(),
                       cert, detail=t("engine.ideal.identity"),
                       meta={"equations": 0, "degree": 0})

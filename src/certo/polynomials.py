@@ -461,6 +461,84 @@ def groebner(gens, max_pairs=20_000, max_terms=20_000, deadline=None,
 # --- linear definitions, eliminated and put back --------------------------
 
 
+def rational_function(expr, variables):
+    """A z3 term as `(numerator, denominator)`, both polynomials.
+
+    `N / D = 0` where `D != 0` is `N = 0` there, so clearing a denominator is
+    exact -- ON THE SET WHERE IT DOES NOT VANISH, which is what the caller
+    has to be told and what `IdealSpec(clear_denominators=True)` records.
+    Users multiplied through by hand, by SymPy's `cancel`, and once by a
+    denominator that could be zero. Nothing is cancelled here: a common
+    factor stays in both, which is sound and only costs size. The
+    denominator comes back monic (its leading coefficient folded into the
+    numerator), and a constant one as 1."""
+    import z3
+
+    from .linarith import NotPolynomial, _literal_exponent
+
+    V = tuple(variables)
+    one = Poly.const(V, 1)
+
+    def add(x, y):
+        (n1, d1), (n2, d2) = x, y
+        if d1 == d2:
+            return n1 + n2, d1
+        return n1 * d2 + n2 * d1, d1 * d2
+
+    def rf(e):
+        if z3.is_int_value(e):
+            return Poly.const(V, e.as_long()), one
+        if z3.is_rational_value(e):
+            return Poly.const(V, Fraction(e.as_fraction())), one
+        if z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED:
+            if str(e) not in V:
+                raise NotPolynomial(t("poly.unknown_variable", name=str(e)))
+            return Poly.var(V, str(e)), one
+        if z3.is_to_real(e):
+            return rf(e.arg(0))
+        if z3.is_add(e):
+            out = (Poly(V), one)
+            for c in e.children():
+                out = add(out, rf(c))
+            return out
+        if z3.is_sub(e):
+            a, b = e.children()
+            nb, db = rf(b)
+            return add(rf(a), (nb.scaled(-1), db))
+        if z3.is_app_of(e, z3.Z3_OP_UMINUS):
+            n, d = rf(e.arg(0))
+            return n.scaled(-1), d
+        if z3.is_mul(e):
+            n, d = one, one
+            for c in e.children():
+                cn, cd = rf(c)
+                n, d = n * cn, d * cd
+            return n, d
+        if z3.is_div(e):
+            a, b = e.children()
+            na, da = rf(a)
+            nb, db = rf(b)
+            if not nb:
+                raise NotPolynomial("division by zero: {}".format(e))
+            return na * db, da * nb
+        if z3.is_app_of(e, z3.Z3_OP_POWER):
+            base, exp = e.children()
+            k = _literal_exponent(exp)
+            if k is None:
+                raise NotPolynomial("non-constant or negative exponent: {}".format(e))
+            n, d = rf(base)
+            return n ** k, d ** k
+        raise NotPolynomial("not rational arithmetic: {}".format(e))
+
+    n, d = rf(expr)
+    lead = d.lead()
+    if lead is not None and lead[1] != 1:
+        n, d = n.scaled(1 / lead[1]), d.scaled(1 / lead[1])
+    if d.degree <= 0:
+        return n, one
+    return n, d
+
+
 def substitute(p: Poly, var: str, r: Poly) -> Poly:
     """`p` with `var` replaced by `r` (which must not contain `var`)."""
     vi = p.vars.index(var)

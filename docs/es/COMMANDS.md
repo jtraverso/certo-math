@@ -1867,6 +1867,16 @@ el grado es `relative`, y `status` los lista como deuda. **`--progress`**
 imprime, a lo más una vez por segundo, los pares hechos y pendientes, el
 tamaño de la base y el mayor número de términos -- nunca una expresión.
 
+**Denominadores, eliminados y registrados.** `--clear-denominators` (o
+`IdealSpec(clear_denominators=True)`) lee una ecuación o afirmación escrita
+con `/` como fracción `N / D` y certifica `N`: exacto donde `D` no se anula,
+que es justo lo que dice el certificado. Cada `D` no constante se agrega a
+`nonzero` y queda en `cleared` con la ecuación de la que salió; `verify`
+rechaza un denominador eliminado que falte en los supuestos, y el grado es
+`relative`. No se cancela nada, así que ningún factor se divide sin verse.
+Sin la opción, una división por una variable se rechaza y el mensaje dice
+cómo pedir esto.
+
 ### `certo eliminate`
 
 **Pregunta** — Quita `t` y dime la condición sobre `s`
@@ -2084,6 +2094,13 @@ en un empaquetado), recodificada y comprobada por `verify` sin solver
 empaquetado (matching) o cubierta (transversal), y `exists --max-parts k`
 acepta un transversal: tau > k por DRAT.
 
+**Lo mismo desde la API.** `certo.api.run("cover", spec, maximum=True)`,
+`minimum=True` y `sat=True` son `--maximum`, `--minimum` y `--sat`, y un
+`HypergraphSpec` se lee según el comando bajo el que corre: bajo `cover` un
+matching es un empaquetado y un transversal una cubierta, bajo `exists` un
+transversal es una cubierta, y en otro caso es su programa 0-1. Hasta 0.31 la
+API convertía todo hipergrafo en su programa antes, y `cover` lo rechazaba.
+
 ## Construir, ensamblar, conservar
 
 ### `certo synth`
@@ -2121,6 +2138,16 @@ separado, porque dicen cosas distintas. El spec tiene que **declarar** cuál es
 el enunciado general, porque no es derivable: suele cambiar el dominio *y el
 tipo*. La búsqueda corre sobre enteros acotados y la demostración sobre los
 reales, que es donde la aritmética polinomial es decidible.
+
+**Sobre qué es la búsqueda.** `SynthSpec(scope={"model": ..., "relaxed":
+[...], "counterexamples": "realisable" | "relaxation"})` lo dice con el
+resultado: qué modelan las fórmulas, qué sobreaproximan y si un contraejemplo
+es un objeto real. Viaja en el certificado; `verify` y la línea de alcance lo
+repiten, y un `cegis_none` sobre una relajación dice que "ningún candidato"
+refuta el contrato RELAJADO, no el objeto. Un objeto hallado se comprueba con
+solver (`with_solver`), nunca `solver_free`. El callback `on_round` ahora
+también recibe la ronda ACEPTADA (`"accepted": True`, `"counterexample":
+None`), así que se llama `iterations` veces; `--trace` la imprime.
 
 ### `certo compose`
 
@@ -2228,6 +2255,26 @@ el payload como el campo opcional `card` -- así cuentan en el digest -- y se
 marcan como DECLARADOS: nada de ellos se comprueba. `verify --json`, el `verify`
 del MCP y `api` llevan la ficha entera, con intérprete y ruta del paquete.
 Roles: `consumer`, `existence`, `refutation`, `finite_check`.
+
+**Sobre ESTA obligación.** `verify CERT --obligation SPEC` agrega un chequeo:
+el certificado es sobre la obligación que declara la spec, leída como la lee
+el motor (`certo.obligation.same_obligation(cert, spec)` en la API). Para un
+ideal, un nonneg, una cubierta, un CNF y un LP el certificado lleva la
+obligación entera y ambos lados tienen una **huella** canónica
+(`certo.obligation.fingerprint`, y `obligation` en `verify --json`); para una
+prueba de `prove`, que guarda solo las hipótesis que usó, cada una se compara
+por nombre, junto con la afirmación. Un certificado válido de `0 = 0` puesto
+en lugar de tu afirmación se informa como tal, con las diferencias nombradas,
+y `verify` sale con 1.
+
+**Qué tipo de evidencia.** Cada resultado, la tarjeta y `status` dicen qué ES
+el certificado: una prueba, una refutación, una identidad, un signo en un
+dominio, un contraejemplo, un testigo, un objeto FACTIBLE (una cota, no el
+óptimo), un óptimo LP, un óptimo, una cota de relajación, una comprobación
+finita, una síntesis, una composición ... (`evidence` en el JSON y el MCP).
+
+Un `--spec` que coincide por hash y está en otra ruta que la registrada es
+una reubicación, dicha como tal, no una advertencia de que la spec ya no está.
 
 ### `certo bind`
 

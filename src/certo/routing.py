@@ -173,16 +173,26 @@ def command_for(spec) -> str | None:
     return ALSO.get(name)
 
 
-def prepared(spec):
+def prepared(spec, command=None):
     """The spec in the shape its runner wants.
 
     A `PackingSpec` becomes the linear program it describes; everything else
     is already what it is. Kept beside the routing rather than inside each
     caller, so `ask`, the MCP tool and the tests cannot disagree about it.
+
+    A `HypergraphSpec` depends on the COMMAND: under `cover` a matching is a
+    packing and a transversal a cover, under `exists` a transversal is a
+    cover, and anywhere else it is its 0-1 program. It used to become the
+    program everywhere, so `api.run("cover", h, maximum=True)` -- what the
+    CLI answers -- was refused as "cover wants a CoverSpec, got a LPSpec".
     """
     if type(spec).__name__ == "PackingSpec":
         return spec.to_lp()
     if type(spec).__name__ == "HypergraphSpec":
+        if command == "cover":
+            return spec.to_packing() if spec.problem == "matching" else spec.to_cover()
+        if command == "exists":
+            return spec.to_cover()
         return spec.to_lp()
     return spec
 

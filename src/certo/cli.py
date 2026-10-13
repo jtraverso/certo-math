@@ -110,6 +110,11 @@ def _as_json(res, args) -> dict:
     from .scope import scope_of
 
     out["scope"] = scope_of(res.certificate)
+    from .evidence import evidence_of
+
+    ev = evidence_of(res.certificate)
+    if ev:
+        out["evidence"] = ev["class"]
     if res.meta.get("self_check") == "FAILED":
         # What the engine claimed is kept, under its own name; the verdict a
         # reader acts on is that there is none.
@@ -209,6 +214,11 @@ def emit(res: Result, args) -> int:
         scope = scope_of(res.certificate)
         if scope:
             print("  " + t("cli.scope", scope="; ".join(scope)))
+        from .evidence import evidence_of
+
+        ev = evidence_of(res.certificate)
+        if ev:
+            print("  " + t("cli.evidence", text=ev["text"]))
 
         impl = res.meta.get("implementation")
         if impl:
@@ -1000,7 +1010,7 @@ def cmd_ask(args):
 
     from .routing import prepared
 
-    ready = prepared(spec)
+    ready = prepared(spec, command)
     if "spec_path" in inspect.signature(fn).parameters:
         res = fn(ready, limits_from(args), spec_path=args.spec)
     else:
@@ -1376,6 +1386,8 @@ def cmd_ideal(args):
     res = algebra.ideal(spec, limits_from(args), spec_path=args.spec,
                         progress=progress if getattr(args, "progress", False) else None,
                         eliminate_linear=True if getattr(args, "eliminate_linear", False)
+                        else None,
+                        clear_denominators=True if getattr(args, "clear_denominators", False)
                         else None)
     rc = emit(res, args)
     if not args.json and res.meta.get("cofactors"):
@@ -1750,8 +1762,12 @@ def cmd_synth(args):
     from .spec import SynthSpec, load_spec
 
     def on_round(r):
-        print("  " + t("cli.round", round=r["round"],
-                        impl={k: v[1] for k, v in r["implementation"].items()},
+        impl = {k: v[1] for k, v in r["implementation"].items()}
+        if r.get("accepted"):
+            print("  " + t("cli.round_accepted", round=r["round"], impl=impl),
+                  file=sys.stderr)
+            return
+        print("  " + t("cli.round", round=r["round"], impl=impl,
                         ce={k: v[1] for k, v in r["counterexample"].items()}),
               file=sys.stderr)
 
@@ -2304,6 +2320,32 @@ def _tamper(cert, args) -> int:
     return 0
 
 
+def _obligation_check(cert, rep, path):
+    """`verify --obligation SPEC`: one more check on the report -- is the
+    certificate about what this spec states? A kind it cannot compare is
+    refused (exit 3) rather than passed."""
+    from . import obligation
+    from .spec import load_spec
+
+    try:
+        spec = load_spec(path)
+    except Exception as e:  # noqa: BLE001
+        print(t("cli.verify.obligation_unreadable", path=path,
+                why="{}: {}".format(type(e).__name__, e)), file=sys.stderr)
+        return 3
+    out = obligation.same_obligation(cert, spec)
+    if out["same"] is None:
+        print("; ".join(out["differences"]), file=sys.stderr)
+        return 3
+    rep.checks.append((t("cli.verify.obligation", path=path), out["same"],
+                       "; ".join(out["differences"])[:400]
+                       or (out["fingerprint"] or {}).get("spec", "")[:16]))
+    if not out["same"]:
+        rep.ok = False
+        rep.detail = t("cli.verify.obligation_differs", path=path)
+    return None
+
+
 def cmd_verify(args):
     from . import store
 
@@ -2333,13 +2375,21 @@ def cmd_verify(args):
             return 1
         if not args.json and not getattr(args, "oneline", False):
             print("  " + t("cli.verify.spec_matches", path=args.spec))
+            was = (cert.provenance or {}).get("spec_path")
+            if was and Path(was).resolve() != Path(args.spec).resolve():
+                # Moved, same content: the hash above is what ties them.
+                print("  " + t("cli.verify.spec_relocated", was=was))
 
     if getattr(args, "tamper", False):
         return _tamper(cert, args)
     if getattr(args, "elaborate", False):
         os.environ["CERTO_LEAN_ELABORATE"] = "1"
 
-    rep = verify_cert(cert, limits_from(args))
+    rep = verify_cert(cert, limits_from(args), source=args.spec or None)
+    if getattr(args, "obligation", None):
+        refused = _obligation_check(cert, rep, args.obligation)
+        if refused is not None:
+            return refused
     if getattr(args, "md", False):
         _print_explained(cert, md=True)
         return 0 if rep.ok else 1
@@ -2354,6 +2404,11 @@ def cmd_verify(args):
         from . import card as _card
 
         out["card"] = _card.card_of(cert, rep)
+        from . import obligation as _obl
+
+        fp = _obl.fingerprint(cert)
+        if fp:
+            out["obligation"] = fp
         print(json.dumps(out, indent=2, ensure_ascii=False))
     elif getattr(args, "oneline", False):
         pend = len(((cert.payload or {}).get("card") or {}).get("pending") or [])
@@ -2612,6 +2667,9 @@ def cmd_status(args):
     if rep.get("roles"):
         print("  " + t("cli.status.roles", counts="   ".join(
             "{} {}".format(k, v) for k, v in rep["roles"].items())))
+    if rep.get("evidence"):
+        print("  " + t("cli.status.evidence", counts="   ".join(
+            "{} {}".format(k, v) for k, v in rep["evidence"].items())))
     if rep.get("resting_on_pending"):
         print("  !! " + t("cli.status.resting", n=rep["resting_on_pending"],
                           total=rep["certificates"]))
@@ -3320,6 +3378,11 @@ def build_parser():
                          "the cofactors are put back on the ORIGINAL "
                          "equations and each substitution is recorded and "
                          "re-checked")
+    sp.add_argument("--clear-denominators", action="store_true",
+                    dest="clear_denominators",
+                    help="read `/` as a fraction N/D: certify N, and record "
+                         "every non-constant D as cleared and ASSUMED non-zero "
+                         "(the result is relative to that)")
     sp.add_argument("--progress", action="store_true",
                     help="one line on stderr at most each second while the "
                          "Groebner search runs: pairs done and pending, "
@@ -3548,6 +3611,12 @@ def build_parser():
                          "was made from, by hash. Verifying an old "
                          "certificate correctly while believing it describes "
                          "the spec on your screen is the failure this catches")
+    sp.add_argument("--obligation", metavar="SPEC",
+                    help="refuse unless the certificate is about the "
+                         "obligation THIS spec states, read the way the "
+                         "engine reads it: an ideal, a nonneg, a cover, a CNF, "
+                         "an LP or a proof by `prove`. Names what differs. A "
+                         "valid certificate of `0 = 0` is not one of your claim")
     sp.add_argument("--elaborate", action="store_true",
                     help="for a lean_binding: run Lean again on the bound "
                          "declaration and refuse a type that changed (minutes: "

@@ -1830,6 +1830,16 @@ do not vanish, the degree is `relative`, and `status` lists them as owed.
 **`--progress`** prints, at most once a second, the pairs done and pending,
 the basis size and the largest term count -- never an expression.
 
+**Denominators, cleared and recorded.** `--clear-denominators` (or
+`IdealSpec(clear_denominators=True)`) reads an equation or claim written with
+`/` as a fraction `N / D` and certifies `N`: exact wherever `D` does not
+vanish, which is exactly what the certificate says. Every non-constant `D` is
+added to `nonzero` and recorded in `cleared` with the equation it came from;
+`verify` refuses a cleared denominator missing from the assumptions, and the
+degree is `relative`. Nothing is cancelled, so no factor is divided away
+unseen. Without the flag a division by a variable is refused, and the message
+says how to ask for this.
+
 ### `certo eliminate`
 
 **Question** — Get rid of `t` and tell me the condition on `s`
@@ -2038,6 +2048,13 @@ more, for a packing), re-encoded and checked by `verify` without a solver
 (matching) or a cover (transversal), and `exists --max-parts k` takes a
 transversal: tau > k by DRAT.
 
+**The same from the API.** `certo.api.run("cover", spec, maximum=True)`,
+`minimum=True` and `sat=True` are `--maximum`, `--minimum` and `--sat`, and a
+`HypergraphSpec` is read by the command it runs under: under `cover` a
+matching is a packing and a transversal a cover, under `exists` a transversal
+is a cover, elsewhere it is its 0-1 program. Until 0.31 the API turned every
+hypergraph into its program first, and `cover` refused it.
+
 ## Build it, assemble it, keep it
 
 ### `certo synth`
@@ -2073,6 +2090,17 @@ separately, because they say different things. The spec has to **declare**
 what the general statement is, because it is not derivable: it usually changes
 the domain *and the sort*. The search runs over bounded integers and the proof
 over the reals, which is where polynomial arithmetic is decidable.
+
+**What the search is about.** `SynthSpec(scope={"model": ..., "relaxed":
+[...], "counterexamples": "realisable" | "relaxation"})` says it with the
+result: what the formulas model, what they over-approximate, and whether a
+counterexample is a real object. It travels in the certificate; `verify` and
+the scope line repeat it, and a `cegis_none` over a relaxation says that "no
+candidate" refutes the RELAXED contract, not the object. A found object is
+checked with a solver (`with_solver`), never `solver_free`. The `on_round`
+callback now also receives the ACCEPTED round (`"accepted": True`,
+`"counterexample": None`), so it is called `iterations` times; `--trace`
+prints it.
 
 ### `certo compose`
 
@@ -2179,6 +2207,26 @@ the payload as the optional field `card` -- so they count in the digest -- and
 labelled DECLARED: nothing about them is checked. `verify --json`, the MCP
 `verify` and `api` carry the whole card, interpreter and package path
 included. Roles: `consumer`, `existence`, `refutation`, `finite_check`.
+
+**About THIS obligation.** `verify CERT --obligation SPEC` adds one check: the
+certificate is about the obligation the spec states, read the way the engine
+reads it (`certo.obligation.same_obligation(cert, spec)` in the API). For an
+ideal, a nonneg, a cover, a CNF and an LP the certificate carries the whole
+obligation and both sides get a canonical **fingerprint**
+(`certo.obligation.fingerprint`, and `obligation` in `verify --json`); for a
+proof by `prove`, which keeps only the hypotheses it used, each one is
+compared by name, with the claim. A valid certificate of `0 = 0` standing in
+for your claim is reported as such, the differences named, and `verify`
+exits 1.
+
+**What kind of evidence.** Every result, the card and `status` say what the
+certificate IS: a proof, a refutation, an identity, a sign on a domain, a
+counterexample, a witness, a FEASIBLE object (a bound, not the optimum), an
+LP optimum, an optimum, a relaxation bound, a finite check, a synthesis, a
+composition ... (`evidence` in the JSON and the MCP).
+
+`--spec` that matches by hash and sits elsewhere than the recorded path is a
+relocation, said as such, not a warning that the spec is gone.
 
 ### `certo bind`
 

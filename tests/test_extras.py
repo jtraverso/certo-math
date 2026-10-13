@@ -17167,6 +17167,300 @@ def test_0_30_a_drat_refutation_with_no_steps_says_why():
     assert rep.ok and any("unit propagation" in str(w) for w in rep.warnings)
 
 
+# --- 0.31: inputs kept as written, obligations, evidence, synthesis scope ----
+
+
+def test_0_31_a_binary_keeps_the_bounds_it_was_given():
+    """`variable("x", 1, 1, kind="binary")` came back as (0, 1): opt certified
+    0 for a program where x is fixed to 1."""
+    from certo import LPSpec
+    from certo.certificate import verify
+
+    p = LPSpec(sense="min")
+    p.variable("x", 1, 1, kind="binary")
+    p.variable("y", kind="binary")
+    p.objective({"x": Fraction(1, 8)})
+    assert p.bounds["x"] == (1, 1) and p.bounds["y"] == (0, 1)
+    res = lp.opt(p)
+    assert Fraction(res.certificate.payload["declared"]["objective"]) == Fraction(1, 8)
+    assert verify(res.certificate).ok
+    try:
+        LPSpec().variable("z", Fraction(1, 3), Fraction(2, 3), kind="binary")
+    except ValueError as e:
+        assert "z" in str(e)
+    else:
+        raise AssertionError("an empty binary range was accepted")
+    # written straight into the kinds dict: intersected the same way
+    q = LPSpec(sense="max")
+    q.variable("w", 1, 5)
+    q.kinds["w"] = "binary"
+    q._binary_bounds()
+    assert q.bounds["w"] == (1, 1)
+
+
+def test_0_31_hypergraph_labels_that_print_alike_are_refused():
+    """`[1, 2]` and `["1", "2"]` were one hyperedge twice: MAXIMUM 1 for a
+    matching of 2, then a crash writing the certificate."""
+    from certo.engines import algebra
+    from certo.hypergraph import HypergraphSpec
+    from certo.spec import CoverSpec, load_spec
+
+    with _tempfile.TemporaryDirectory() as d:
+        f = pathlib.Path(d) / "mix.json"
+        f.write_text(json.dumps({"type": "HypergraphSpec", "problem": "matching",
+                                 "edges": [[1, 2], ["1", "2"]]}), encoding="utf-8")
+        h = load_spec(str(f))
+        assert h.edges[1] == ["1", "2"]          # labels stay labels in JSON
+        try:
+            h.to_packing()
+        except ValueError as e:
+            assert "'1'" in str(e)
+        else:
+            raise AssertionError("a label collision was merged")
+    for edges in ([[1, 2], [3, 4]], [["1", "2"], ["3", "4"]]):
+        res = algebra.cover_sat(HypergraphSpec(edges=edges).to_packing(), maximum=True)
+        assert res.meta["optimum"] == 2
+    try:
+        CoverSpec(universe=[1, "1"], parts=[[1], ["1"]])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("CoverSpec merged 1 and '1'")
+    # an edge given both ways is one edge, not a collision
+    HypergraphSpec(edges=[[(0, 1), 2], [(1, 0), 3]]).to_lp()
+
+
+def test_0_31_a_graph_with_no_triangle_has_nu_and_tau_zero():
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.hypergraph import HypergraphSpec, triangle_cover, triangle_packing
+
+    path = [(0, 1), (1, 2)]
+    nu = algebra.cover_sat(triangle_packing(3, path).to_packing(), maximum=True)
+    tau = algebra.cover_minimum(triangle_cover(3, path).to_cover())
+    tau_sat = algebra.cover_sat(triangle_cover(3, path).to_cover())
+    for r in (nu, tau, tau_sat):
+        assert r.verdict is Verdict.PROVED and verify(r.certificate).ok
+    assert nu.meta["optimum"] == 0 and tau.meta["minimum"] == 0
+    try:
+        HypergraphSpec(edges=[[1, 2], []], problem="transversal").to_cover()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an empty hyperedge had a transversal")
+
+
+def test_0_31_a_moved_spec_with_the_same_hash_is_not_a_warning():
+    import shutil
+    import subprocess
+    import sys
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    env = dict(os.environ, PYTHONPATH=str(root / "src"))
+    with _tempfile.TemporaryDirectory() as d:
+        a, b = pathlib.Path(d) / "a", pathlib.Path(d) / "b"
+        a.mkdir()
+        b.mkdir()
+        shutil.copy(root / "examples" / "farkas_linear.py", a / "s.py")
+        subprocess.run([sys.executable, "-m", "certo.cli", "farkas", str(a / "s.py"),
+                        "--cert", str(pathlib.Path(d) / "c.json")],
+                       capture_output=True, env=env, timeout=300)
+        shutil.move(str(a / "s.py"), str(b / "s.py"))
+        cert = Certificate.from_dict(json.loads(
+            (pathlib.Path(d) / "c.json").read_text(encoding="utf-8")))
+        from certo.certificate import verify
+
+        assert any("no longer" in str(w) for w in verify(cert).warnings)
+        assert not any("no longer" in str(w)
+                       for w in verify(cert, source=str(b / "s.py")).warnings)
+        r = subprocess.run([sys.executable, "-m", "certo.cli", "verify",
+                            str(pathlib.Path(d) / "c.json"), "--spec", str(b / "s.py")],
+                           capture_output=True, text=True, env=env, timeout=300,
+                           encoding="utf-8", errors="replace")
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "no longer" not in r.stdout and "moved" in r.stdout
+
+
+def test_0_31_the_api_runs_a_hypergraph_where_the_cli_does():
+    """`api.run("cover", h, maximum=True)` was refused: the hypergraph had
+    become its LP before `cover` saw it."""
+    from certo import api
+    from certo.hypergraph import HypergraphSpec
+
+    m = HypergraphSpec(edges=[[1, 2], [3, 4], [2, 3]], problem="matching")
+    tr = HypergraphSpec(edges=[[1, 2], [3, 4], [2, 3]], problem="transversal")
+    assert api.run("cover", m, maximum=True).meta["optimum"] == 2
+    assert api.run("cover", tr, minimum=True).meta["minimum"] == 2
+    assert api.run("cover", tr, minimum=True, sat=True).meta["optimum"] == 2
+    assert api.run("exists", tr, max_parts=1).verdict is Verdict.PROVED
+    assert api.run("opt", m).certificate.kind == "lp_dual"
+    assert {"minimum", "maximum", "sat"} <= set(api.options("cover"))
+
+
+def test_0_31_denominators_cleared_and_recorded():
+    import copy
+
+    import z3
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import IdealSpec
+
+    x, r = z3.Reals("x r")
+    s = IdealSpec(variables=["x", "r"], equations=[x / (r + 1) - 1],
+                  claim=x - r - 1, clear_denominators=True)
+    res = algebra.ideal(s)
+    assert res.verdict is Verdict.PROVED
+    p = res.certificate.payload
+    assert p["cleared"] == [{"of": 0, "denominator": p["nonzero"][0]}]
+    rep = verify(res.certificate)
+    assert rep.ok and rep.degree == "relative"
+    # a cleared denominator dropped from the assumptions is refused
+    d = copy.deepcopy(res.certificate.to_dict())
+    d["payload"]["nonzero"] = []
+    assert not verify(Certificate.from_dict(d)).ok
+    # without the flag: refused, and told how
+    plain = algebra.ideal(IdealSpec(variables=["x", "r"], equations=[x / (r + 1) - 1],
+                                    claim=x - r - 1))
+    assert plain.status is Status.OUT_OF_THEORY and "clear" in plain.detail
+    # the same through the engine's argument
+    assert algebra.ideal(IdealSpec(variables=["x", "r"], equations=[x / (r + 1) - 1],
+                                   claim=x - r - 1),
+                         clear_denominators=True).verdict is Verdict.PROVED
+
+
+def test_0_31_a_certificate_of_another_obligation_is_named():
+    """A valid certificate of `0 = 0`, standing in for the obligation."""
+    import subprocess
+    import sys
+
+    import z3
+
+    from certo import Spec
+    from certo.engines import algebra, smt
+    from certo.obligation import fingerprint, same_obligation
+    from certo.spec import IdealSpec, NonnegSpec
+
+    x, y = z3.Reals("x y")
+    real = IdealSpec(variables=["x", "y"], equations=[x - y], claim=x * x - y * y)
+    fake = IdealSpec(variables=["x", "y"], equations=[], claim=z3.RealVal(0))
+    good = algebra.ideal(real).certificate
+    bad = algebra.ideal(fake).certificate
+    assert same_obligation(good, real)["same"]
+    assert fingerprint(good) == fingerprint(real)
+    out = same_obligation(bad, real)
+    assert out["same"] is False and any("CLAIM" in d for d in out["differences"])
+
+    s = Spec(title="t")
+    s.assume("a", x >= 1)
+    s.assume("b", y >= x)
+    s.assume("noise", y <= 100)
+    s.claim(y >= 1)
+    proof = smt.prove(s).certificate
+    assert same_obligation(proof, s)["same"]
+    other = Spec(title="t")
+    other.assume("a", x >= 1)
+    other.assume("b", y >= x)
+    other.claim(y >= 0)
+    assert same_obligation(proof, other)["same"] is False
+
+    ns = NonnegSpec(poly=x * x - x + Fraction(1, 4), box={"x": (0, 1)})
+    nc = algebra.nonneg(ns).certificate
+    assert same_obligation(nc, ns)["same"]
+    wider = NonnegSpec(poly=x * x - x + Fraction(1, 4), box={"x": (0, 2)})
+    assert same_obligation(nc, wider)["same"] is False
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    env = dict(os.environ, PYTHONPATH=str(root / "src"))
+    with _tempfile.TemporaryDirectory() as d:
+        c = pathlib.Path(d) / "c.json"
+        c.write_text(bad.to_json(), encoding="utf-8")
+        spec = pathlib.Path(d) / "s.py"
+        spec.write_text(
+            "import z3\nfrom certo.spec import IdealSpec\n"
+            "x, y = z3.Reals('x y')\n"
+            "def spec():\n    return IdealSpec(variables=['x', 'y'], "
+            "equations=[x - y], claim=x * x - y * y)\n", encoding="utf-8")
+        r = subprocess.run([sys.executable, "-m", "certo.cli", "verify", str(c),
+                            "--obligation", str(spec)], capture_output=True,
+                           text=True, env=env, timeout=300,
+                           encoding="utf-8", errors="replace")
+        assert r.returncode == 1 and "CLAIM" in r.stdout, r.stdout + r.stderr
+        c.write_text(good.to_json(), encoding="utf-8")
+        r = subprocess.run([sys.executable, "-m", "certo.cli", "verify", str(c),
+                            "--obligation", str(spec)], capture_output=True,
+                           text=True, env=env, timeout=300,
+                           encoding="utf-8", errors="replace")
+        assert r.returncode == 0, r.stdout + r.stderr
+
+
+def test_0_31_every_result_says_what_kind_of_evidence_it_is():
+    from certo import LPSpec
+    from certo.certificate import VERIFIERS
+    from certo.engines import algebra
+    from certo.evidence import CLASSES, evidence_class
+    from certo.hypergraph import HypergraphSpec
+
+    for kind in VERIFIERS:
+        assert evidence_class(Certificate(kind=kind, solver_free=True,
+                                          payload={})) in CLASSES, kind
+    p = LPSpec(sense="max")
+    p.variable("a", 0, 1)
+    p.variable("b", 0, 1)
+    p.objective({"a": 1, "b": 1})
+    p.constraint({"a": 1, "b": 1}, "<=", Fraction(3, 2))
+    assert evidence_class(lp.opt(p).certificate) == "lp_optimum"
+    h = HypergraphSpec(edges=[[1, 2], [3, 4]])
+    assert evidence_class(algebra.cover_sat(h.to_packing(), maximum=True)
+                          .certificate) == "optimum"
+    from certo.spec import CoverSpec
+
+    cov = algebra.cover(CoverSpec(universe=[1, 2], parts=[[1], [2]]))
+    assert evidence_class(cov.certificate) == "feasible"
+    import z3
+
+    from certo.spec import IdealSpec
+
+    x = z3.Real("x")
+    inc = algebra.ideal(IdealSpec(variables=["x"], equations=[x, x - 1]))
+    assert evidence_class(inc.certificate) == "inconsistency"
+
+
+def test_0_31_a_synthesis_says_what_it_searched():
+    import z3
+
+    from certo import Limits, SynthSpec
+    from certo.certificate import verify
+    from certo.engines import cegis
+
+    a, x = z3.Ints("a x")
+    common = dict(impl_vars=[a], input_vars=[x],
+                  impl_constraints=z3.And(a >= 0, a <= 1),
+                  behavior=z3.And(x >= 0, x <= 3))
+    lim = Limits(timeout_ms=5000, max_iterations=10)
+    scope = {"model": "a scalar load", "relaxed": ["the capacity box"],
+             "counterexamples": "relaxation"}
+    none = cegis.synth(SynthSpec(**common, correctness=a > x, scope=scope), lim)
+    assert none.certificate.kind == "cegis_none"
+    assert none.certificate.payload["scope"]["counterexamples"] == "relaxation"
+    assert "RELAXED" in none.detail
+    rep = verify(none.certificate)
+    assert rep.ok and any("MODEL" in str(w) for w in rep.warnings)
+    try:
+        SynthSpec(**common, correctness=a >= 0, scope={"modle": "x"}).scope_data()
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("an unknown scope key was accepted")
+
+    rounds = []
+    found = cegis.synth(SynthSpec(**common, correctness=a + x >= x), lim,
+                        on_round=rounds.append)
+    assert found.verdict is Verdict.PROVED
+    assert len(rounds) == found.meta["iterations"]
+    assert rounds[-1].get("accepted") and rounds[-1]["counterexample"] is None
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

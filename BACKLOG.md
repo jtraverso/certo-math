@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-09-23, at **0.16.0**.
+Last updated: 2026-10-13, at **0.31.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -375,6 +375,7 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Binary bounds kept, hypergraph labels refused when they print alike, the empty hypergraph, the API reading a hypergraph by its command, `--clear-denominators`, `verify --obligation` and fingerprints, evidence classes, `SynthSpec.scope`, the accepted CEGIS round | **0.31.0** |
 | Optima by SAT with a proof (`sat_optimum`), `exists` on transversals, `LPSpec.to_data` and `same_program`, gmpy2 in the simplex, FLINT for exact systems and integer products, sparse rays in branch and bound | **0.30.0** |
 | The least concentrated optimum (`--diffuse`), the best constant on a refutation, both signs of an objective and `exact` in the card, hypergraphs and the triangle numbers, `cover --minimum` with the LP bound (the exact cover number in one output) | **0.29.0** |
 | Boolean cores refuted by DRUP over certo's own encoding; minimum partitions by a recurrence table; refused repairs sealed | `prove --drat`, `cover --minimum`, `repair_refusal`, **0.28.0** |
@@ -1095,7 +1096,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.30.0**, with **61 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.31.0**, with **61 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1105,7 +1106,7 @@ lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
 `ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`; in 0.26.1 `helpers`
-(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.30.0 the kind `sat_optimum`; in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
+(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.30.0 the kind `sat_optimum`; in 0.31.0 `cleared` (`ideal`) and `scope` (`cegis`, `cegis_none`); in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

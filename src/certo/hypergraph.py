@@ -57,8 +57,13 @@ class HypergraphSpec:
         if self.problem not in PROBLEMS:
             raise ValueError(_t("hypergraph.bad_problem", problem=self.problem,
                                 known=", ".join(PROBLEMS)))
-        if not self.edges:
-            raise ValueError(_t("hypergraph.no_edges"))
+        if self.problem == "transversal" and any(not list(e) for e in self.edges):
+            # Nothing meets an empty hyperedge: there is no transversal at all.
+            raise ValueError(_t("hypergraph.empty_edge"))
+        from .cover import refuse_collisions
+
+        refuse_collisions(list(self.vertices or []) +
+                          [v for e in self.edges for v in e], key=_label)
 
     def vertex_list(self) -> list:
         seen, out = set(), []

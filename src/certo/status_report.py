@@ -252,6 +252,7 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
         entry = {
             "path": ref, "rel": rel,
             "kind": data["kind"], "digest": cert.digest(),
+            "evidence": _evidence(cert),
             "headline": _headline(data),
             "solver_free": bool(data.get("solver_free")),
             "version": prov.get("certo_version"),
@@ -327,6 +328,7 @@ def scan(where=".", verify_all=False, limits=None) -> dict:
         "versions": _count(n["version"] for n in order if n["version"]),
         "degrees": _count(n["degree"] for n in order if n.get("degree")),
         "roles": _count(n["role"] for n in order if n.get("role")),
+        "evidence": _count(n["evidence"] for n in order if n.get("evidence")),
         "resting_on_pending": sum(1 for n in order if n.get("pending")),
     }
 
@@ -339,6 +341,15 @@ def _dedup(items, key):
             seen.add(k)
             out.append(x)
     return out
+
+
+def _evidence(cert):
+    from .evidence import evidence_class
+
+    try:
+        return evidence_class(cert)
+    except Exception:  # noqa: BLE001 -- a label never breaks a status
+        return None
 
 
 def _count(it) -> dict:

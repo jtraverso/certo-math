@@ -77,6 +77,22 @@ def _exact(value):
     return value
 
 
+#: Fields that hold LABELS, not numbers. `"1"` in a hypergraph is the
+#: vertex named 1, and reading it as the number 1 merged it with the vertex
+#: `1` before anything could notice.
+LABELS = {"HypergraphSpec": ("edges", "vertices"),
+          "CoverSpec": ("universe", "parts", "candidates")}
+
+
+def _label(value):
+    """A label as written: strings stay strings, floats are still refused."""
+    if isinstance(value, float):
+        raise NotData(_t("dataspec.float", value=value))
+    if isinstance(value, list):
+        return [_label(v) for v in value]
+    return value
+
+
 def build(kind: str, data: dict):
     """A dataclass of the named type, from plain data, or a refusal."""
     import dataclasses
@@ -101,8 +117,9 @@ def build(kind: str, data: dict):
         raise NotData(_t("dataspec.unknown_fields", names=", ".join(unknown),
                          kind=kind, known=", ".join(sorted(fields))))
 
-    kwargs = {k: _exact(v) for k, v in data.items()
-              if k != "type" and not k.startswith("_")}
+    labels = LABELS.get(kind, ())
+    kwargs = {k: (_label(v) if k in labels else _exact(v))
+              for k, v in data.items() if k != "type" and not k.startswith("_")}
     try:
         return cls(**kwargs)
     except TypeError as exc:

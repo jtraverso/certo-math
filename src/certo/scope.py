@@ -121,16 +121,28 @@ def _formula(smt2) -> str:
     return text if len(text) <= 120 else text[:117] + "..."
 
 
+def _synth_scope(p):
+    sc = p.get("scope") or {}
+    out = []
+    if sc.get("model"):
+        out.append(t("scope.synth_model", model=sc["model"]))
+    if sc.get("relaxed"):
+        out.append(t("scope.synth_relaxed", names=", ".join(sc["relaxed"])))
+    if sc.get("counterexamples"):
+        out.append(t("scope.synth_ce." + sc["counterexamples"]))
+    return out
+
+
 def _cegis(p):
     # A found object is checked on the BOUNDED input domain, which the
     # verdict line used to leave to `meta.domain`.
-    return [t("scope.cegis", domain=_formula(p["smt2"]["behavior"]))]
+    return [t("scope.cegis", domain=_formula(p["smt2"]["behavior"]))] + _synth_scope(p)
 
 
 def _cegis_none(p):
     return [t("scope.cegis_none",
               impl=_formula(p["smt2"]["impl_constraints"]),
-              domain=_formula(p["smt2"]["behavior"]))]
+              domain=_formula(p["smt2"]["behavior"]))] + _synth_scope(p)
 
 
 SCOPES = {

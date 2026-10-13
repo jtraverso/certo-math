@@ -139,6 +139,12 @@ def attach(cert, spec_path=None, spec=None):
 # --- what a reader sees ------------------------------------------------------
 
 
+def _evidence(cert):
+    from .evidence import evidence_class
+
+    return evidence_class(cert)
+
+
 def card_of(cert, report=None) -> dict:
     """The full card: declared, derived and verified, as data."""
     from . import __version__
@@ -158,6 +164,7 @@ def card_of(cert, report=None) -> dict:
             else [])
     out = {
         "kind": cert.kind,
+        "evidence": _evidence(cert),
         "conclusion": (report.detail if report is not None else cert.note) or "",
         "scope": scope_of(cert),
         "hypotheses_used": used,
@@ -202,6 +209,8 @@ def card_of(cert, report=None) -> dict:
 def lines(card) -> list:
     """The card as text, a few lines, for `verify`."""
     out = [t("card.header", kind=card["kind"], degree=card["degree"] or "-")]
+    if card.get("evidence"):
+        out.append(t("card.evidence", text=t("evidence." + card["evidence"])))
     if card["role"] or card["link"]:
         out.append(t("card.role", role=card["role"] or "-",
                      link=card["link"] or "-"))

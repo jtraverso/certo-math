@@ -50,6 +50,51 @@ def _key(x):
     return str(x)
 
 
+def _typed(x):
+    """What an element IS, where `_key` is how it PRINTS: `1` and `"1"`
+    print alike and are different elements."""
+    from fractions import Fraction
+
+    if isinstance(x, (tuple, list, set, frozenset)):
+        return ("seq", tuple(sorted((_typed(v) for v in x), key=repr)))
+    if isinstance(x, bool):
+        return ("bool", x)
+    if isinstance(x, (int, Fraction)):
+        return ("num", Fraction(x))
+    if isinstance(x, str):
+        return ("str", x)
+    return (type(x).__name__, repr(x))
+
+
+def label_collisions(elements, key=None) -> list:
+    """`[(a, b, printed)]`: DIFFERENT elements with the same identity.
+
+    Elements are identified by how they print -- `_key` here, a label in a
+    hypergraph -- so `1` and `"1"` were one element, two hyperedges `[1, 2]`
+    and `["1", "2"]` met, and the optimum of a different problem was
+    certified. The identity is the printed form; two elements that differ
+    and print alike are refused, not merged."""
+    key = key or _key
+    seen, out = {}, []
+    for e in elements:
+        k, ty = key(e), _typed(e)
+        first = seen.setdefault(k, (e, ty))
+        if first[1] != ty:
+            out.append((first[0], e, k))
+            if len(out) >= 3:
+                break
+    return out
+
+
+def refuse_collisions(elements, key=None):
+    """Raise, naming the first collision, if two elements print alike."""
+    found = label_collisions(elements, key)
+    if found:
+        a, b, k = found[0]
+        raise ValueError(_t("cover.label_collision", a=repr(a), b=repr(b),
+                            printed=str(k)))
+
+
 def check(universe, parts, exact: bool = True) -> dict:
     """Does `parts` cover `universe`, and how many times is each element hit?
 

@@ -52,7 +52,7 @@ counterexamples can be spurious (`nu = -1/2`). Declare them with `z3.Int` /
 | `SynthSpec` | `synth` |
 | `LPSpec` | `opt`, `mixed` |
 | `PackingSpec` | `opt` |
-| `HypergraphSpec` | `opt`, `mixed`, `cover` (a transversal) |
+| `HypergraphSpec` | `opt`, `mixed`, `cover` (a matching with `--maximum`, a transversal with `--minimum`), `exists` (a transversal) |
 | `CNFSpec` | `cases`, `shrink` |
 | `SweepSpec` | `sweep`, `shrink`, `enum` |
 | `DomainSpec` | `sweep`, `cases`, `shrink` over any finite domain |
@@ -97,7 +97,9 @@ lp.constraint({"x": 1, "y": 1}, "<=", Fraction(1, 2), name="cap")
 
 A variable's kind is `continuous`, `integer` or `binary`:
 `lp.variable("x", kind="binary")`. A binary is 0..1 however it was declared,
-`kinds["x"] = "binary"` included. An integer needs an upper bound for
+`kinds["x"] = "binary"` included -- INTERSECTED with the bounds you wrote, so
+`lp.variable("x", 1, 1, kind="binary")` is x fixed to 1 (since 0.31; it used
+to come back as 0..1), and a range with neither 0 nor 1 is refused. An integer needs an upper bound for
 `mixed --prove-optimal`: `lp.variable("n", 0, 10, kind="integer")`.
 
 Prefer `Fraction` or the string form. A float that arrives as data is a float
@@ -329,6 +331,15 @@ not citable.
 how a constraint goes missing — this project has paid for that once already. A
 key starting with `_` is a comment, since JSON has none and no spec field
 begins with one.
+
+**Labels are labels.** In a `HypergraphSpec` (`edges`, `vertices`) and a
+`CoverSpec` (`universe`, `parts`, `candidates`) a string stays a string: `"1"`
+is the vertex named 1, not the number. Elements are identified by how they
+PRINT (an edge `(3, 1)` is the edge `(1, 3)`), so two DIFFERENT elements that
+print alike -- `1` and `"1"`, the pair `[0, 1]` and the string `"0-1"` in a
+hypergraph -- are refused before any verdict, naming both, instead of being
+merged into one. A hypergraph with no hyperedges is allowed: its matching and
+its transversal number are 0.
 
 ## One table behind every count
 

@@ -348,16 +348,26 @@ def _rejection_summary(rep) -> str:
     return "{}: {}{}{}".format(head, what, more, claimed)
 
 
-def _provenance_warnings(cert: Certificate) -> list:
+def _provenance_warnings(cert: Certificate, source=None) -> list:
     """Provenance does not invalidate the mathematics, but a mismatch matters.
 
     A certificate stays valid even if the spec changed: it verifies on its
     own. What stops being true is the ASSOCIATION between the two, and that
     has to be said out loud.
+
+    `source` is a file the caller SUPPLIED whose hash is the recorded one
+    (`verify --spec`): the association is then established by content, and
+    a recorded path that no longer resolves is a relocation, not a warning.
     """
     prov = cert.provenance or {}
     out = []
     sp, want = prov.get("spec_path"), prov.get("spec_sha256")
+    if source and want:
+        try:
+            if hashlib.sha256(Path(source).read_bytes()).hexdigest() == want:
+                sp = None
+        except OSError:
+            pass
     if sp and want:
         p = Path(sp)
         if not p.exists():
@@ -2097,7 +2107,7 @@ def _replay(cert, limits, kind):
 
 
 
-def verify(cert, limits=None) -> VerifyReport:
+def verify(cert, limits=None, source=None) -> VerifyReport:
     """Re-check a certificate. Takes a `Certificate` or its serialised dict.
 
     THE DICT IS ACCEPTED ON PURPOSE. A user's revalidation adapter read
@@ -2158,7 +2168,7 @@ def verify(cert, limits=None) -> VerifyReport:
             # The summary is now the first check that failed, and the old one
             # survives only as what the certificate CLAIMED.
             rep.detail = _rejection_summary(rep)
-        rep.warnings = _provenance_warnings(cert) + list(rep.warnings)
+        rep.warnings = _provenance_warnings(cert, source) + list(rep.warnings)
         if cert.schema > SCHEMA_VERSION:
             rep.warnings.insert(0, t("verify.schema.newer", schema=cert.schema,
                                      known=SCHEMA_VERSION))
@@ -4962,6 +4972,23 @@ def _verify_ideal(cert, limits) -> VerifyReport:
         checks.append((t("verify.ideal.eliminated"), ok_steps,
                        ", ".join(str(s.get("var")) for s in p["eliminated"])))
 
+    # What was cleared, from where: each denominator is ASSUMED non-zero, so
+    # a cleared one missing from `nonzero` would be an assumption unsaid.
+    if p.get("cleared") is not None:
+        nzs = [Poly.parse(variables, z) for z in p.get("nonzero") or []]
+        ok_clear, bad = True, []
+        for c in p["cleared"]:
+            what = c.get("of") if isinstance(c, dict) else None
+            known = (what == "claim" and not p["inconsistent"]) or (
+                isinstance(what, int) and not isinstance(what, bool)
+                and 0 <= what < len(gs))
+            d = Poly.parse(variables, c.get("denominator")) if known else None
+            if not known or d is None or d.degree <= 0 or d not in nzs:
+                ok_clear = False
+                bad.append(str(what))
+        checks.append((t("verify.ideal.cleared"), ok_clear,
+                       ", ".join(bad) or str(len(p["cleared"]))))
+
     warnings = []
     if p["inconsistent"]:
         warnings.append(t("verify.ideal.field"))
@@ -6479,9 +6506,25 @@ def _verify_cegis(cert, limits) -> VerifyReport:
 
     return VerifyReport(
         ok1 and ok2, "cegis", False, checks=checks,
+        warnings=_synth_scope_notes(p, found=True),
         detail=t("verify.cegis.detail", iterations=p["iterations"],
                  ces=len(p["counterexamples"])),
     )
+
+
+def _synth_scope_notes(p, found) -> list:
+    """What a synthesis was ABOUT, when the spec said: the model it searched,
+    what it over-approximates, and whether its counterexamples are real."""
+    sc = p.get("scope") or {}
+    out = []
+    if sc.get("model"):
+        out.append(t("verify.synth.model", model=sc["model"]))
+    if sc.get("relaxed"):
+        out.append(t("verify.synth.relaxed", names=", ".join(sc["relaxed"])))
+    if sc.get("counterexamples") == "relaxation":
+        out.append(t("verify.synth.ce_relaxation_none" if not found
+                     else "verify.synth.ce_relaxation"))
+    return out
 
 
 def _verify_cegis_none(cert, limits) -> VerifyReport:
@@ -6536,7 +6579,7 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
     checks.append((t("verify.cegis_none.unsat"), unsat, str(r)))
     rep = VerifyReport(
         disjoint and covered and ok_ces and unsat, "cegis_none", False,
-        checks=checks,
+        checks=checks, warnings=_synth_scope_notes(p, found=False),
         detail=t("verify.cegis_none.detail", ces=len(p["counterexamples"]),
                  vars=", ".join(impl)))
     rep.timed_out = r == z3.unknown

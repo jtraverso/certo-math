@@ -42,6 +42,12 @@ def _no_helper_saves(behav, corr, helper_vars):
 
 
 def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
+    """CEGIS over the spec's bounded domain.
+
+    `on_round`, a callable, receives every round: a REJECTED one as
+    `{"round", "implementation", "counterexample"}`, and the ACCEPTED one --
+    the candidate no input refutes -- with `"counterexample": None` and
+    `"accepted": True`. So it is called `iterations` times on success."""
     lim = limits or Limits()
     t0 = time.perf_counter()
     deadline = t0 + lim.timeout_ms / 1000.0
@@ -83,9 +89,20 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     if len(domain) > 200:
         domain = domain[:197] + "..."
 
+    scope = spec.scope_data() if hasattr(spec, "scope_data") else None
+
     def done(status, verdict, detail, cert=None, k=0, impl=None):
         meta = {"iterations": k, "counterexamples": len(counterexamples),
                 "domain": domain, "trace": trace}
+        if scope:
+            # WHAT the search was about travels with what it found, and in
+            # the certificate, where a reader of the result looks.
+            meta["scope"] = scope
+            if cert is not None:
+                cert.payload["scope"] = scope
+            if (cert is not None and cert.kind == "cegis_none"
+                    and scope.get("counterexamples") == "relaxation"):
+                detail = detail.rstrip(". ") + ". " + t("engine.synth.relaxed_none")
         if impl is not None:
             # El objeto encontrado es el resultado, no un detalle del
             # certificado: tiene que verse sin abrir un JSON.
@@ -135,6 +152,12 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             r2 = ce_solver.check()
 
             if r2 == z3.unsat:
+                if on_round is not None:
+                    # The ACCEPTED round is a round too: a caller counting
+                    # callbacks saw one fewer than `iterations` and no sign
+                    # of the candidate that survived.
+                    on_round({"round": k + 1, "implementation": impl_assign,
+                              "counterexample": None, "accepted": True})
                 cert = cegis_certificate(impl_assign, counterexamples, spec_smt2, k + 1,
                                          helpers=[[str(h), z3util.sort_name(h)]
                                                   for h in helper_vars])
