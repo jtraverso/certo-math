@@ -15513,8 +15513,10 @@ def test_a_route_tells_reducing_the_crux_from_closing_another_case():
         assert before["off_route"] == [], (before["off_route"], sorted(
             p.name for p in d.iterdir()))
         # another case closed: it lands OFF the route, and nothing under the
-        # target moves
-        make("prove", "amgm.py", "side.json")
+        # target moves. A LINEAR proof: `amgm.py` is nonlinear, and on one CI
+        # runner (Windows, Python 3.13) z3 spent its whole 600 s on it and
+        # wrote nothing, which this test read as a routing failure.
+        make("prove", "farkas_linear.py", "side.json")
         now = status_report.route(d / "theorem.json", d, LIM)
         assert [o["rel"] for o in now["off_route"]] == ["side.json"], (
             now["off_route"], sorted(p.name for p in d.iterdir()), said)
