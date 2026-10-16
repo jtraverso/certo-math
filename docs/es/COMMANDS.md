@@ -1,4 +1,4 @@
-# Los cincuenta y nueve comandos
+# Los sesenta y un comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -65,6 +65,13 @@ certificado `unsat_core` y la corrida dice por qué (`drat_refused`).
 constante y las hipótesis son lineales, `prove` ejecuta `range` por sí mismo y
 dice la constante que las hipótesis SÍ dan -- `l <= 7/2` donde se afirmó
 `l <= 3` -- con su certificado `variable_range` en `best_constant`.
+
+**Por qué no se resolvió.** Un `timeout` o `unknown` ahora lee la pregunta: su
+teoría (lineal o no, entera, real, ambas), pisos y restos, divisiones por
+variables, el grado, y QUÉ hipótesis trae cada cosa -- y dice lo primero que
+probar en vez de "sube los límites": la aritmética entera no lineal con pisos
+no tiene procedimiento de decisión, así que separa las consecuencias lineales
+de los pisos del paso polinómico. En `meta["hardness"]`.
 
 ### `certo core`
 
@@ -1184,6 +1191,16 @@ irreducible» es una afirmación.
 conjunto propuesto rompe la graduación y nada por debajo termina; eso se
 reporta como `None`, nunca como «no genera».
 
+**Perfiles, y la respuesta de cada punto.** `profiles={"q": {"point": [None,
+99], "up_to": 10}}` pide el MENOR valor de la coordenada libre con el punto en
+S: cada valor menor excluido (cada uno una búsqueda rehecha), el mínimo una
+pertenencia. `meta["points"]` del resultado dice `member`, `not_member` o
+`undecided` para cada punto -- el estado de la ejecución es una palabra para
+muchas preguntas -- y el alcance dice qué es el semigrupo: CONTEOS, una
+combinación de vectores generadores, no un objeto físico construido con ellos.
+La búsqueda respeta el presupuesto de tiempo y se detiene como `undecided`,
+nunca como "no".
+
 ### `certo range`
 
 **Pregunta** — ¿Hasta dónde llega esta variable — el intervalo entero, no un
@@ -1238,6 +1255,32 @@ tienen el mismo supremo y solo uno lo contiene.
 Solo hipótesis lineales. Una no lineal se refusa por nombre en vez de
 descartarse, porque descartarla *ensancharía* el rango — equivocado en la
 dirección que parece segura.
+
+### `certo covering`
+
+**Pregunta** — En cada punto de esta caja donde se cumplen las condiciones,
+¿se cumple alguna de estas obligaciones?
+**Spec** — `CoveringSpec`
+**Responde** — las hojas de una partición de la caja, cada una con su razón
+(una obligación que mantiene su signo en toda la hoja, o una condición negativa
+en ella), las hojas que quedan sin resolver, o un punto donde se cumplen todas
+las condiciones y fallan todas las obligaciones
+**Certificado** — `conditioned_cover`, **sin solver**: los coeficientes de
+Bernstein y la teselación, recalculados
+**No establece** — nada fuera de la caja, ni para una obligación que no está
+en la lista. Una hoja probada por una obligación queda probada en TODA la hoja,
+lo que es más de lo necesario; una hoja sin resolver se lista, y el enunciado
+vale solo en las demás.
+
+La forma que los usuarios mantenían en código propio: un dominio físico
+(condiciones `g >= 0`, un selector, hipótesis), obligaciones suficientes
+alternativas (`F > 0` aquí, `U >= 0` allá), miles de hojas y su exhaustividad.
+certo divide la caja por su lado más ancho hasta que una razón se cumple o se
+agota `subdivide`. Las hojas TESELAN la caja -- cada una dentro de ella,
+interiores disjuntos dos a dos, volúmenes que suman el de la caja -- así que
+las hojas cerradas cubren cada punto, fronteras incluidas. `leaves=[{...},
+...]`, tu propia partición, es el corte inicial, y se comprueba que tesele la
+caja como el resto.
 
 ### `certo cycle`
 
@@ -1504,6 +1547,12 @@ Rayos y lados acotados se mezclan en una misma caja, y se usan los techos:
 
 `meta["method"]` dice qué test corrió -- `bernstein` o `shift` -- para un
 cliente que no debería sacarlo del texto del detalle.
+
+**Un polinomio escrito con `/`.** `NonnegSpec(clear_denominators=True)` lee
+`poly` como `N / D`, prueba el SIGNO de `D` en toda la caja (Bernstein,
+estricto) y certifica `N` -- o `-N` cuando `D` es negativo ahí. La orientación,
+el denominador y su prueba viajan en el certificado (`cleared`), y `verify`
+rehace ambos; un `D` que se anula o cambia de signo en la caja se rechaza.
 
 ### `certo assign`
 
@@ -2149,6 +2198,15 @@ solver (`with_solver`), nunca `solver_free`. El callback `on_round` ahora
 también recibe la ronda ACEPTADA (`"accepted": True`, `"counterexample":
 None`), así que se llama `iterations` veces; `--trace` la imprime.
 
+**Qué obligación, y el mejor candidato.** `correctness={"access": ...,
+"payment": ...}` es un contrato con partes con nombre, y cada contraejemplo de
+la traza dice cuál `breaks`. `minimize=expr` (o `maximize`), una expresión
+entera sobre las variables de implementación, sigue pidiendo un candidato
+mejor hasta que no existe: `synth_optimum` lleva el candidato que alcanza el
+valor y la búsqueda refutada de uno mejor, ambos verificados y atados al mismo
+contrato -- óptimo dentro de la plantilla y su dominio acotado, como repite el
+alcance.
+
 ### `certo compose`
 
 **Pregunta** — ¿Cómo ensamblo mis lemas en una demostración?
@@ -2215,6 +2273,15 @@ hipótesis -- `hipótesis -> when_1 o ... o when_k` -- con un certificado propio
 y `verify` comprueba que trate de estos casos y estas hipótesis. Un hueco
 entre los casos rechaza la prueba con la instancia que cae en él.
 
+**Prerrequisitos, y una cadena que no está cerrada.** `p.pending("access",
+states=..., why="...")` declara un paso que la cadena necesita y nadie ha
+probado; `p.lemma("payment", ..., needs=["access"])` dice que el pago no
+significa nada antes del acceso. Un pago probado por sí solo sigue probado. Un
+teorema que descansa en un paso pendiente -- directamente, o como prerrequisito
+de un lema que usa, a cualquier profundidad -- se informa **NO CERRADO**, con la
+cadena (`not_closed` en el certificado, recalculado por `verify`); la tarjeta
+lo lista como pendiente y `status` lo cuenta como apoyado en pendientes.
+
 ### `certo verify`
 
 **Pregunta** — ¿Sigue siendo bueno este certificado guardado?
@@ -2275,6 +2342,26 @@ finita, una síntesis, una composición ... (`evidence` en el JSON y el MCP).
 
 Un `--spec` que coincide por hash y está en otra ruta que la registrada es
 una reubicación, dicha como tal, no una advertencia de que la spec ya no está.
+
+### `certo roles`
+
+**Pregunta** — ¿Se pueden intercambiar estos roles sin cambiar el grafo?
+**Spec** — `RoleSpec`
+**Responde** — la permutación de los vértices que lleva el conjunto de aristas
+sobre sí mismo y cada rol antiguo sobre el nuevo, y cada propiedad declarada
+(`independent`, `clique`, `disjoint`, `complete_to`, `anticomplete_to`,
+`neighbourhood_within`) antes y después
+**Certificado** — `role_transport`, **sin solver**: se comparan conjuntos de
+aristas
+**No establece** — que los roles signifiquen lo que dicen sus nombres, ni nada
+sobre otro grafo. Cuando no se halla permutación, eso es una búsqueda VF2
+exhaustiva y no un certificado.
+
+`q' = q`, una identidad escalar, no dice si la configuración con los roles
+nuevos es la misma configuración renombrada; un automorfismo que lleva los
+roles dice exactamente eso, y cada propiedad se transporta con él. Da
+`roles_after` y certo busca la permutación (networkx propone, la comprobación
+es de certo), o da `mapping` y se comprueba.
 
 ### `certo bind`
 
@@ -2479,6 +2566,15 @@ construye desde el parser de argumentos, la tabla de rutas, las dataclasses de
 los specs (con los comentarios de sus campos), los verificadores y la API
 pública, así que no puede desviarse de lo que se publica. `--json` da las
 filas; por MCP es la herramienta `find`.
+
+**Un veredicto, no solo un ranking.** `find` ahora responde `found`,
+`not_available` (certo no hace esto: por qué, y qué usar en su lugar) o
+`not_in_certo`, y cada resultado lleva su `confidence`, las palabras que
+`matched`, lo que NO establece (de este archivo), un `example`, y su `call`
+para cada superficie -- la línea de la CLI, la herramienta MCP,
+`certo.api.run`. Se indexan los métodos de los specs (`ProofSpec.pending`).
+`find --spec FILE` lista qué se puede hacer con ese spec: cada comando que lo
+acepta, cómo se lee ahí, y qué saber antes de correrlo.
 
 ### `certo commands`
 

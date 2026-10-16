@@ -44,7 +44,10 @@ def _factor(n: int) -> dict:
         pass
     out, m = {}, n
     d = 2
+    from .budget import tick
+
     while d * d <= m:
+        tick(65536)
         while m % d == 0:
             out[d] = out.get(d, 0) + 1
             m //= d

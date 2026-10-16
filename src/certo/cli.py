@@ -639,24 +639,55 @@ def cmd_find(args):
         if got.get("api_options"):
             print("  api.run options: " + ", ".join(got["api_options"]))
         return 0
+    if getattr(args, "spec", None):
+        from .spec import load_spec
+
+        got = discovery.for_spec(load_spec(args.spec))
+        if args.json:
+            print(json.dumps(got, indent=2, ensure_ascii=False, default=str))
+            return 0
+        print(t("cli.find.spec_head", spec=got["spec"], n=len(got["commands"])))
+        for note in got["notes"]:
+            print("  !! " + note)
+        for c in got["commands"]:
+            print("  {:<10} {}".format(c["command"], (c["question"] or "")[:90]))
+            if c["read_as"] != got["spec"]:
+                print("  {:<10} {}".format("", t("cli.find.read_as", how=c["read_as"])))
+            for surface, call in sorted((c.get("call") or {}).items()):
+                print("  {:<10} {:<4} {}".format("", surface, call))
+            if c.get("not_established"):
+                print("  {:<10} {}".format("", t("cli.find.not_established",
+                                                 text=c["not_established"][:110])))
+        return 0
     query = " ".join(args.query)
     if not query.strip():
         print(t("cli.find.empty"), file=sys.stderr)
         return 2
-    rows = discovery.find(query, n=args.n)
+    got = discovery.answer(query, n=args.n)
+    rows = got["results"]
     if args.json:
-        print(json.dumps(rows, indent=2, ensure_ascii=False, default=str))
-        return 0 if rows else 2
-    for note in discovery.notes(query):
+        print(json.dumps(got, indent=2, ensure_ascii=False, default=str))
+        return 0 if got["verdict"] == "found" else 2
+    for note in got.get("notes") or []:
         print("  !! " + note)
+    if got["verdict"] == "not_available" and got.get("not_available"):
+        na = got["not_available"]
+        print("  " + t("cli.find.not_available", what=na["summary"], why=na["why"]))
+        print("  " + t("cli.find.instead", instead=na["instead"]))
+    elif got["verdict"] == "not_in_certo":
+        print("  " + t("cli.find.not_in_certo", query=query))
     if not rows:
-        print("  " + t("cli.find.none", query=query))
         return 2
     for e in rows:
-        print("  {:<30} {:<10} {}".format(e["id"], e["type"], (e["summary"] or "")[:90]))
-        print("  {:<30} {:<10} {}".format("", "", e["use"]))
+        print("  {:<30} {:<6} {:<10} {}".format(e["id"], e["confidence"], e["type"],
+                                                (e["summary"] or "")[:84]))
+        print("  {:<30} {:<6} {:<10} {}".format("", "", "", (e.get("call") or {}).get("cli")
+                                                or e["use"]))
+        if e.get("not_established"):
+            print("  {:<30} {:<6} {:<10} {}".format("", "", "", t(
+                "cli.find.not_established", text=e["not_established"][:100])))
     print("  " + t("cli.find.next"))
-    return 0
+    return 0 if got["verdict"] == "found" else 2
 
 
 def cmd_batch(args):
@@ -893,6 +924,35 @@ def cmd_range(args):
                 for k, v in sorted(end["multipliers"].items())))
         if p["empty"]:
             print("  " + t("engine.varrange.ask_check"))
+    return rc
+
+
+def cmd_covering(args):
+    from .engines import algebra
+    from .spec import CoveringSpec, load_spec
+
+    spec = load_spec(args.spec, CoveringSpec)
+    res = algebra.covering(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.meta.get("unresolved_boxes"):
+        print("  " + t("cli.covering.unresolved"))
+        for b in res.meta["unresolved_boxes"]:
+            print("    " + ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                                     for n, (lo, hi) in b.items()))
+    return rc
+
+
+def cmd_roles(args):
+    from .engines import algebra
+    from .spec import RoleSpec, load_spec
+
+    spec = load_spec(args.spec, RoleSpec)
+    res = algebra.roles(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.certificate is not None:
+        m = res.certificate.payload["mapping"]
+        print("  " + t("cli.roles.mapping", text=", ".join(
+            "{}->{}".format(a, b) for a, b in m.items() if a != b) or "-"))
     return rc
 
 
@@ -3132,6 +3192,18 @@ def build_parser():
     sp.add_argument("spec", help=".py file returning a CycleSpec")
     sp.set_defaults(func=cmd_cycle)
 
+    sp = add("covering", "a box cut into leaves: on every leaf one of several "
+                         "obligations keeps its sign, or a condition excludes "
+                         "it -- the leaves tile the box, boundaries included")
+    sp.add_argument("spec", help=".py file returning a CoveringSpec")
+    sp.set_defaults(func=cmd_covering)
+
+    sp = add("roles", "roles changed on one graph without changing the graph: "
+                      "the automorphism that carries them, and each property "
+                      "before and after")
+    sp.add_argument("spec", help=".py or .json file returning a RoleSpec")
+    sp.set_defaults(func=cmd_roles)
+
     sp = add("bind", "tie a certificate to the Lean declaration meant to "
                      "justify it, and check that it does")
     sp.add_argument("spec", help=".py file returning a BindSpec")
@@ -3185,6 +3257,10 @@ def build_parser():
                          "(NonnegSpec.region) or a kind (polynomial_nonneg)")
     sp.add_argument("-n", type=int, default=8, metavar="N",
                     help="how many results (default 8)")
+    sp.add_argument("--spec", metavar="FILE",
+                    help="what can be done with THIS spec: every command that "
+                         "takes it, how it is read there, the calls, and what "
+                         "to know first (a .py spec is loaded, i.e. run)")
     sp.set_defaults(func=cmd_find)
     sp = add("batch", "every spec in a directory through ONE command, in one "
                       "process (or N with --jobs): one certificate per spec, "

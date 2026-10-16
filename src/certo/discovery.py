@@ -81,6 +81,27 @@ SYNONYMS = {
     "contradictorios": "contradictory", "contradictorias": "contradictory",
     "contradiction": "contradictory", "inconsistent": "contradictory",
     "contradiccion": "contradictory",
+    # 0.32: words from the reports that found nothing
+    "perfil": "profile", "perfiles": "profile", "reconstruccion": "repair",
+    "relativa": "relative", "relativo": "relative", "retirados": "withdraw",
+    "retirar": "withdraw", "retirado": "withdraw", "insertados": "insert",
+    "insertar": "insert", "prerrequisito": "prerequisite",
+    "prerrequisitos": "prerequisite", "prerequisites": "prerequisite",
+    "pendiente": "pending", "pendientes": "pending", "cobertura": "covering",
+    "coberturas": "covering", "cajas": "box", "frontera": "boundary",
+    "fronteras": "boundary", "boundaries": "boundary", "divisor": "denominator",
+    "divisores": "denominator", "denominador": "denominator",
+    "denominadores": "denominator", "signo": "sign", "rango": "rank",
+    "reducido": "reduction", "reducida": "reduction", "reduced": "reduction",
+    "minimize": "minimum", "minimise": "minimum", "minimizar": "minimum",
+    "minimiza": "minimum", "maximize": "maximum", "maximise": "maximum",
+    "maximizar": "maximum", "sintetizar": "synth", "sintetizado": "synth",
+    "sintesis": "synth", "synthesis": "synth", "synthesise": "synth",
+    "roles": "role", "rol": "role", "grafo": "graph", "automorfismo": "automorphism",
+    "condicionada": "conditioned", "condicionadas": "conditioned",
+    "hojas": "leaf", "hoja": "leaf", "leaves": "leaf",
+    "isabelle": "coq", "agda": "coq", "hol": "coq", "rocq": "coq",
+    "obligacion": "obligation", "obligaciones": "obligation",
 }
 
 STOP = {"a", "an", "the", "of", "on", "in", "is", "it", "to", "for", "and",
@@ -199,12 +220,17 @@ def entries() -> list:
         # ("range --var X") with the positional arguments put back.
         head, _, rest = (questions[0][1] if questions else name).partition(" ")
         use = " ".join(x for x in ("certo", head, positional, rest) if x)
+        doc = _doc_for(name)
         out.append({
             "id": name, "type": "command", "command": name,
             "summary": questions[0][0] if questions else help_text,
             "help": help_text, "use": use,
             "spec": spec, "kind": kind, "solver_free": tier,
-            "text": " ".join([name, help_text] + [q for q, _ in questions]),
+            "question": doc.get("question"), "answers": doc.get("answers"),
+            "not_established": doc.get("not_established"),
+            "example": (doc_contracts().get("examples") or {}).get(name),
+            "text": " ".join([name, help_text] + [q for q, _ in questions]
+                             + [doc.get("question") or "", doc.get("answers") or ""]),
         })
         for a in p._actions:
             opts = [o for o in a.option_strings if o.startswith("--")]
@@ -225,6 +251,8 @@ def entries() -> list:
                      else " " + (a.metavar or a.dest.upper()))),
                 "default": None if a.default in (None, False, argparse.SUPPRESS)
                 else a.default,
+                "example": (doc_contracts().get("examples") or {}).get(
+                    "{} {}".format(name, opts[0])),
                 "text": " ".join([name, opts[0].lstrip("-").replace("-", " "),
                                   a.help or ""]),
             })
@@ -254,6 +282,24 @@ def entries() -> list:
                     "use": "{}(..., {}=...)".format(name, f.name),
                     "text": " ".join([name, f.name.replace("_", " "), note, first]),
                 })
+        # The spec's own METHODS: `ProofSpec.pending`, `Spec.regime` -- a
+        # feature that is a method was invisible to a search of fields.
+        for mname, fn in sorted(vars(cls).items()):
+            if mname.startswith("_") or not inspect.isfunction(fn):
+                continue
+            mdoc = inspect.getdoc(fn) or ""
+            if not mdoc:
+                continue
+            mfirst = mdoc.split("\n\n")[0].replace("\n", " ")
+            out.append({"id": "{}.{}".format(name, mname), "type": "spec_method",
+                        "spec": name, "commands": cmds, "summary": mfirst,
+                        "use": "{}(...).{}{}".format(name, mname, _sig(fn)),
+                        "text": " ".join([name, mname.replace("_", " "), mfirst])})
+    for na in NOT_AVAILABLE:
+        out.append({"id": "na:" + na["id"], "type": "not_available",
+                    "summary": na["what"], "why": na["why"], "instead": na["instead"],
+                    "use": na["instead"],
+                    "text": " ".join([na["id"].replace("_", " "), na["what"], na["why"]])})
     # The Python API: the public functions of the modules a caller imports.
     import importlib
 
@@ -284,6 +330,83 @@ def entries() -> list:
     return out
 
 
+def _sig(fn) -> str:
+    try:
+        params = list(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        return "(...)"
+    return "({})".format(", ".join(p for p in params if p != "self"))
+
+
+#: WHAT CERTO DOES NOT DO, said where a search lands. A model that finds
+#: nothing guesses; one that finds "not here, and this instead" does not.
+#: Each entry names the BACKLOG line it stands for, and a test keeps the two
+#: together: an item that ships has to leave this list in the same commit.
+NOT_AVAILABLE = [
+    {"id": "sos_rank_reduction", "backlog": "Rational SOS certificates on a lower-rank sub-face",
+     "what": "a rational sum of squares on a lower-rank face (rank reduction, facial reduction)",
+     "why": "research-grade: the face's projector is irrational in general",
+     "instead": "certo nonneg on a box (Bernstein), or certo sos for full-rank cases"},
+    {"id": "lean_branch_bound", "backlog": "Branch-and-bound trees to Lean",
+     "what": "branch-and-bound trees or finite sweeps exported to Lean",
+     "why": "only linear Farkas certificates export to Lean today",
+     "instead": "certo export --lean on a farkas certificate; verify the tree with certo verify"},
+    {"id": "chow_ring", "backlog": "Chow ring and toric intersection",
+     "what": "Chow rings and toric intersection numbers",
+     "why": "an engine, not a checker; not built",
+     "instead": "certo cone and certo semigroup for the local toric data"},
+    {"id": "ports", "backlog": "Composition with PORTS",
+     "what": "composition with ports: gluing gadgets, transporting resource profiles, projection contracts",
+     "why": "planned; the contracts are not specified yet",
+     "instead": "certo compose with ProofSpec.pending and needs; CoverSpec.repair for relative changes"},
+    {"id": "parametric_feasibility", "backlog": "Parametric feasibility certificates",
+     "what": "a family of bases with rational formulas over regions covering a parameter domain",
+     "why": "planned",
+     "instead": "certo parametric, certo profile (one parameter), certo atlas, certo covering"},
+    {"id": "atlas_charts", "backlog": "Charts in `atlas`",
+     "what": "atlas pieces in other coordinate charts, with the change of coordinates checked",
+     "why": "planned: atlas covers a domain in one chart",
+     "instead": "certo atlas in one chart; certo covering for a conditioned box partition"},
+    {"id": "declarative_notation", "backlog": "A declarative spec notation that is not code",
+     "what": "a spec notation that is not Python (no exec), or SMT-LIB input",
+     "why": "planned; specs other than the JSON types are executed",
+     "instead": "the JSON spec types (nothing executed), CERTO_NO_EXEC=1"},
+    {"id": "normality", "backlog": "The boundary, stated",
+     "what": "proving an affine semigroup NORMAL",
+     "why": "a witness refutes normality; establishing it is Normaliz's job",
+     "instead": "certo semigroup for witnesses and memberships, SemigroupSpec.profiles"},
+    {"id": "cegis_provenance", "backlog": "CEGIS witnesses tied to physical resources",
+     "what": "CEGIS counterexamples tied to physical resources (pages, edges, capacities)",
+     "why": "planned with the composition-with-ports work",
+     "instead": "SynthSpec.scope (what is relaxed, whether counterexamples are realisable)"},
+    {"id": "packing_upper_bound", "backlog": "A certified integer UPPER bound for packings",
+     "what": "a certified integer upper bound for large packings beyond branch and bound",
+     "why": "open: needs cuts or another certificate of the integer value",
+     "instead": "certo opt --gap, certo cover --maximum (SAT with DRUP), certo mixed --prove-optimal"},
+    {"id": "bound_shapes", "backlog": "Contracts between bound shapes",
+     "what": "a typed contract for passing between absolute, linear and rational bounds",
+     "why": "planned",
+     "instead": "write the inference step as a Spec (hypotheses, new bound as claim) and certo prove it"},
+    {"id": "other_provers", "backlog": "The boundary, stated",
+     "what": "exporting to Coq (Rocq), Isabelle, Agda or HOL",
+     "why": "the one formal target is Lean 4 with Mathlib",
+     "instead": "certo export --lean, certo bind"},
+    {"id": "model_families", "backlog": "Integer-parameter model families",
+     "what": "families of models in an integer parameter derived from one schema, with the specialisation checked",
+     "why": "planned",
+     "instead": "certo parametric for a family of LPs; certo induct for statements in n"},
+]
+
+
+#: How certo reads each spec type under each command it takes, and what to
+#: know before running it -- what `find --spec` answers.
+CONVERTED = {"HypergraphSpec": {"opt": "to_lp", "mixed": "to_lp",
+                                "cover": "to_packing (matching) / to_cover (transversal)",
+                                "exists": "to_cover (transversal)"},
+             "PackingSpec": {"opt": "to_lp", "mixed": "to_lp", "farkas": "as hypotheses"},
+             "LPSpec": {"farkas": "as hypotheses"}}
+
+
 #: The modules whose public functions are indexed as the Python API.
 API_MODULES = ("api", "explain", "batch", "tamper", "status_report",
                "discovery", "nosite", "closedform", "scope")
@@ -305,13 +428,15 @@ def _field_note(cls, field) -> str:
         return ""
     for i, line in enumerate(src):
         if re.match(r"\s*{}\s*:".format(re.escape(field)), line):
-            if "#" in line:
-                return line.split("#", 1)[1].strip()
+            # The comment block above AND the one on the line: `repair` said
+            # "a dict, or a LIST of steps" inline and what it IS above, and
+            # only the inline half was indexed.
             j, above = i - 1, []
             while j >= 0 and src[j].strip().startswith("#"):
                 above.insert(0, src[j].strip().lstrip("#").strip())
                 j -= 1
-            return " ".join(above)
+            inline = line.split("#", 1)[1].strip() if "#" in line else ""
+            return " ".join(x for x in (inline, " ".join(above)) if x)
     return ""
 
 
@@ -336,7 +461,7 @@ def _index():
 #: How much each kind of entry is worth when two score alike: a command is
 #: what most questions want, a field the least often.
 TYPE_WEIGHT = {"command": 1.0, "flag": 0.95, "spec": 0.8, "spec_field": 0.75,
-               "api": 0.75, "kind": 0.7}
+               "spec_method": 0.75, "api": 0.75, "kind": 0.7, "not_available": 0.6}
 
 
 #: Questions whose words lead to the WRONG entry, and what to say instead.
@@ -347,6 +472,10 @@ NOTES = [
                 r"cubierta (por|de) (conjuntos|vertices)|"
                 r"cubrimiento (por|de) (conjuntos|vertices)|"
                 r"conjunto de impacto"), "find.note.hitting_set"),
+    # A timeout is not a missing feature: since 0.32 the result itself reads
+    # the question's structure.
+    (re.compile(r"time ?out|timed out|tiempo (agotado|limite)|unknown|inconclus"),
+     "find.note.timeout"),
 ]
 
 
@@ -380,9 +509,283 @@ def find(query, n=8, types=None) -> list:
         # The entry's own name in the query is the strongest signal there is.
         if _fold(e["id"].split(":")[-1]) in _fold(query):
             score *= 1.5
-        scored.append((score * TYPE_WEIGHT.get(e["type"], 1.0), e))
-    scored.sort(key=lambda se: (-se[0], se[1]["id"]))
-    return [dict(e, score=round(s, 3)) for s, e in scored[:n]]
+        matched = sorted(w for w in set(q) if w in ts)
+        scored.append((score * TYPE_WEIGHT.get(e["type"], 1.0), matched, e))
+    scored.sort(key=lambda se: (-se[0], se[2]["id"]))
+    informative = [w for w in set(q) if w in df]
+    out = []
+    for s, matched, e in scored[:n]:
+        # Every word of the query counts, known or not: a word certo has
+        # never seen ("coq") is evidence that the question is not about it.
+        cover = len(matched) / max(1, len(set(q)))
+        out.append(dict(e, score=round(s, 3), matched=matched,
+                        confidence=_confidence(s, cover, len(informative))))
+    return out
+
+
+#: Calibrated on the golden queries (tests): every one of them reaches
+#: `medium` or better, and the queries about what certo does NOT do stay low.
+HIGH, MEDIUM = 7.0, 4.0
+
+
+def _confidence(score, cover, informative) -> str:
+    if informative == 0:
+        return "low"
+    if score >= HIGH and cover >= 0.5:
+        return "high"
+    if score >= MEDIUM and cover >= 0.3:
+        return "medium"
+    return "low"
+
+
+def answer(query, n=8, surface="cli") -> dict:
+    """What a model needs from a search: `found`, `not_available` (certo
+    does not do this -- why, and what to use instead) or `not_in_certo`,
+    with each result's calls ready for `surface` and how sure the match is."""
+    rows = find(query, n=n)
+    # Most certain first: a high-confidence entry below a low one was read as
+    # second best by a model that stops at the first.
+    rank = {"high": 0, "medium": 1, "low": 2}
+    rows.sort(key=lambda r: (rank[r["confidence"]], -r["score"]))
+    for r in rows:
+        r.pop("text", None)
+        if r["type"] in ("command", "flag", "spec", "spec_field", "spec_method"):
+            r["call"] = calls(r)
+    top = rows[0] if rows else None
+    # A "not here" entry wins when it matches what the best result does NOT:
+    # "export to coq" finds `export`, and "coq" is the word that decides.
+    found_words = set().union(*[set(r["matched"]) for r in rows
+                                if r["type"] != "not_available"] or [set()])
+    na = next((r for r in rows if r["type"] == "not_available"
+               and (r["confidence"] != "low" or set(r["matched"]) - found_words)),
+              None)
+    if top is None or top["confidence"] == "low":
+        verdict = "not_available" if na else "not_in_certo"
+    elif top["type"] == "not_available" or (
+            na is not None and set(na["matched"]) - found_words):
+        verdict = "not_available"
+    else:
+        verdict = "found"
+    out = {"ok": verdict == "found", "verdict": verdict, "query": query,
+           "results": rows}
+    if verdict == "not_available":
+        out["not_available"] = {k: na[k] for k in ("id", "summary", "why", "instead")} \
+            if na else None
+    said = notes(query)
+    if said:
+        out["notes"] = said
+    return out
+
+
+def _mcp_params():
+    """`{tool: [parameters]}` of the MCP server, when it can be imported."""
+    global _MCP
+    if _MCP is None:
+        try:
+            from . import mcp_server
+
+            got = {}
+            for name, obj in vars(mcp_server).items():
+                fn = getattr(obj, "fn", obj)
+                if inspect.iscoroutinefunction(fn) and not name.startswith("_"):
+                    got[name] = list(inspect.signature(fn).parameters)
+            _MCP = got
+        except Exception:  # noqa: BLE001 -- no `mcp` installed: no MCP calls
+            _MCP = {}
+    return _MCP
+
+
+_MCP = None
+
+
+def calls(e) -> dict:
+    """How to call an entry from each surface: the CLI line, the MCP tool
+    call, and `certo.api.run`. Derived from the parser, the tools'
+    signatures and the engines' -- never written by hand."""
+    from . import api
+
+    out = {"cli": e.get("use")}
+    cmd = e.get("command")
+    if e["type"] in ("spec", "spec_field", "spec_method"):
+        cmds = e.get("commands") or []
+        cmd = cmds[0] if cmds else None
+        if cmd:
+            out["cli"] = "certo {} SPEC".format(cmd)
+    if not cmd or cmd == "*":
+        return out
+    dest = (e.get("flag") or "").lstrip("-").replace("-", "_") or None
+    try:
+        opts = set(api.options(cmd))
+        runnable = cmd in api.runnable()
+    except Exception:  # noqa: BLE001
+        opts, runnable = set(), False
+    if runnable and (dest is None or dest in opts):
+        out["api"] = "certo.api.run({!r}, spec{})".format(
+            cmd, ", {}=True".format(dest) if dest else "")
+    tools = _mcp_params()
+    if cmd in tools and (dest is None or dest in tools[cmd]):
+        out["mcp"] = "{}(spec_path=...{})".format(cmd, ", {}=true".format(dest) if dest else "")
+    elif "run" in tools and runnable and (dest is None or dest in opts):
+        out["mcp"] = "run(command={!r}, spec_path=...{})".format(
+            cmd, ", options={{{!r}: true}}".format(dest) if dest else "")
+    return out
+
+
+def for_spec(spec) -> dict:
+    """What can be done with THIS spec object: every command that takes it,
+    how it is read there, the flags, the calls, and what to know first."""
+    from . import routing
+
+    name = type(spec).__name__
+    cmds = [c for c, s in routing.SPEC_OF.items() if s == name]
+    cmds += [c for c, takes in routing.ALSO_TAKES.items() if name in takes]
+    conv = CONVERTED.get(name, {})
+    cmds += [c for c in conv if c not in cmds]
+    rows = []
+    for c in cmds:
+        got = contract(c) or {}
+        rows.append({"command": c, "read_as": conv.get(c, name),
+                     "question": got.get("question") or got.get("summary"),
+                     "not_established": got.get("not_established"),
+                     "flags": [f["flag"] for f in got.get("flags") or []],
+                     "call": calls(dict(got, type="command")) if got else {}})
+    return {"spec": name, "commands": rows, "notes": _spec_notes(spec)}
+
+
+def _spec_notes(spec) -> list:
+    """What to know before running this particular spec."""
+    name = type(spec).__name__
+    out = []
+    if name == "CoverSpec":
+        if not spec.candidates:
+            out.append(t("find.spec.cover_no_candidates"))
+        try:
+            if len(list(spec.universe)) > 62:
+                out.append(t("find.spec.cover_sat"))
+        except TypeError:
+            pass
+    if name == "HypergraphSpec":
+        out.append(t("find.spec.hypergraph_matching") if spec.problem == "matching"
+                   else t("find.spec.hypergraph_transversal"))
+        if spec.weights:
+            out.append(t("find.spec.hypergraph_weighted"))
+    if name == "LPSpec" and any(k in ("integer", "binary") for k in spec.kinds.values()):
+        out.append(t("find.spec.lp_discrete"))
+    if name == "NonnegSpec" and any(spec.box[n][1] is None for n in spec.box):
+        out.append(t("find.spec.nonneg_ray"))
+    if name == "SemigroupSpec" and spec.profiles:
+        out.append(t("find.spec.semigroup_profiles"))
+    if name == "IdealSpec" and not spec.clear_denominators:
+        out.append(t("find.spec.ideal_divisions"))
+    if name == "SynthSpec":
+        out.append(t("find.spec.synth_scope"))
+    return out
+
+
+# --- the docs' contracts, shipped -------------------------------------------------
+
+DOC_FIELDS = {"Question": "question", "Pregunta": "question",
+              "Answers": "answers", "Responde": "answers",
+              "Certificate": "certificate", "Certificado": "certificate",
+              "Not established": "not_established", "No establece": "not_established",
+              "Spec": "spec"}
+
+
+def parse_commands_doc(text) -> dict:
+    """`{command: {question, answers, certificate, not_established}}` from a
+    COMMANDS.md: the five-line head of each `### certo X` section."""
+    out, cmd, field, buf = {}, None, None, []
+
+    def flush():
+        if cmd and field:
+            out.setdefault(cmd, {})[field] = " ".join(" ".join(buf).split())
+
+    for line in text.splitlines():
+        m = re.match(r"^### `certo ([a-z]+)", line)
+        if m:
+            flush()
+            cmd, field, buf = m.group(1), None, []
+            if cmd in out:              # a second section: the first is the head
+                cmd = None
+            continue
+        if cmd is None:
+            continue
+        m = re.match(r"^\*\*([^*]+)\*\* — (.*)$", line)
+        if m and m.group(1) in DOC_FIELDS:
+            flush()
+            field, buf = DOC_FIELDS[m.group(1)], [m.group(2)]
+            continue
+        if not line.strip():
+            flush()
+            if field:
+                cmd = None              # the head ends at its first blank line
+            field, buf = None, []
+            continue
+        if field:
+            buf.append(line.strip())
+    flush()
+    return out
+
+
+def build_doc_contracts(root) -> dict:
+    """What `data/doc_contracts.json` holds, rebuilt from the repository:
+    both COMMANDS.md and which example exercises each command and flag."""
+    import ast
+    import pathlib
+
+    root = pathlib.Path(root)
+    out = {"en": parse_commands_doc((root / "docs" / "COMMANDS.md").read_text("utf-8")),
+           "es": parse_commands_doc((root / "docs" / "es" / "COMMANDS.md").read_text("utf-8")),
+           "examples": {}}
+    tree = ast.parse((root / "tests" / "run_examples.py").read_text("utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(getattr(t_, "id", "") == "CASES"
+                                                for t_ in node.targets):
+            for row in ast.literal_eval(node.value):
+                ex, cmd, flags = row[0], row[1], row[2]
+                out["examples"].setdefault(cmd, ex)
+                for f in flags:
+                    if str(f).startswith("--"):
+                        out["examples"].setdefault("{} {}".format(cmd, f), ex)
+    out["examples"] = dict(sorted(out["examples"].items()))
+    return out
+
+
+_DOC = None
+
+
+def doc_contracts() -> dict:
+    global _DOC
+    if _DOC is None:
+        import json
+        import pathlib
+
+        p = pathlib.Path(__file__).parent / "data" / "doc_contracts.json"
+        try:
+            _DOC = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            _DOC = {}
+    return _DOC
+
+
+def _doc_for(command) -> dict:
+    from . import i18n
+
+    d = doc_contracts()
+    return (d.get(i18n.current()) or {}).get(command) or (d.get("en") or {}).get(command) or {}
+
+
+if __name__ == "__main__":  # python -m certo.discovery: rebuild the shipped contracts
+    import json
+    import pathlib
+    import sys
+
+    root = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
+    target = pathlib.Path(__file__).parent / "data" / "doc_contracts.json"
+    target.parent.mkdir(exist_ok=True)
+    target.write_text(json.dumps(build_doc_contracts(root), indent=1, ensure_ascii=False,
+                                 sort_keys=True) + "\n", encoding="utf-8")
+    print("wrote", target)
 
 
 def contract(name) -> dict | None:

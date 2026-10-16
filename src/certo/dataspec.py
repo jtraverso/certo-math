@@ -51,6 +51,7 @@ class NotData(ValueError):
 BUILDABLE = (
     "LPSpec", "PackingSpec", "HypergraphSpec", "MatrixSpec", "LinearSystemSpec", "ConeSpec",
     "CycleSpec", "CoverSpec", "CNFSpec", "NumberSpec", "EquitableQuotientSpec",
+    "RoleSpec",
 )
 
 
@@ -81,6 +82,8 @@ def _exact(value):
 #: vertex named 1, and reading it as the number 1 merged it with the vertex
 #: `1` before anything could notice.
 LABELS = {"HypergraphSpec": ("edges", "vertices"),
+          "RoleSpec": ("edges", "roles", "roles_after", "mapping", "vertices",
+                       "properties"),
           "CoverSpec": ("universe", "parts", "candidates")}
 
 

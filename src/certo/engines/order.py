@@ -25,7 +25,10 @@ from ..status import Result, Status, Verdict
 
 ENGINE = "certo/order"
 
+from ..budget import honours_timeout  # noqa: E402
 
+
+@honours_timeout("order", ENGINE)
 def order(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     t0 = time.perf_counter()
 

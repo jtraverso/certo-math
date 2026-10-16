@@ -145,7 +145,27 @@ def _cegis_none(p):
               domain=_formula(p["smt2"]["behavior"]))] + _synth_scope(p)
 
 
+def _covering(p):
+    out = [t("scope.box", box=_box(p.get("domain")))]
+    if p.get("conditions"):
+        out.append(t("scope.covering_conditions",
+                     names=", ".join(sorted(p["conditions"]))))
+    return out
+
+
+def _synth_optimum(p):
+    return [t("scope.synth_optimum")] + _synth_scope(p)
+
+
+def _semigroup(p):
+    # COUNTS, NOT OBJECTS: a member is a combination of generator vectors.
+    # That physical pieces with those counts fit together is not said here.
+    return [t("scope.semigroup_counts")]
+
+
 SCOPES = {
+    "affine_semigroup": _semigroup, "conditioned_cover": _covering,
+    "synth_optimum": _synth_optimum,
     "parametric_bound": _parametric, "polynomial_nonneg": _nonneg,
     "parametric_atlas": _atlas, "clique_lp": _cliques,
     "clique_lp_farkas": _cliques, "lp_dual": _lp, "sweep": _sweep,

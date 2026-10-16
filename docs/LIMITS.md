@@ -168,3 +168,11 @@ LDLᵀ.
 
 **Can I use it offline with nothing else installed?**
 Yes. `z3-solver` and `pulp` ship their binaries; the rest is pure Python.
+
+**Every engine obeys the time budget (0.32).** Seventeen engines took a
+`limits` argument and never read it -- a semigroup asked for
+`Limits(timeout_ms=1)` finished its whole search. Each now runs under the
+earlier of its own `timeout_ms` and the run's deadline, refuses to start once
+it has passed, and stops inside its long loops; `semigroup` keeps what it
+decided and marks the rest `undecided`. A test runs every engine past its
+deadline.

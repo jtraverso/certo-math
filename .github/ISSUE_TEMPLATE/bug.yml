@@ -26,7 +26,7 @@ body:
     attributes:
       label: Version
       description: "`certo --version`"
-      placeholder: "0.17.0"
+      placeholder: "the line certo --version prints"
     validations:
       required: true
   - type: input

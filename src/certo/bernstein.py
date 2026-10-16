@@ -239,6 +239,49 @@ def nonneg(poly, box, depth=0, degrees=None):
     return True, [name, tl, tr] if at is None else [name, tl, tr, str(at)]
 
 
+def positive(poly, box, depth=0):
+    """`(ok, tree)` for `poly > 0` on the closed box: every Bernstein
+    coefficient of every leaf STRICTLY positive -- the polynomial is a
+    convex combination of them -- halving the widest interval at its
+    midpoint. A corner coefficient <= 0 is the value at a vertex, and ends
+    the search."""
+    if not poly.terms:
+        return False, None
+    d = degrees_of(poly)
+    b = coefficients(poly, box, d)
+    if all(v > 0 for v in b.values()):
+        return True, None
+    if any(b[c] <= 0 for c in _corners(d)) or depth <= 0:
+        return False, None
+    own = d
+    used = [n for i, n in enumerate(poly.vars) if own[i] > 0] or list(poly.vars)
+    name = max(used, key=lambda n: (box[n][1] - box[n][0], -used.index(n)))
+    left, right = halves(box, name)
+    ok_l, tl = positive(poly, left, depth - 1)
+    if not ok_l:
+        return False, None
+    ok_r, tr = positive(poly, right, depth - 1)
+    if not ok_r:
+        return False, None
+    return True, [name, tl, tr]
+
+
+def check_positive(poly, box, tree, max_depth=64):
+    """Recompute what `positive` claimed: every leaf's coefficients > 0."""
+    if not poly.terms:
+        return False
+    if tree is None:
+        return all(v > 0 for v in coefficients(poly, box, degrees_of(poly)).values())
+    if max_depth <= 0 or not isinstance(tree, list) or len(tree) != 3:
+        return False
+    name, tl, tr = tree
+    if name not in box:
+        return False
+    left, right = halves(box, name)
+    return (check_positive(poly, left, tl, max_depth - 1)
+            and check_positive(poly, right, tr, max_depth - 1))
+
+
 def diagnose(poly, box, degrees=None):
     """WHERE a non-negativity check fails, and what to do about it -- or None
     when it does not fail. A user running thousands of box certificates got

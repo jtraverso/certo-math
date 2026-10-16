@@ -6,6 +6,55 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-10-16
+
+**Every engine within its budget, a search that says what is not there,
+conditioned coverings, roles moved on one graph, and the best candidate.**
+Two new commands (61): `covering` and `roles`; three new kinds (64):
+`conditioned_cover`, `role_transport`, `synth_optimum`. The schema stays 5;
+new optional fields: `profiles` (`affine_semigroup`), `cleared`
+(`polynomial_nonneg`), `pending`, `needs`, `not_closed` (`proof`).
+
+### Fixed
+
+- **Seventeen engines ignored the time budget** (`semigroup`, `number`,
+  `shrink`, `parametric` among them): each now runs under its `timeout_ms`
+  and the run's deadline, stops inside its loops, and a test runs every one
+  past its deadline. `semigroup` keeps what it decided.
+- **A semigroup's status read as one answer for many questions**: each point
+  now says `member`, `not_member` or `undecided`, and the scope says these are
+  COUNTS, not physical objects.
+
+### New
+
+- **`certo covering`** (`CoveringSpec`): a box, conditions and alternative
+  obligations; the leaves, each with its reason, tile the box, boundaries
+  included (`conditioned_cover`, solver-free). Unresolved leaves are listed; a
+  point where everything fails is a counterexample.
+- **`certo roles`** (`RoleSpec`): roles exchanged on one graph without
+  changing it -- the automorphism, and each declared property before and after
+  (`role_transport`, solver-free).
+- **The best candidate**: `SynthSpec(minimize=...)` / `maximize`, certified by
+  the candidate and the refuted search for a better one (`synth_optimum`).
+  `correctness` as `{name: formula}` names which obligation each
+  counterexample breaks.
+- **Prerequisite chains** in `compose`: `ProofSpec.pending(...)` and
+  `lemma(..., needs=[...])`; a theorem resting on a pending prerequisite is
+  NOT CLOSED, said as the verdict.
+- **Semigroup profiles**: the least value of a free coordinate with the point
+  in S, every smaller value excluded.
+- **`NonnegSpec(clear_denominators=True)`**: the sign of the denominator
+  proved on the box, and the numerator certified with that orientation.
+- **Why a question did not settle**: a `timeout` or `unknown` from `prove` or
+  `check` reads the theory, floors, products and the hypotheses that bring
+  them, and says what to try (`meta["hardness"]`).
+- **`find` answers with a verdict** -- `found`, `not_available` (why, and what
+  instead) or `not_in_certo` -- each result with its confidence, what it does
+  not establish, an example and the call for the CLI, MCP and the API;
+  `find --spec FILE` says what can be done with a spec. Spec methods indexed.
+- `verify --obligation` covers `atlas` and `covering` certificates, and a
+  `nonneg` with cleared denominators.
+
 ## [0.31.0] — 2026-10-13
 
 **Inputs kept as written, and a certificate tied to its obligation.** No new

@@ -32,6 +32,8 @@ from ..spec import Outcome
 from ..status import Result, Status, Verdict
 
 
+from ..budget import honours_timeout, tick  # noqa: E402
+
 def _sha(path):
     if not path:
         return ""
@@ -62,6 +64,7 @@ def _reductions(g: Graph):
         yield ("del_edge {}-{}".format(*e), _delete_edge(g, e))
 
 
+@honours_timeout("shrink", "certo/shrink")
 def shrink_graph(spec, start: Graph, limits: Limits | None = None,
                  spec_path: str = "", keep_filters: bool = True,
                  use_objective: bool = False) -> Result:
@@ -117,6 +120,7 @@ def shrink_graph(spec, start: Graph, limits: Limits | None = None,
     current, steps, trace = start, 0, []
     changed = True
     while changed:
+        tick(1)
         changed = False
         candidates = []
         for op, cand in _reductions(current):
@@ -251,6 +255,7 @@ def shrink_cnf(spec, limits: Limits | None = None) -> Result:
 # ---------------------------------------------------------------------------
 
 
+@honours_timeout("shrink", "certo/shrink")
 def shrink_domain(spec, start, limits: Limits | None = None,
                   spec_path: str = "", use_objective: bool = False) -> Result:
     """The same reduction, for items that are not graphs.
@@ -295,6 +300,7 @@ def shrink_domain(spec, start, limits: Limits | None = None,
     current, steps, trace = start, 0, []
     changed = True
     while changed:
+        tick(1)
         changed = False
         cands = []
         for i, cand in enumerate(reduce(current)):

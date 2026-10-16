@@ -1,0 +1,924 @@
+{
+ "en": {
+  "ask": {
+   "answers": "whatever the routed command produces",
+   "certificate": "whatever the routed command produces",
+   "not_established": "nothing extra; routing changes who answers, not what the answer means.",
+   "question": "Just run whatever this spec asks for",
+   "spec": "any of them"
+  },
+  "assign": {
+   "answers": "the largest integral assignment, and a Hall set `U` of receivers with `cap(U) + |items not confined to U|` equal to its size; with a `target` out of reach, REFUTED and `U` names the bottleneck",
+   "certificate": "`assignment`, **solver-free**: each placement checked against what the item is allowed, each load against its capacity, and the Hall bound recounted from the data",
+   "not_established": "that the data is your problem: the items, the allowed receivers and the capacities are the claim's input, and a matrix nobody wrote is the point -- an exact optimum of a wrong LP is still exact.",
+   "question": "Items to receivers under capacities: how many can be placed, and why no more?",
+   "spec": "`AssignmentSpec`"
+  },
+  "atlas": {
+   "answers": "one statement, `opt ≤ T` (or `≥`) on the domain, or the pieces that fail and the cells of the domain that no piece covers",
+   "certificate": "`parametric_atlas`, **solver-free**: every piece verified again and the covering recomputed",
+   "not_established": "anything on a cell covered only by a `cited` box, which the statement then rests on. A region is scope, as it is in `parametric`.",
+   "question": "Each box is certified. Does the bound hold on the whole domain the boxes are meant to cover?",
+   "spec": "`AtlasSpec`"
+  },
+  "audit": {
+   "answers": "one of four verdicts per hypothesis — `needed`, `redundant`, `domain`, `unknown` — and for `needed`, **the assignment that breaks the claim without it**",
+   "certificate": "`hypothesis_audit`; re-checking substitutes each witness and re-decides the result, so it needs a solver — but not the search that found it",
+   "not_established": "that the hypothesis set is minimal. Hypotheses are dropped one at a time.",
+   "question": "Does every hypothesis earn its place, or is my theorem overstated?",
+   "spec": "any spec with named hypotheses"
+  },
+  "batch": {
+   "answers": "one row per spec, in the directory's order: verdict, time, and the certificate written beside the others, named after the spec",
+   "certificate": "one per spec, each self-checked exactly as a single run is",
+   "not_established": "anything about the specs together. A batch is many separate runs; joining boxes into one statement is `atlas`, and \"each exactly once\" is `status --manifest`.",
+   "question": "Hundreds of small specs: can they run without one process each?",
+   "spec": "none; a command and a directory of specs"
+  },
+  "bind": {
+   "answers": "whether what you say the declaration **provides** entails the hypothesis the certificate rests on",
+   "certificate": "`lean_binding`; re-asks the entailment, so not solver-free",
+   "not_established": "that your rendering of the declaration is faithful. Nothing here reads Mathlib. It is a **bridge**, and `verify` says so every time.",
+   "question": "Does the Lean lemma actually give what my certificate assumed?",
+   "spec": "`BindSpec`"
+  },
+  "bisect": {
+   "answers": "the pair that brackets the threshold, each side certified",
+   "certificate": "`bisect`; solver-freedom depends on its children",
+   "not_established": "monotonicity in the parameter. It is **assumed**; the endpoints are checked and a warning is issued if they misbehave, but monotonicity itself is not proved.",
+   "question": "Where is the threshold for this constant?",
+   "spec": "`BisectSpec`"
+  },
+  "bounds": {
+   "answers": "a rigorous enclosure in exact rationals, and whether it settles the claim",
+   "certificate": "`ball`, **solver-free for the claim**; the interval itself needs the spec and the same backend",
+   "not_established": "non-zero-ness of a quantity that is in fact zero. No enclosure will ever prove that, and running out of precision is reported as `resource_exhausted`, not as a refutation.",
+   "question": "Is this numeric inequality true? (`e`, `log`, `π`, `ζ`)",
+   "spec": "`BoundSpec`"
+  },
+  "cases": {
+   "answers": "satisfiability, with a **DRAT proof** when unsatisfiable",
+   "certificate": "`drat`, **solver-free**: RUP/RAT checking",
+   "not_established": "the theorem. It settles the **finite case**.",
+   "question": "For every item of a finite domain / is this CNF unsat?",
+   "spec": "`CNFSpec`, or `DomainSpec`"
+  },
+  "check": {
+   "answers": "with `--hypotheses-only`, a **model** if the regime is inhabited, the **minimal clash** if it is not",
+   "certificate": "`model`, **solver-free**: non-emptiness re-checks by evaluation alone",
+   "not_established": "anything about the hypotheses, if you ask without `--hypotheses-only` and your claim is the literal `False`.",
+   "question": "Is my regime non-empty — do these hypotheses have a model at all?",
+   "spec": "`Spec`"
+  },
+  "columns": {
+   "answers": "the exact optimum, the cliques in the support with their values, and the exact dual of every edge row",
+   "certificate": "`clique_lp`, **solver-free**: rational arithmetic, and the pricing search run again",
+   "not_established": "anything about the integer program. This is the LP over the cliques; its integer counterpart is `mixed --prove-optimal` over the cliques as explicit columns. And that the graph is the one you meant is the spec's claim.",
+   "question": "What is the optimum of an LP over *every* clique of this graph — without listing the cliques?",
+   "spec": "`CliqueLPSpec`"
+  },
+  "commands": {
+   "answers": "this page, in your terminal, in your language",
+   "certificate": "none",
+   "not_established": "that a listed command can answer *your* instance. It routes by the shape of the question, not by whether the problem is in range.",
+   "question": "Which command answers which question?",
+   "spec": "none"
+  },
+  "compose": {
+   "answers": "the theorem, with every lemma either **linked** or named as a **bridge**",
+   "certificate": "`proof`; re-solves",
+   "not_established": "any bridge. A bridge is asserted, not derived, and it is reported by name **every single time the proof is verified**.",
+   "question": "How do I assemble my lemmas into one proof?",
+   "spec": "`ProofSpec`"
+  },
+  "cone": {
+   "answers": "primitivity per generator, the multiplicity, the height functional `u` with `⟨u,v⟩ = 1`, and the discrepancy `⟨u,w⟩ − 1` of any ray you name",
+   "certificate": "`toric_cone`, **solver-free**: exact determinant and solve",
+   "not_established": "the geometry. That multiplicity one gives a smooth chart, that discrepancy zero gives a crepant modification, that a fibre is SNC or reduced: those are theorems about varieties, and a certificate that quietly asserted them would be the substitution this project exists to refuse.",
+   "question": "Is this cone regular, at height one, and is subdividing it crepant?",
+   "spec": "`ConeSpec`"
+  },
+  "core": {
+   "answers": "the minimal unsatisfiable subset, and which hypotheses were redundant",
+   "certificate": "`mus` / `unsat_core`, solver-free when the core is linear",
+   "not_established": "that the hypothesis set is minimal *jointly*. A pair can be redundant together with neither redundant alone.",
+   "question": "Which of my hypotheses does it actually need?",
+   "spec": "`Spec`, or `MultiSpec` for several goals at once"
+  },
+  "cover": {
+   "answers": "every part checked to be a clique, every element counted exactly once, and with `--optimize --prove-optimal`, how far that is from the minimum",
+   "certificate": "`exact_cover`, **solver-free**: counting",
+   "not_established": "minimality, unless you ask for it. A cover certificate is an **upper bound**.",
+   "question": "Is this really a clique partition, and how large?",
+   "spec": "`CoverSpec`"
+  },
+  "covering": {
+   "answers": "the leaves of a partition of the box, each with its reason (an obligation that keeps its sign on the whole leaf, or a condition negative on it), the leaves left unresolved, or a point where every condition holds and every obligation fails",
+   "certificate": "`conditioned_cover`, **solver-free**: Bernstein coefficients and the tiling, recomputed",
+   "not_established": "anything outside the box, or for an obligation not listed. A leaf proved by an obligation is proved on the WHOLE leaf, which is stronger than needed; an unresolved leaf is listed, and the statement holds on the others only.",
+   "question": "On every point of this box where the conditions hold, does one of these obligations hold?",
+   "spec": "`CoveringSpec`"
+  },
+  "cycle": {
+   "answers": "the chain, the growth class of every step, and the one comparison that closes it",
+   "certificate": "`dependency_cycle`, **solver-free**: class arithmetic",
+   "not_established": "that your growth classes are the real ones. That `k` grows like a tower is what your lemma says; this checks what follows from it. And a loop this route does not refute comes back *not established*, never *there is no cycle*.",
+   "question": "Does this parameter depend on itself — and can the loop close at all?",
+   "spec": "`CycleSpec`"
+  },
+  "doctor": {
+   "answers": "every capability, present or absent, and **what each gap costs**",
+   "certificate": "none",
+   "not_established": "nothing; it makes no mathematical claim.",
+   "question": "Can this install do what I need?",
+   "spec": "none"
+  },
+  "eliminate": {
+   "answers": "the resultant, with the Bézout identity `Res = A·f + B·g` attached",
+   "certificate": "`resultant`, **solver-free**: expand two products and subtract",
+   "not_established": "sufficiency over ℝ. `Res = 0` is **necessary** for a common root over any field, **sufficient** over an algebraically closed one, and only where the leading coefficients do not both vanish. `verify` names that locus specifically.",
+   "question": "Get rid of `t` and tell me the condition on `s`",
+   "spec": "`EliminateSpec`"
+  },
+  "entry": {
+   "answers": "the index of the first crossing, the value there, and the two terms that bracket it",
+   "certificate": "`first_entry`, **solver-free**: exact rationals",
+   "not_established": "that the sequence is the one you meant. The prefix carries the values up to the crossing and nothing past it, because nothing past it is part of the claim.",
+   "question": "Where does this first cross the line — and by how little?",
+   "spec": "`EntrySpec`"
+  },
+  "enum": {
+   "answers": "the canonical list and its hash",
+   "certificate": "`graph_set`, **solver-free**",
+   "not_established": "**completeness**. The certificate verifies non-isomorphism and the filters, not that the family is all of them.",
+   "question": "Which graphs on `n` vertices are there, up to isomorphism?",
+   "spec": "`SweepSpec`, or flags"
+  },
+  "exists": {
+   "answers": "a model, or a DRAT refutation",
+   "certificate": "`cnf_model` or `drat`, both **solver-free**",
+   "not_established": "anything outside the candidate set you supplied.",
+   "question": "Does one exist at all — and if not, can you prove it?",
+   "spec": "`CoverSpec`"
+  },
+  "export": {
+   "answers": "a spec as SMT-LIB2 or DIMACS; to Lean, five kinds: a **linear Farkas certificate** and an **exact LP bound** as `linarith` examples, an **integer matrix** as literal matrices and the identities over them, an **affine semigroup** as its membership, pointedness, irreducibility and freeness theorems, and an **ideal** certificate as a `linear_combination` with its cofactors",
+   "certificate": "none",
+   "not_established": "anything for the other kinds: they are refused rather than written hopefully. Each exporter joined only after its output compiled against a real Mathlib.",
+   "question": "Get this into Lean",
+   "spec": "none; it takes a certificate or a spec"
+  },
+  "family": {
+   "answers": "the winner, its value, and a dual certifying that nothing else reaches it",
+   "certificate": "`family_extremum`; verification rebuilds each item's program from the spec",
+   "not_established": "that the family is the one you meant. Completeness of `items` is the spec's claim, the way a sweep's domain is.",
+   "question": "What is the largest of these ten thousand LPs — and can nothing beat it?",
+   "spec": "`FamilySpec`"
+  },
+  "farkas": {
+   "answers": "the non-negative rational multipliers that combine the hypotheses with the negated goal until everything cancels, plus the `linarith` / `nlinarith` call to paste",
+   "certificate": "`farkas`, **solver-free**: checking it is adding fractions",
+   "not_established": "anything, when it finds nothing. `farkas` is incomplete on purpose in both modes, so \"no certificate\" means *this search did not close it*, never *false* -- unless it also finds a point, below.",
+   "question": "Is this inequality true, with the multipliers shown? Or: are these hypotheses -- this linear program -- contradictory?",
+   "spec": "`Spec`, or an `LPSpec` / `PackingSpec`"
+  },
+  "find": {
+   "answers": "the commands, flags, spec fields, certificate kinds and Python API functions that match, best first, each with how to call it. `--exact NAME` returns one contract: a command with its flags and API options, a spec with its fields and defaults, a flag, a field or a kind",
+   "certificate": "none",
+   "not_established": "that what it lists can answer your instance. The search is lexical, over text derived from the code; a hit is a place to read, not a route.",
+   "question": "Is it in certo, and where?",
+   "spec": "none: what you need, in your words, English or Spanish"
+  },
+  "ideal": {
+   "answers": "the Gröbner cofactors showing `1 ∈ I`, or certifying `f = Σ hᵢgᵢ`",
+   "certificate": "`ideal`, **solver-free**: expand a product and compare coefficients",
+   "not_established": "anything about **real** roots. The field is ℂ. `1 ∈ I` refutes solutions over ℂ, hence over ℝ, ℚ and ℤ; the converse does not hold.",
+   "question": "Do these polynomial equations have a solution?",
+   "spec": "`IdealSpec`"
+  },
+  "induct": {
+   "answers": "the base cases, the step, **and the check that the chain joins**",
+   "certificate": "`induction`; re-solves, so not solver-free",
+   "not_established": "nothing by a solver: there is no induction schema in an SMT solver. The principle is applied *here*, and `verify` says so every time.",
+   "question": "Does this hold for every `n ≥ n₀`?",
+   "spec": "`InductSpec`"
+  },
+  "ledger": {
+   "answers": "an append-only log, re-verifiable",
+   "certificate": "none",
+   "not_established": "nothing; it stores paths and digests, never copies.",
+   "question": "What did I run last month?",
+   "spec": "none"
+  },
+  "lint": {
+   "answers": "contradictory hypotheses, an empty family, a 10⁹ domain, a predicate that returns `bool`, an inductive step that starts after the base ends",
+   "certificate": "none, and none claimed",
+   "not_established": "that the spec is *right*. It checks the shape of the question, not the mathematics.",
+   "question": "Is this spec well-posed, before I spend the compute?",
+   "spec": "any of them"
+  },
+  "matrix": {
+   "answers": "rank, determinant, Hermite or Smith normal form, with the unimodular transforms **and their inverses**; or the inertia, by a congruence",
+   "certificate": "`integer_matrix`, **solver-free**: integer matrix multiplication; `symmetric_inertia` for `inertia` and `psd`, two rational products",
+   "not_established": "that the matrix you wrote down is the matrix your paper is about. The right incidence matrix, the right basis, the right orientation: that is the spec's claim, and it is exactly where a computation stops being about the mathematics.",
+   "question": "What is the rank, the determinant, or the Smith form of this integer matrix — exactly? And the inertia of a symmetric one: is it PSD?",
+   "spec": "`MatrixSpec`"
+  },
+  "mcp": {
+   "answers": "the installed version and when it was installed, and every certo MCP server with when it started, the ones started before the install marked **stale**",
+   "certificate": "none",
+   "not_established": "anything about a server's answers. It reads the process table.",
+   "question": "I reinstalled certo. Which MCP servers are still running the old code?",
+   "spec": "none"
+  },
+  "mixed": {
+   "answers": "a discrete skeleton from a search, a residual LP over the continuous part certified exactly, and three numbers kept apart",
+   "certificate": "`mixed_design`, **solver-free**: exact arithmetic",
+   "not_established": "that the discrete choice was optimal, unless `achieved` meets `bound`. When it does not, the banner says **GLOBAL OPTIMALITY IS NOT CLAIMED**.",
+   "question": "…and is it really optimal over the integers?",
+   "spec": "`LPSpec` with variables carrying `kind=\"binary\"` or `kind=\"integer\"`"
+  },
+  "moment": {
+   "answers": "the expectation, and the mass it leaves over",
+   "certificate": "`first_moment`, **solver-free**: re-add exact rationals and compare",
+   "not_established": "that the probabilities describe the experiment you meant. What is checked is that they *are* probabilities, that the sum is the sum, and that the comparison holds.",
+   "question": "Is the expected number of bad events below one — so one good object exists?",
+   "spec": "`MomentSpec`"
+  },
+  "nonneg": {
+   "answers": "PROVED with the Bernstein certificate, or REFUTED with a point of the box, inside the region, and the exact negative value there",
+   "certificate": "`polynomial_nonneg`, **solver-free**: Bernstein coefficients recomputed on every leaf, or the point evaluated",
+   "not_established": "anything when it is INCONCLUSIVE: the coefficients stayed negative after `subdivide` halvings and no grid point was negative. It may still hold; the detail says where to cut.",
+   "question": "Is this polynomial >= 0 on a box -- or on the part of it a region cuts?",
+   "spec": "`NonnegSpec`"
+  },
+  "number": {
+   "answers": "a Pratt certificate, or a factorisation with `--question factor`",
+   "certificate": "`number`, **solver-free**: modular exponentiation",
+   "not_established": "nothing beyond primality of what you asked about.",
+   "question": "Is this integer prime?",
+   "spec": "`NumberSpec`, or `--n`"
+  },
+  "opt": {
+   "answers": "the optimum in exact rationals, and the **dual**, which for a packing reads as the load on each resource",
+   "certificate": "`lp_dual`, **solver-free**: rational arithmetic",
+   "not_established": "integer optimality. For an ILP the dual certifies the **relaxation bound**. With `integer={\"K3\"}` — whole in one kind, fractional in another — `opt` reports only the relaxation bound and says so.",
+   "question": "What is the optimum, exactly?",
+   "spec": "`LPSpec`, or `PackingSpec`"
+  },
+  "order": {
+   "answers": "the leading exponent, and the terms collected by exponent",
+   "certificate": "`asymptotic`, **solver-free**: exact arithmetic",
+   "not_established": "the constant. `≍` hides a factor, so a Θ(1) term with a coefficient of 1e-9 may be perfectly fine in practice.",
+   "question": "Does this term DECAY in `n`, or is it Θ(1)?",
+   "spec": "`OrderSpec`"
+  },
+  "pack": {
+   "answers": "one `.zip`, each member compressed on its own, with a `manifest.json` of names, digests, kinds and boxes",
+   "certificate": "none of its own; `verify` checks every member and the manifest",
+   "not_established": "anything about a member beyond what verifying it establishes. Packing moves bytes.",
+   "question": "Thousands of certificate files: can they be one archive, with each certificate still readable alone?",
+   "spec": "none; a directory of certificates"
+  },
+  "parametric": {
+   "answers": "a bound proved for the whole family, from one dual",
+   "certificate": "`parametric_bound`, **solver-free**: expand and read signs",
+   "not_established": "anything below the floor, anything about an integer optimum, and nothing at all on failure. The shift test is **sufficient and not necessary**, so a failure means *not established by this route*, never *false* — and **no certificate is emitted**, because a route that did not work is not a bound.",
+   "question": "I checked it for `p = 5..12`. Does it hold for EVERY `p`?",
+   "spec": "`ParametricSpec`"
+  },
+  "peak": {
+   "answers": "the integer maximiser and the value there, for the whole family",
+   "certificate": "`integer_peak`, **solver-free**: expand and read signs",
+   "not_established": "anything for a maximiser with non-integer coefficients, which is **refused** rather than assumed integral. An argument about a point that does not exist proves nothing.",
+   "question": "I solved it for `n = 1..40`. Which integer is best for EVERY `n`?",
+   "spec": "`PeakSpec`"
+  },
+  "pin": {
+   "answers": "`cp_r(G) = X` PROVED when the bounds meet; the certified range `ceil(L) <= cp_r(G) <= X` when they do not",
+   "certificate": "`pinned_value`, **solver-free**: both halves re-verified, tied to one edge list, and their numbers compared",
+   "not_established": "for a lower half from your own LP (`opt --round`), that the LP bounds `cp(G)` from below: `assumption=` states it, and the result is RELATIVE to it.",
+   "question": "A cover gives `cp(G) <= X` and an LP gives `cp(G) >= X`: can the two be ONE certificate that `cp(G) = X`?",
+   "spec": "`PinSpec`"
+  },
+  "profile": {
+   "answers": "the piecewise-affine `f(t)`, its breakpoints, the dual that bounds each segment and the source that attains each breakpoint",
+   "certificate": "`capacity_profile`, **solver-free**: exact rational arithmetic",
+   "not_established": "that the columns are all the columns, or that the rows mean what they are called. A profile is a statement about the column set it declares; if those came from a graph, that translation is a separate obligation this does not discharge.",
+   "question": "How does the optimum respond as ONE capacity runs from `lo` to `hi` — the whole function, not one value?",
+   "spec": "`ProfileSpec`"
+  },
+  "promote": {
+   "answers": "the certified run, and whether it agrees with what was explored",
+   "certificate": "the certified run's own",
+   "not_established": "anything the certified run does not establish itself.",
+   "question": "The cheap look said yes. Does the certified run agree?",
+   "spec": "none; the record `--explore --record FILE` wrote"
+  },
+  "prove": {
+   "answers": "a proof, or a **counterexample with concrete values**",
+   "certificate": "`unsat_core`, solver-free whenever the core is linear arithmetic; or `model`, always solver-free",
+   "not_established": "that the hypotheses are satisfiable. A proof from contradictory hypotheses is valid and says nothing, so vacuity is checked on every success and reported by name.",
+   "question": "Is this claim true under these hypotheses?",
+   "spec": "`Spec`"
+  },
+  "quotient": {
+   "answers": "the class data, both regularities, and the two maps",
+   "certificate": "`equitable_quotient`, **solver-free**: exact counting",
+   "not_established": "that the partition is the one your argument uses. That is the spec's claim.",
+   "question": "I have a partition of this program. Does the quotient have the same attainable values?",
+   "spec": "`EquitableQuotientSpec`"
+  },
+  "range": {
+   "answers": "the exact rational `min` and `max` over the regime, each with the non-negative combination of hypotheses that yields it",
+   "certificate": "`variable_range`, **solver-free**: adding fractions",
+   "not_established": "anything about the spec's **claim**, which is never read. This bounds the variable over the hypotheses — the regime, not the theorem.",
+   "question": "How far can this variable go — the whole interval, not one point?",
+   "spec": "`Spec`, with `--var` naming the variable"
+  },
+  "ratio": {
+   "answers": "the cleared numerator and the sign of the denominator",
+   "certificate": "`ratio_bound`, **solver-free**: cross-multiply, expand, read signs",
+   "not_established": "anything below the floor. It holds for every parameter value at or above it and says nothing beneath.",
+   "question": "Is this fraction inequality true for EVERY `n`, without a solver?",
+   "spec": "`RatioSpec`"
+  },
+  "reduce": {
+   "answers": "the three hypotheses of the averaging argument, checked, plus the quotient program",
+   "certificate": "`symmetry_reduction`, **solver-free**",
+   "not_established": "where the group came from. nauty computes it, a paper states it, you write it down.",
+   "question": "This is symmetric. Can I solve one variable per orbit instead?",
+   "spec": "`SymmetrySpec`"
+  },
+  "report": {
+   "answers": "a triage with the evidence for it, a local folder, and a link to a pre-filled issue",
+   "certificate": "none; it makes no claim of its own",
+   "not_established": "that a triage of `nothing-found` means the result is right. It means nothing certo can check disagreed. If the result is mathematically false, say so with `--wrong`.",
+   "question": "Something went wrong: is it certo's bug, my spec's, or my machine's — and how do I report it?",
+   "spec": "none; give it the certo command that misbehaved"
+  },
+  "repro": {
+   "answers": "a bundle: spec, certificates, versions and hashes",
+   "certificate": "the bundle itself",
+   "not_established": "that the referee's machine will agree. It will, for our engines; a `sweep` predicate calling scipy is outside that guarantee.",
+   "question": "What does a referee need to redo this?",
+   "spec": "none"
+  },
+  "roles": {
+   "answers": "the permutation of the vertices that maps the edge set onto itself and each old role onto its new one, and each declared property (`independent`, `clique`, `disjoint`, `complete_to`, `anticomplete_to`, `neighbourhood_within`) before and after",
+   "certificate": "`role_transport`, **solver-free**: edge sets compared",
+   "not_established": "that the roles mean what their names say, or anything about another graph. When no permutation is found, that is an exhaustive VF2 search and not a certificate.",
+   "question": "Can these roles be exchanged without changing the graph?",
+   "spec": "`RoleSpec`"
+  },
+  "semigroup": {
+   "answers": "whether the semigroup is pointed, with the grading that proves it; whether the generating set is minimal, naming any redundant generator; and per point, membership of the cone, of the group and of the semigroup itself",
+   "certificate": "`affine_semigroup`, **solver-free**: exact integer and rational arithmetic",
+   "not_established": "that the semigroup **is** normal. A witness refutes normality; establishing it means deciding membership for every lattice point of the cone, which is what Normaliz is for. `normal` is null by construction.",
+   "question": "Is this lattice point a non-negative integer combination of these generators, and is the semigroup normal?",
+   "spec": "`SemigroupSpec`"
+  },
+  "shrink": {
+   "answers": "a minimal witness, with the descent recorded",
+   "certificate": "`shrink_graph` / `mus`; needs the spec module",
+   "not_established": "minimum-ness. It gives a **1-minimal**, not minimum, counterexample.",
+   "question": "My counterexample is huge — what is the real one?",
+   "spec": "`SweepSpec` or `DomainSpec`, with a `reduce`"
+  },
+  "solve": {
+   "answers": "the solution over ℚ or ℤ, a kernel basis when it is underdetermined, or an obstruction when there is none",
+   "certificate": "`linear_system`, **solver-free**: one matrix-vector product",
+   "not_established": "that the solution is **non-negative**, or over ℚ that it is **integral**. A rational solution to the equations of a packing is not a packing.",
+   "question": "What exactly solves this linear system — and if nothing does, why not?",
+   "spec": "`LinearSystemSpec`"
+  },
+  "sos": {
+   "answers": "exact rational squares",
+   "certificate": "`sos`, **solver-free**: expand a product",
+   "not_established": "negativity, ever. From degree 4 in 3 variables there are non-negative polynomials that are not sums of squares — Motzkin's is the standard one — and `certo sos` comes back `unknown_solver` on it, never \"the polynomial goes negative\".",
+   "question": "Is this polynomial non-negative everywhere?",
+   "spec": "`SOSSpec`"
+  },
+  "status": {
+   "answers": "four sections: RESULTS, STILL OWED, HOLLOW, STALE",
+   "certificate": "**none, deliberately.** A report that certified itself would be the one artefact here that nobody had checked",
+   "not_established": "that the certificates verify. `status` reads the claims other commands made; `certo status --verify` re-checks every one.",
+   "question": "Where does my whole project stand?",
+   "spec": "none; it reads a directory of certificates"
+  },
+  "sweep": {
+   "answers": "the verdict over the family, **and which of three levels was established about the predicate**",
+   "certificate": "`sweep` / `domain_sweep`; solver-freedom depends on the predicate",
+   "not_established": "the theorem. A finite domain was checked, not every `n`. And separately: nothing says the predicate answered correctly, unless it returned certificates.",
+   "question": "Does it hold for every graph on `n` vertices?",
+   "spec": "`SweepSpec` for graphs, `DomainSpec` for any finite domain"
+  },
+  "synth": {
+   "answers": "the object, plus the counterexamples that forced it; or that none exists",
+   "certificate": "`cegis` for an object, `cegis_none` for none; both re-solve",
+   "not_established": "a theorem. `synth` searches a **bounded** domain, the banner says `CANDIDATE SYNTHESISED -- BOUNDED search`, and that is a discovery.",
+   "question": "Does an object with these properties exist?",
+   "spec": "`SynthSpec`"
+  },
+  "verify": {
+   "answers": "every check, passed or failed, plus **the warnings repeated**",
+   "certificate": "none",
+   "not_established": "that the spec still matches. If the file changed since the certificate was issued, `verify` accepts the certificate and warns: it is still valid on its own, but it no longer corresponds to what is there now.",
+   "question": "Is this stored certificate still good?",
+   "spec": "none; it takes a certificate path"
+  }
+ },
+ "es": {
+  "ask": {
+   "answers": "lo que produzca el comando enrutado",
+   "certificate": "lo que produzca el comando enrutado",
+   "not_established": "nada extra; el enrutado cambia quién responde, no qué significa la respuesta.",
+   "question": "Corre lo que este spec pida, sin más",
+   "spec": "cualquiera"
+  },
+  "assign": {
+   "answers": "la asignación entera más grande, y un conjunto de Hall `U` de receptores con `cap(U) + |ítems no confinados a U|` igual a su tamaño; con un `target` fuera de alcance, REFUTADO y `U` nombra el cuello de botella",
+   "certificate": "`assignment`, **sin solver**: cada asignación comprobada contra lo permitido al ítem, cada carga contra su capacidad, y la cota de Hall recontada desde los datos",
+   "not_established": "que los datos sean tu problema: los ítems, los receptores permitidos y las capacidades son la entrada de la afirmación, y no escribir una matriz es justamente la idea -- un óptimo exacto de un LP equivocado sigue siendo exacto.",
+   "question": "Ítems a receptores con capacidades: ¿cuántos caben, y por qué no más?",
+   "spec": "`AssignmentSpec`"
+  },
+  "atlas": {
+   "answers": "un enunciado, `opt ≤ T` (o `≥`) en el dominio, o las piezas que fallan y las celdas del dominio que ninguna pieza cubre",
+   "certificate": "`parametric_atlas`, **sin solver**: cada pieza verificada de nuevo y el cubrimiento recalculado",
+   "not_established": "nada en una celda cubierta solo por una caja `cited`, de la que el enunciado pasa a depender. Una región es alcance, igual que en `parametric`.",
+   "question": "Cada caja está certificada. ¿Vale la cota en todo el dominio que las cajas deberían cubrir?",
+   "spec": "`AtlasSpec`"
+  },
+  "audit": {
+   "answers": "uno de cuatro veredictos por hipótesis —`needed`, `redundant`, `domain`, `unknown`— y, para `needed`, **la asignación que rompe la afirmación sin ella**",
+   "certificate": "`hypothesis_audit`; re-comprobarlo sustituye cada testigo y vuelve a decidir el resultado, así que necesita solver — pero no la búsqueda que lo encontró",
+   "not_established": "que el conjunto de hipótesis sea minimal. Se quitan de una en una.",
+   "question": "¿Cada hipótesis se gana su lugar, o mi teorema está sobreenunciado?",
+   "spec": "cualquier spec con hipótesis nombradas"
+  },
+  "batch": {
+   "answers": "una fila por spec, en el orden del directorio: veredicto, tiempo, y el certificado escrito junto a los demás, con el nombre del spec",
+   "certificate": "uno por spec, cada uno autoverificado igual que una corrida sola",
+   "not_established": "nada sobre los specs en conjunto. Un batch son muchas corridas separadas; unir cajas en un enunciado es `atlas`, y \"cada uno exactamente una vez\" es `status --manifest`.",
+   "question": "Cientos de specs pequeños: ¿pueden correr sin un proceso cada uno?",
+   "spec": "ninguno; un comando y un directorio de specs"
+  },
+  "bind": {
+   "answers": "si lo que dices que **provee** la declaración implica la hipótesis sobre la que descansa el certificado",
+   "certificate": "`lean_binding`; vuelve a preguntar la implicación, así que no es sin solver",
+   "not_established": "que tu versión de la declaración sea fiel. Nada aquí lee Mathlib. Es un **puente**, y `verify` lo dice siempre.",
+   "question": "¿Da realmente el lema de Lean lo que supuso mi certificado?",
+   "spec": "`BindSpec`"
+  },
+  "bisect": {
+   "answers": "el par que acota el umbral, cada lado certificado",
+   "certificate": "`bisect`; la libertad de solver depende de sus hijos",
+   "not_established": "monotonía en el parámetro. Se **supone**; se comprueban los extremos y se avisa si se portan mal, pero la monotonía misma no se demuestra.",
+   "question": "¿Dónde está el umbral de esta constante?",
+   "spec": "`BisectSpec`"
+  },
+  "bounds": {
+   "answers": "un encierro riguroso en racionales exactos, y si resuelve la afirmación",
+   "certificate": "`ball`, **sin solver para la afirmación**; el intervalo mismo necesita el spec y el mismo backend",
+   "not_established": "que una cantidad sea no nula cuando de hecho es cero. Ningún encierro lo demostrará nunca, y quedarse sin precisión se reporta como `resource_exhausted`, no como refutación.",
+   "question": "¿Es cierta esta desigualdad numérica? (`e`, `log`, `π`, `ζ`)",
+   "spec": "`BoundSpec`"
+  },
+  "cases": {
+   "answers": "satisfacibilidad, con una **prueba DRAT** cuando es insatisfacible",
+   "certificate": "`drat`, **sin solver**: comprobación RUP/RAT",
+   "not_established": "el teorema. Resuelve el **caso finito**.",
+   "question": "¿Para cada ítem de un dominio finito / es este CNF insatisfacible?",
+   "spec": "`CNFSpec`, o `DomainSpec`"
+  },
+  "check": {
+   "answers": "con `--hypotheses-only`, un **modelo** si el régimen está habitado, el **choque minimal** si no",
+   "certificate": "`model`, **sin solver**: la no vacuidad se re-comprueba solo evaluando",
+   "not_established": "nada sobre las hipótesis, si preguntas sin `--hypotheses-only` y tu afirmación es el literal `False`.",
+   "question": "¿Mi régimen es no vacío — tienen estas hipótesis algún modelo?",
+   "spec": "`Spec`"
+  },
+  "columns": {
+   "answers": "el óptimo exacto, las cliques del soporte con sus valores, y el dual exacto de cada fila de arista",
+   "certificate": "`clique_lp`, **sin solver**: aritmética racional, y la búsqueda de precios corrida de nuevo",
+   "not_established": "nada sobre el programa entero. Esto es el LP sobre las cliques; su contraparte entera es `mixed --prove-optimal` con las cliques como columnas explícitas. Y que el grafo sea el que querías es afirmación del spec.",
+   "question": "¿Cuál es el óptimo de un LP sobre *todas* las cliques de este grafo — sin listarlas?",
+   "spec": "`CliqueLPSpec`"
+  },
+  "commands": {
+   "answers": "esta página, en tu terminal, en tu idioma",
+   "certificate": "ninguno",
+   "not_established": "que un comando listado pueda responder *tu* instancia. Enruta por la forma de la pregunta, no por si el problema está al alcance.",
+   "question": "¿Qué comando responde qué pregunta?",
+   "spec": "ninguno"
+  },
+  "compose": {
+   "answers": "el teorema, con cada lema o bien **enlazado** o bien nombrado como **puente**",
+   "certificate": "`proof`; vuelve a resolver",
+   "not_established": "ningún puente. Un puente se afirma, no se deriva, y se reporta por nombre **cada vez que la demostración se verifica**.",
+   "question": "¿Cómo ensamblo mis lemas en una demostración?",
+   "spec": "`ProofSpec`"
+  },
+  "cone": {
+   "answers": "primitividad por generador, la multiplicidad, el funcional de altura `u` con `⟨u,v⟩ = 1`, y la discrepancia `⟨u,w⟩ − 1` de cualquier rayo que nombres",
+   "certificate": "`toric_cone`, **sin solver**: determinante y resolución exactos",
+   "not_established": "la geometría. Que multiplicidad uno dé una carta lisa, que discrepancia cero dé una modificación crepante, que una fibra sea SNC o reducida: eso son teoremas sobre variedades, y un certificado que los afirmara en silencio sería la sustitución que este proyecto existe para rechazar.",
+   "question": "¿Es este cono regular, de altura uno, y subdividirlo es crepante?",
+   "spec": "`ConeSpec`"
+  },
+  "core": {
+   "answers": "el subconjunto insatisfacible minimal, y qué hipótesis sobraban",
+   "certificate": "`mus` / `unsat_core`, sin solver cuando el núcleo es lineal",
+   "not_established": "que el conjunto de hipótesis sea minimal *conjuntamente*. Un par puede sobrar junto sin que sobre ninguna por separado.",
+   "question": "¿Qué hipótesis necesita realmente?",
+   "spec": "`Spec`, o `MultiSpec` para varios objetivos a la vez"
+  },
+  "cover": {
+   "answers": "cada parte comprobada como clique, cada elemento contado exactamente una vez, y con `--optimize --prove-optimal`, a qué distancia queda del mínimo",
+   "certificate": "`exact_cover`, **sin solver**: conteo",
+   "not_established": "minimalidad, salvo que la pidas. Un certificado de recubrimiento es una cota **superior**.",
+   "question": "¿Es esto realmente una partición en cliques, y de qué tamaño?",
+   "spec": "`CoverSpec`"
+  },
+  "covering": {
+   "answers": "las hojas de una partición de la caja, cada una con su razón (una obligación que mantiene su signo en toda la hoja, o una condición negativa en ella), las hojas que quedan sin resolver, o un punto donde se cumplen todas las condiciones y fallan todas las obligaciones",
+   "certificate": "`conditioned_cover`, **sin solver**: los coeficientes de Bernstein y la teselación, recalculados",
+   "not_established": "nada fuera de la caja, ni para una obligación que no está en la lista. Una hoja probada por una obligación queda probada en TODA la hoja, lo que es más de lo necesario; una hoja sin resolver se lista, y el enunciado vale solo en las demás.",
+   "question": "En cada punto de esta caja donde se cumplen las condiciones, ¿se cumple alguna de estas obligaciones?",
+   "spec": "`CoveringSpec`"
+  },
+  "cycle": {
+   "answers": "la cadena, la clase de crecimiento de cada paso, y la única comparación que la cierra",
+   "certificate": "`dependency_cycle`, **sin solver**: aritmética de clases",
+   "not_established": "que tus clases de crecimiento sean las reales. Que `k` crezca como una torre lo dice tu lema; esto comprueba lo que se sigue de ello. Y un ciclo que esta vía no refuta vuelve como *no establecido*, nunca *no hay ciclo*.",
+   "question": "¿Depende este parámetro de sí mismo — y puede cerrar el ciclo siquiera?",
+   "spec": "`CycleSpec`"
+  },
+  "doctor": {
+   "answers": "cada capacidad, presente o ausente, y **qué cuesta cada hueco**",
+   "certificate": "ninguno",
+   "not_established": "nada; no hace ninguna afirmación matemática.",
+   "question": "¿Puede esta instalación hacer lo que necesito?",
+   "spec": "ninguno"
+  },
+  "eliminate": {
+   "answers": "la resultante, con la identidad de Bézout `Res = A·f + B·g` adjunta",
+   "certificate": "`resultant`, **sin solver**: expandir dos productos y restar",
+   "not_established": "suficiencia sobre ℝ. `Res = 0` es **necesario** para una raíz común sobre cualquier cuerpo, **suficiente** sobre uno algebraicamente cerrado, y solo donde los coeficientes principales no se anulan ambos. `verify` nombra ese lugar específicamente.",
+   "question": "Quita `t` y dime la condición sobre `s`",
+   "spec": "`EliminateSpec`"
+  },
+  "entry": {
+   "answers": "el índice del primer cruce, el valor ahí, y los dos términos que lo acotan",
+   "certificate": "`first_entry`, **sin solver**: racionales exactos",
+   "not_established": "que la sucesión sea la que querías. El prefijo lleva los valores hasta el cruce y nada más allá, porque nada más allá es parte de la afirmación.",
+   "question": "¿Dónde cruza esto la línea por primera vez — y por cuán poco?",
+   "spec": "`EntrySpec`"
+  },
+  "enum": {
+   "answers": "la lista canónica y su hash",
+   "certificate": "`graph_set`, **sin solver**",
+   "not_established": "la **completitud**. El certificado verifica la no isomorfía y los filtros, no que la familia sean todos.",
+   "question": "¿Qué grafos de `n` vértices hay, salvo isomorfismo?",
+   "spec": "`SweepSpec`, o flags"
+  },
+  "exists": {
+   "answers": "un modelo, o una refutación DRAT",
+   "certificate": "`cnf_model` o `drat`, ambos **sin solver**",
+   "not_established": "nada fuera del conjunto de candidatos que diste.",
+   "question": "¿Existe alguno — y si no, puedes demostrarlo?",
+   "spec": "`CoverSpec`"
+  },
+  "export": {
+   "answers": "un spec como SMT-LIB2 o DIMACS; a Lean, cinco tipos: un **certificado de Farkas lineal** y una **cota exacta de LP** como ejemplos `linarith`, una **matriz entera** como matrices literales y las identidades entre ellas, un **semigrupo afín** como sus teoremas de pertenencia, apuntado, irreducibilidad y libertad, y un certificado **ideal** como un `linear_combination` con sus cofactores",
+   "certificate": "ninguno",
+   "not_established": "nada para los demás tipos: se rechazan en vez de escribirse con esperanza. Cada exportador entró solo después de que su salida compilara contra un Mathlib real.",
+   "question": "Llévame esto a Lean",
+   "spec": "ninguno; toma un certificado o un spec"
+  },
+  "family": {
+   "answers": "el ganador, su valor, y un dual que certifica que nada más lo alcanza",
+   "certificate": "`family_extremum`; la verificación reconstruye el programa de cada ítem desde el spec",
+   "not_established": "que la familia sea la que querías. La completitud de `items` la afirma el spec, igual que el dominio de un barrido.",
+   "question": "¿Cuál es el mayor de estos diez mil LP — y puede algo superarlo?",
+   "spec": "`FamilySpec`"
+  },
+  "farkas": {
+   "answers": "los multiplicadores racionales no negativos que combinan las hipótesis con el objetivo negado hasta que todo se cancela, más la llamada a `linarith` / `nlinarith` lista para pegar",
+   "certificate": "`farkas`, **sin solver**: comprobarlo es sumar fracciones",
+   "not_established": "nada, cuando no encuentra nada. `farkas` es incompleto a propósito en ambos modos, así que \"sin certificado\" significa *esta búsqueda no lo cerró*, nunca *falso* -- salvo que además encuentre un punto, abajo.",
+   "question": "¿Es cierta esta desigualdad, con los multiplicadores a la vista? O: ¿son contradictorias estas hipótesis -- este programa lineal?",
+   "spec": "`Spec`, o un `LPSpec` / `PackingSpec`"
+  },
+  "find": {
+   "answers": "los comandos, opciones, campos de spec, tipos de certificado y funciones de la API de Python que coinciden, el mejor primero, cada uno con cómo llamarlo. `--exact NOMBRE` devuelve un contrato: un comando con sus opciones y las de la API, un spec con sus campos y valores por defecto, una opción, un campo o un tipo",
+   "certificate": "ninguno",
+   "not_established": "que lo que lista pueda responder tu instancia. La búsqueda es léxica, sobre texto derivado del código; un resultado es un lugar para leer, no una ruta.",
+   "question": "¿Está en certo, y dónde?",
+   "spec": "ninguno: lo que necesitas, en tus palabras, en inglés o español"
+  },
+  "ideal": {
+   "answers": "los cofactores de Gröbner que muestran `1 ∈ I`, o que certifican `f = Σ hᵢgᵢ`",
+   "certificate": "`ideal`, **sin solver**: expandir un producto y comparar coeficientes",
+   "not_established": "nada sobre raíces **reales**. El cuerpo es ℂ. `1 ∈ I` refuta soluciones sobre ℂ, y por tanto sobre ℝ, ℚ y ℤ; el recíproco no vale.",
+   "question": "¿Tienen solución estas ecuaciones polinomiales?",
+   "spec": "`IdealSpec`"
+  },
+  "induct": {
+   "answers": "los casos base, el paso, **y la comprobación de que la cadena une**",
+   "certificate": "`induction`; vuelve a resolver, así que no es sin solver",
+   "not_established": "nada por parte de un solver: no hay esquema de inducción en un solver SMT. El principio se aplica *aquí*, y `verify` lo dice siempre.",
+   "question": "¿Vale para todo `n ≥ n₀`?",
+   "spec": "`InductSpec`"
+  },
+  "ledger": {
+   "answers": "un registro de solo-añadir, re-verificable",
+   "certificate": "ninguno",
+   "not_established": "nada; guarda rutas y digests, nunca copias.",
+   "question": "¿Qué corrí el mes pasado?",
+   "spec": "ninguno"
+  },
+  "lint": {
+   "answers": "hipótesis contradictorias, una familia vacía, un dominio de 10⁹, un predicado que devuelve `bool`, un paso inductivo que empieza después de que acabe la base",
+   "certificate": "ninguno, y ninguno afirmado",
+   "not_established": "que el spec sea *correcto*. Comprueba la forma de la pregunta, no la matemática.",
+   "question": "¿Está bien planteado este spec, antes de gastar el cómputo?",
+   "spec": "cualquiera"
+  },
+  "matrix": {
+   "answers": "rango, determinante, forma normal de Hermite o de Smith, con las transformaciones unimodulares **y sus inversas**; o la inercia, por congruencia",
+   "certificate": "`integer_matrix`, **sin solver**: multiplicación de matrices enteras; `symmetric_inertia` para `inertia` y `psd`, dos productos racionales",
+   "not_established": "que la matriz que escribiste sea la matriz de la que habla tu paper. La matriz de incidencia correcta, la base correcta, la orientación correcta: eso lo afirma el spec, y es exactamente donde un cálculo deja de ser sobre la matemática.",
+   "question": "¿Cuál es el rango, el determinante o la forma de Smith de esta matriz entera — exactamente? ¿Y la inercia de una simétrica: es PSD?",
+   "spec": "`MatrixSpec`"
+  },
+  "mcp": {
+   "answers": "la versión instalada y cuándo se instaló, y cada servidor MCP de certo con cuándo arrancó, marcando como **viejos** los que arrancaron antes de la instalación",
+   "certificate": "ninguno",
+   "not_established": "nada sobre las respuestas de un servidor. Lee la tabla de procesos.",
+   "question": "Reinstalé certo. ¿Qué servidores MCP siguen corriendo el código viejo?",
+   "spec": "ninguna"
+  },
+  "mixed": {
+   "answers": "un esqueleto discreto de una búsqueda, un LP residual sobre la parte continua certificado exactamente, y tres números que se mantienen separados",
+   "certificate": "`mixed_design`, **sin solver**: aritmética exacta",
+   "not_established": "que la elección discreta fuera óptima, salvo que `achieved` alcance `bound`. Cuando no lo hace, el banner dice **LA OPTIMALIDAD GLOBAL NO SE AFIRMA**.",
+   "question": "…y ¿es realmente óptimo sobre los enteros?",
+   "spec": "`LPSpec` con variables que llevan `kind=\"binary\"` o `kind=\"integer\"`"
+  },
+  "moment": {
+   "answers": "la esperanza, y la masa que deja",
+   "certificate": "`first_moment`, **sin solver**: volver a sumar racionales exactos y comparar",
+   "not_established": "que las probabilidades describan el experimento que querías. Lo que se comprueba es que *son* probabilidades, que la suma es la suma, y que la comparación se cumple.",
+   "question": "¿El número esperado de eventos malos es menor que uno — así que existe un objeto bueno?",
+   "spec": "`MomentSpec`"
+  },
+  "nonneg": {
+   "answers": "DEMOSTRADO con el certificado de Bernstein, o REFUTADO con un punto de la caja, dentro de la región, y el valor negativo exacto ahí",
+   "certificate": "`polynomial_nonneg`, **sin solver**: coeficientes de Bernstein recalculados en cada hoja, o el punto evaluado",
+   "not_established": "nada cuando es INCONCLUSO: los coeficientes siguieron negativos tras `subdivide` bisecciones y ningún punto de la grilla fue negativo. Puede que igual valga; el detalle dice dónde cortar.",
+   "question": "¿Este polinomio es >= 0 en una caja -- o en la parte que corta una región?",
+   "spec": "`NonnegSpec`"
+  },
+  "number": {
+   "answers": "un certificado de Pratt, o una factorización con `--question factor`",
+   "certificate": "`number`, **sin solver**: exponenciación modular",
+   "not_established": "nada más allá de la primalidad de lo que preguntaste.",
+   "question": "¿Es primo este entero?",
+   "spec": "`NumberSpec`, o `--n`"
+  },
+  "opt": {
+   "answers": "el óptimo en racionales exactos, y el **dual**, que en un empaquetamiento se lee como la carga sobre cada recurso",
+   "certificate": "`lp_dual`, **sin solver**: aritmética racional",
+   "not_established": "optimalidad entera. Para un ILP el dual certifica la **cota de la relajación**. Con `integer={\"K3\"}` —entero en un tipo, fraccionario en otro— `opt` reporta solo la cota de la relajación y lo dice.",
+   "question": "¿Cuál es el óptimo, exactamente?",
+   "spec": "`LPSpec`, o `PackingSpec`"
+  },
+  "order": {
+   "answers": "el exponente principal, y los términos agrupados por exponente",
+   "certificate": "`asymptotic`, **sin solver**: aritmética exacta",
+   "not_established": "la constante. `≍` esconde un factor, así que un término Θ(1) con coeficiente 1e-9 puede estar perfectamente bien en la práctica.",
+   "question": "¿DECAE este término en `n`, o es Θ(1)?",
+   "spec": "`OrderSpec`"
+  },
+  "pack": {
+   "answers": "un `.zip`, cada miembro comprimido por su cuenta, con un `manifest.json` de nombres, digests, tipos y cajas",
+   "certificate": "ninguno propio; `verify` comprueba cada miembro y el manifiesto",
+   "not_established": "nada sobre un miembro más allá de lo que establece verificarlo. Empaquetar mueve bytes.",
+   "question": "Miles de archivos de certificados: ¿pueden ser un solo archivo, con cada certificado todavía legible por separado?",
+   "spec": "ninguna; un directorio de certificados"
+  },
+  "parametric": {
+   "answers": "una cota demostrada para toda la familia, desde un solo dual",
+   "certificate": "`parametric_bound`, **sin solver**: expandir y leer signos",
+   "not_established": "nada por debajo del suelo, nada sobre un óptimo entero, y nada en absoluto si falla. El test de desplazamiento es **suficiente y no necesario**, así que un fallo significa *no establecido por esta vía*, nunca *falso* —y **no se emite certificado**, porque una vía que no funcionó no es una cota.",
+   "question": "Lo comprobé para `p = 5..12`. ¿Vale para TODO `p`?",
+   "spec": "`ParametricSpec`"
+  },
+  "peak": {
+   "answers": "el maximizador entero y el valor ahí, para toda la familia",
+   "certificate": "`integer_peak`, **sin solver**: expandir y leer signos",
+   "not_established": "nada para un maximizador con coeficientes no enteros, que se **rechaza** en vez de suponerse entero. Un argumento sobre un punto que no existe no demuestra nada.",
+   "question": "Lo resolví para `n = 1..40`. ¿Qué entero es el mejor para TODO `n`?",
+   "spec": "`PeakSpec`"
+  },
+  "pin": {
+   "answers": "`cp_r(G) = X` DEMOSTRADO cuando las cotas se encuentran; el rango certificado `ceil(L) <= cp_r(G) <= X` cuando no",
+   "certificate": "`pinned_value`, **sin solver**: ambas mitades re-verificadas, atadas a una lista de aristas, y sus números comparados",
+   "not_established": "para una mitad inferior de un LP tuyo (`opt --round`), que el LP acote `cp(G)` por abajo: `assumption=` lo declara, y el resultado es RELATIVO a eso.",
+   "question": "Un cubrimiento da `cp(G) <= X` y un LP da `cp(G) >= X`: ¿pueden ser UN certificado de que `cp(G) = X`?",
+   "spec": "`PinSpec`"
+  },
+  "profile": {
+   "answers": "la `f(t)` afín a trozos, sus quiebres, el dual que acota cada tramo y la fuente que alcanza cada quiebre",
+   "certificate": "`capacity_profile`, **sin solver**: aritmética racional exacta",
+   "not_established": "que las columnas sean todas las columnas, ni que las filas signifiquen lo que su nombre sugiere. Un perfil es una afirmación sobre el conjunto de columnas que declara; si vinieron de un grafo, esa traducción es una obligación aparte que esto no salda.",
+   "question": "¿Cómo responde el óptimo cuando UNA capacidad va de `lo` a `hi` — la función entera, no un valor?",
+   "spec": "`ProfileSpec`"
+  },
+  "promote": {
+   "answers": "la corrida certificada, y si coincide con lo explorado",
+   "certificate": "el de la corrida certificada",
+   "not_established": "nada que la corrida certificada no establezca por sí misma.",
+   "question": "La mirada barata dijo que sí. ¿Coincide la corrida certificada?",
+   "spec": "ninguna; el registro que escribió `--explore --record FICHERO`"
+  },
+  "prove": {
+   "answers": "una demostración, o un **contraejemplo con valores concretos**",
+   "certificate": "`unsat_core`, sin solver siempre que el núcleo sea aritmética lineal; o `model`, siempre sin solver",
+   "not_established": "que las hipótesis sean satisfacibles. Una demostración desde hipótesis contradictorias es válida y no dice nada, así que la vacuidad se comprueba en cada éxito y se reporta por nombre.",
+   "question": "¿Es cierta esta afirmación bajo estas hipótesis?",
+   "spec": "`Spec`"
+  },
+  "quotient": {
+   "answers": "los datos de clase, ambas regularidades, y los dos mapas",
+   "certificate": "`equitable_quotient`, **sin solver**: conteo exacto",
+   "not_established": "que la partición sea la que usa tu argumento. Eso lo afirma el spec.",
+   "question": "Tengo una partición de este programa. ¿El cociente tiene los mismos valores alcanzables?",
+   "spec": "`EquitableQuotientSpec`"
+  },
+  "range": {
+   "answers": "el `min` y el `max` racionales exactos sobre el régimen, cada uno con la combinación no negativa de hipótesis que lo da",
+   "certificate": "`variable_range`, **sin solver**: sumar fracciones",
+   "not_established": "nada sobre la **afirmación** del spec, que nunca se lee. Esto acota la variable sobre las hipótesis: el régimen, no el teorema.",
+   "question": "¿Hasta dónde llega esta variable — el intervalo entero, no un punto?",
+   "spec": "`Spec`, con `--var` nombrando la variable"
+  },
+  "ratio": {
+   "answers": "el numerador despejado y el signo del denominador",
+   "certificate": "`ratio_bound`, **sin solver**: multiplicar en cruz, expandir, leer signos",
+   "not_established": "nada por debajo del suelo. Vale para todo valor del parámetro en el suelo o por encima y no dice nada por debajo.",
+   "question": "¿Es cierta esta desigualdad de fracciones para TODO `n`, sin solver?",
+   "spec": "`RatioSpec`"
+  },
+  "reduce": {
+   "answers": "las tres hipótesis del argumento de promediado, comprobadas, más el programa cociente",
+   "certificate": "`symmetry_reduction`, **sin solver**",
+   "not_established": "de dónde salió el grupo. nauty lo calcula, un paper lo enuncia, tú lo escribes.",
+   "question": "Esto es simétrico. ¿Puedo resolver una variable por órbita?",
+   "spec": "`SymmetrySpec`"
+  },
+  "report": {
+   "answers": "un triaje con su evidencia, una carpeta local y un enlace a un issue ya rellenado",
+   "certificate": "ninguno; no afirma nada por sí mismo",
+   "not_established": "que un triaje `nothing-found` signifique que el resultado es correcto. Significa que nada de lo que certo puede comprobar lo contradijo. Si el resultado es matemáticamente falso, dilo con `--wrong`.",
+   "question": "Algo salió mal: ¿es un bug de certo, de mi spec o de mi máquina — y cómo lo reporto?",
+   "spec": "ninguno; se le da el comando de certo que falló"
+  },
+  "repro": {
+   "answers": "un paquete: spec, certificados, versiones y hashes",
+   "certificate": "el paquete mismo",
+   "not_established": "que la máquina del árbitro coincida. Coincidirá, para nuestros motores; un predicado de `sweep` que llama a scipy queda fuera de esa garantía.",
+   "question": "¿Qué necesita un árbitro para rehacer esto?",
+   "spec": "ninguno"
+  },
+  "roles": {
+   "answers": "la permutación de los vértices que lleva el conjunto de aristas sobre sí mismo y cada rol antiguo sobre el nuevo, y cada propiedad declarada (`independent`, `clique`, `disjoint`, `complete_to`, `anticomplete_to`, `neighbourhood_within`) antes y después",
+   "certificate": "`role_transport`, **sin solver**: se comparan conjuntos de aristas",
+   "not_established": "que los roles signifiquen lo que dicen sus nombres, ni nada sobre otro grafo. Cuando no se halla permutación, eso es una búsqueda VF2 exhaustiva y no un certificado.",
+   "question": "¿Se pueden intercambiar estos roles sin cambiar el grafo?",
+   "spec": "`RoleSpec`"
+  },
+  "semigroup": {
+   "answers": "si el semigrupo es puntiagudo, con la graduación que lo prueba; si el sistema de generadores es minimal, nombrando los redundantes; y por cada punto, la pertenencia al cono, al grupo y al semigrupo",
+   "certificate": "`affine_semigroup`, **sin solver**: aritmética entera y racional exacta",
+   "not_established": "que el semigrupo **sea** normal. Un testigo refuta la normalidad; establecerla es decidir la pertenencia de cada punto reticular del cono, que es para lo que existe Normaliz. `normal` es nulo por construcción.",
+   "question": "¿Es este punto reticular una combinación entera no negativa de estos generadores, y es normal el semigrupo?",
+   "spec": "`SemigroupSpec`"
+  },
+  "shrink": {
+   "answers": "un testigo minimal, con el descenso registrado",
+   "certificate": "`shrink_graph` / `mus`; necesita el módulo del spec",
+   "not_established": "que sea mínimo. Da un contraejemplo **1-minimal**, no mínimo.",
+   "question": "Mi contraejemplo es enorme. ¿Cuál es el de verdad?",
+   "spec": "`SweepSpec` o `DomainSpec`, con un `reduce`"
+  },
+  "solve": {
+   "answers": "la solución sobre ℚ o ℤ, una base del núcleo cuando está indeterminado, o una obstrucción cuando no hay ninguna",
+   "certificate": "`linear_system`, **sin solver**: un producto matriz-vector",
+   "not_established": "que la solución sea **no negativa**, ni sobre ℚ que sea **entera**. Una solución racional de las ecuaciones de un empaquetamiento no es un empaquetamiento.",
+   "question": "¿Qué resuelve exactamente este sistema lineal — y si nada lo hace, por qué?",
+   "spec": "`LinearSystemSpec`"
+  },
+  "sos": {
+   "answers": "cuadrados racionales exactos",
+   "certificate": "`sos`, **sin solver**: expandir un producto",
+   "not_established": "negatividad, nunca. Desde grado 4 en 3 variables hay polinomios no negativos que no son sumas de cuadrados —el de Motzkin es el estándar— y `certo sos` vuelve con `unknown_solver` sobre él, nunca con \"el polinomio se va a negativo\".",
+   "question": "¿Es este polinomio no negativo en todas partes?",
+   "spec": "`SOSSpec`"
+  },
+  "status": {
+   "answers": "cuatro secciones: RESULTADOS, AÚN DEBIDO, HUECO, OBSOLETO",
+   "certificate": "**ninguno, deliberadamente.** Un informe que se certificara a sí mismo sería el único artefacto aquí que nadie ha comprobado",
+   "not_established": "que los certificados verifiquen. `status` lee las afirmaciones que otros comandos hicieron; `certo status --verify` las re-comprueba todas.",
+   "question": "¿Dónde está todo mi proyecto?",
+   "spec": "ninguno; lee un directorio de certificados"
+  },
+  "sweep": {
+   "answers": "el veredicto sobre la familia, **y cuál de tres niveles se estableció sobre el predicado**",
+   "certificate": "`sweep` / `domain_sweep`; la libertad de solver depende del predicado",
+   "not_established": "el teorema. Se comprobó un dominio finito, no todo `n`. Y, por separado: nada dice que el predicado respondiera bien, salvo que devolviera certificados.",
+   "question": "¿Vale para todo grafo de `n` vértices?",
+   "spec": "`SweepSpec` para grafos, `DomainSpec` para cualquier dominio finito"
+  },
+  "synth": {
+   "answers": "el objeto, más los contraejemplos que lo forzaron; o que no existe ninguno",
+   "certificate": "`cegis` para un objeto, `cegis_none` para ninguno; ambos vuelven a resolver",
+   "not_established": "un teorema. `synth` busca sobre un dominio **acotado**, el banner dice `CANDIDATO SINTETIZADO -- búsqueda ACOTADA`, y eso es un descubrimiento.",
+   "question": "¿Existe un objeto con estas propiedades?",
+   "spec": "`SynthSpec`"
+  },
+  "verify": {
+   "answers": "cada comprobación, pasada o fallida, más **los avisos repetidos**",
+   "certificate": "ninguno",
+   "not_established": "que el spec siga coincidiendo. Si el archivo cambió desde que se emitió el certificado, `verify` lo acepta y avisa: sigue siendo válido por su cuenta, pero ya no corresponde a lo que hay ahora.",
+   "question": "¿Sigue siendo bueno este certificado guardado?",
+   "spec": "ninguno; toma una ruta de certificado"
+  }
+ },
+ "examples": {
+  "assign": "assignment_hall.py",
+  "atlas": "parametric_atlas.py",
+  "audit": "hypothesis_audit.py",
+  "bind": "lean_binding.py",
+  "bisect": "bisect_constant.py",
+  "bounds": "bounds_constant.py",
+  "cases": "pigeonhole.py",
+  "check": "regime_nonempty.py",
+  "check --hypotheses-only": "regime_nonempty.py",
+  "columns": "clique_columns.py",
+  "compose": "walkthrough_proof.py",
+  "cone": "toric_cone.py",
+  "core": "core_matrix.py",
+  "cover": "clique_partition.py",
+  "cover --maximum": "triangle_cover_sat.py",
+  "cover --minimum": "clique_partition_minimum.py",
+  "covering": "covering_physical.py",
+  "cycle": "dependency_cycle.py",
+  "eliminate": "eliminate_parameter.py",
+  "entry": "first_entry.py",
+  "exists": "no_decomposition.py",
+  "exists --max-parts": "clique_partition.py",
+  "family": "family_max.py",
+  "farkas": "farkas_linear.py",
+  "farkas --nonlinear": "farkas_nonlinear.py",
+  "ideal": "ideal_inconsistent.py",
+  "induct": "induct_sum.py",
+  "lint": "lint_vacuous_regime.py",
+  "matrix": "integer_matrix.py",
+  "mixed": "mixed_design.py",
+  "mixed --prove-optimal": "triangle_numbers.py",
+  "moment": "first_moment.py",
+  "nonneg": "nonneg_box.py",
+  "number": "number_mersenne.py",
+  "opt": "opt_clique_cuts.py",
+  "opt --by-type": "packing_mixed.py",
+  "opt --cuts": "opt_clique_cuts.py",
+  "opt --gap": "walkthrough.py",
+  "opt --round": "opt_clique_cuts.py",
+  "order": "order_decay.py",
+  "parametric": "parametric_bound.py",
+  "peak": "peak_residues.py",
+  "pin": "pin_fano.py",
+  "profile": "capacity_profile.py",
+  "prove": "refute_density.py",
+  "prove --drat": "hall_drat.py",
+  "quotient": "equitable_quotient.py",
+  "range": "variable_range.py",
+  "range --var": "variable_range.py",
+  "ratio": "ratio_window.py",
+  "reduce": "symmetry_reduction.py",
+  "reduce --parametric": "parametric_symmetry.py",
+  "roles": "roles_square.py",
+  "semigroup": "affine_semigroup.py",
+  "shrink": "mus_ramsey.py",
+  "solve": "linear_system.py",
+  "sos": "sos_quartic.py",
+  "sweep": "calibrate_density.py",
+  "sweep --n-range": "sweep_range_nested.py",
+  "sweep --witnesses": "setfamily_sweep.py",
+  "synth": "synth_constant.py",
+  "synth --prove-candidate": "synth_prove_identity.py"
+ }
+}

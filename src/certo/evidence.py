@@ -47,6 +47,8 @@ CLASS = {
     "lean_binding": "composition",
     "repair_refusal": "refusal",
     "hypothesis_audit": "audit",
+    "conditioned_cover": "sign", "role_transport": "computation",
+    "synth_optimum": "optimum",
 }
 
 CLASSES = ("universal", "inconsistency", "identity", "sign", "counterexample",
@@ -66,7 +68,7 @@ def evidence_class(cert) -> str:
     kind = cert.kind
     if kind == "ideal" and p.get("inconsistent"):
         return "inconsistency"
-    if kind == "polynomial_nonneg" and p.get("holds") is False:
+    if kind in ("polynomial_nonneg", "conditioned_cover") and p.get("holds") is False:
         return "counterexample"
     if kind == "unsat_core" and p.get("vacuous"):
         return "inconsistency"

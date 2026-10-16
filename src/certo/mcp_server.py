@@ -2033,6 +2033,46 @@ async def cycle(spec_path: str | None = None, spec_source: str | None = None,
 
 
 @mcp.tool(description=(
+    "COVERING: a box, conditions on it (read g >= 0: the physical domain, "
+    "hypotheses, a selector) and ALTERNATIVE obligations (p > 0 or p >= 0). "
+    "certo halves the box until on each leaf an obligation keeps its sign or a "
+    "condition is negative (the leaf is excluded), and certifies the leaves "
+    "TILE the box, boundaries included -- Bernstein coefficients, no solver. "
+    "Leaves left unresolved are listed, never hidden; a point where every "
+    "condition holds and every obligation fails is a counterexample. Pass "
+    "`leaves` in the spec to start from your own partition."))
+@_guard
+async def covering(spec_path: str | None = None, spec_source: str | None = None,
+                   timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import CoveringSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), CoveringSpec)
+    res = await _off(algebra.covering, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
+    "ROLES: roles on the vertices of ONE graph, changed without changing the "
+    "graph. The certificate is a permutation that maps the edge set onto "
+    "itself and each old role onto its new one (given, or proposed by VF2 and "
+    "checked), with every declared property -- independent, clique, "
+    "complete_to, anticomplete_to, neighbourhood_within, disjoint -- checked "
+    "before and after. A scalar identity like q' = q is not this."))
+@_guard
+async def roles(spec_path: str | None = None, spec_source: str | None = None,
+                timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import RoleSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), RoleSpec)
+    res = await _off(algebra.roles, spec, _limits(timeout_ms), str(f))
+    return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
     "BIND: tie a certificate to the Lean declaration meant to justify it, and "
     "check that the declaration actually gives what the certificate assumed. "
     "The failure this exists for: a bound certified ASSUMING a fine counting "
@@ -2215,22 +2255,25 @@ async def atlas(spec_path: str | None = None, spec_source: str | None = None,
     "returns one contract: its flags, fields with defaults, options. Start "
     "here when unsure which tool fits."))
 @_guard
-async def find(query: str = "", exact: str | None = None, n: int = 8) -> dict:
+async def find(query: str = "", exact: str | None = None, n: int = 8,
+               spec: str | None = None) -> dict:
+    """`verdict` is `found`, `not_available` (with why and what instead) or
+    `not_in_certo`; each result has `confidence` and the `call` for each
+    surface. `spec`, a spec path: what can be done with that object."""
     from . import discovery
 
+    if spec:
+        from .spec import load_spec
+
+        f = _spec_file(spec, None)
+        return {"ok": True, **discovery.for_spec(await _off(load_spec, str(f)))}
     if exact:
         got = discovery.contract(exact)
         if got is None:
             return {"ok": False, "exact": exact,
                     "near": [e["id"] for e in discovery.find(exact.replace(".", " "), n=5)]}
         return {"ok": True, "contract": got}
-    rows = discovery.find(query, n=n)
-    out = {"ok": bool(rows), "query": query,
-           "results": [{k: v for k, v in e.items() if k != "text"} for e in rows]}
-    said = discovery.notes(query)
-    if said:
-        out["notes"] = said
-    return out
+    return discovery.answer(query, n=n, surface="mcp")
 
 
 @mcp.tool(description=(

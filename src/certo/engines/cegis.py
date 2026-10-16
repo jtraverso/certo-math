@@ -48,6 +48,9 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     `{"round", "implementation", "counterexample"}`, and the ACCEPTED one --
     the candidate no input refutes -- with `"counterexample": None` and
     `"accepted": True`. So it is called `iterations` times on success."""
+    if getattr(spec, "minimize", None) is not None or \
+            getattr(spec, "maximize", None) is not None:
+        return synth_optimal(spec, limits, on_round)
     lim = limits or Limits()
     t0 = time.perf_counter()
     deadline = t0 + lim.timeout_ms / 1000.0
@@ -176,12 +179,16 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             ce_concrete = [
                 (x, ce_model.eval(x, model_completion=True)) for x in input_vars
             ]
+            breaks = _which_fail(spec, behav, fixed, ce_concrete, helper_vars, lim)
         finally:
             ce_solver.pop()  # (d) del original: el pop faltaba en dos ramas
 
         counterexamples.append(ce_assign)
         trace.append({"round": k + 1, "implementation": impl_assign,
                       "counterexample": ce_assign})
+        if breaks is not None:
+            # WHICH obligation this input breaks -- access, or payment.
+            trace[-1]["breaks"] = breaks
         if on_round is not None:
             on_round(trace[-1])
 
@@ -200,6 +207,97 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     return done(Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                 t("engine.synth.max_iter", n=lim.max_iterations),
                 k=lim.max_iterations)
+
+
+def _which_fail(spec, behav, fixed, ce_concrete, helper_vars, lim):
+    """The named obligations this counterexample breaks, for a `correctness`
+    given as a dict: obligation i is broken when no helper saves IT at this
+    input. None when the correctness is one formula."""
+    names = spec.obligation_names() if hasattr(spec, "obligation_names") else None
+    if not names:
+        return None
+    out = []
+    for name in names:
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.add(*fixed)
+        s.add(*[x == v for x, v in ce_concrete])
+        s.add(behav)
+        s.add(_no_helper_saves(behav, spec.correctness[name], helper_vars))
+        if s.check() == z3.sat:
+            out.append(name)
+    return out
+
+
+def synth_optimal(spec, limits=None, on_round=None) -> Result:
+    """The BEST candidate: CEGIS, then CEGIS again under `objective < best`
+    (or `>`), until no candidate exists. The last found works; the last
+    search proves nothing better does -- `synth_optimum`, the two
+    certificates together, each verified as it is."""
+    import dataclasses
+
+    from ..certificate import synth_optimum_certificate
+
+    lim = limits or Limits()
+    t0 = time.perf_counter()
+    obj = spec.minimize if spec.minimize is not None else spec.maximize
+    sense = "min" if spec.minimize is not None else "max"
+    if not (z3.is_expr(obj) and z3.is_int(obj)):
+        return Result("synth", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE, ENGINE,
+                      0.0, None, detail=t("engine.synth.objective_int"))
+    base = spec.impl_constraints if spec.impl_constraints is not None else z3.BoolVal(True)
+    plain = dataclasses.replace(spec, minimize=None, maximize=None)
+    best, rounds, path = None, 0, []
+    current = plain
+    for _ in range(max(1, lim.max_iterations)):
+        res = synth(current, lim, on_round)
+        rounds += res.meta.get("iterations", 0)
+        if res.verdict is Verdict.PROVED and res.certificate is not None:
+            impl = res.certificate.payload["implementation"]
+            subs = [(z3util_const(n, s), z3util_value(s, v)) for n, (s, v) in impl.items()]
+            value = z3.simplify(z3.substitute(obj, *subs))
+            best = (value.as_long(), res)
+            path.append(best[0])
+            better = obj < best[0] if sense == "min" else obj > best[0]
+            current = dataclasses.replace(plain, impl_constraints=z3.And(base, better))
+            continue
+        ms = (time.perf_counter() - t0) * 1000
+        if res.verdict is Verdict.UNSATISFIABLE and res.certificate is not None:
+            if best is None:
+                return res          # no candidate at all: the plain answer
+            value, found = best
+            cert = synth_optimum_certificate(
+                found.certificate.to_dict(), res.certificate.to_dict(),
+                z3util.smt2(base), z3util.smt2(obj == value), sense, value)
+            if found.certificate.payload.get("scope"):
+                cert.payload["scope"] = found.certificate.payload["scope"]
+            meta = dict(found.meta, value=value, sense=sense, path=path,
+                        rounds=rounds)
+            return Result("synth", Status.SAT, Verdict.PROVED, ENGINE, ms, cert,
+                          t("engine.synth.optimum", sense=sense, value=value,
+                            steps=len(path), rounds=rounds), meta=meta)
+        # stopped: the best so far is reported, its optimality is not
+        detail = res.detail
+        if best is not None:
+            detail = t("engine.synth.optimum_open", value=best[0], sense=sense) + " " + detail
+        res.detail = detail
+        res.meta["best_so_far"] = None if best is None else best[0]
+        return res
+    return Result("synth", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, ENGINE,
+                  (time.perf_counter() - t0) * 1000, None,
+                  t("engine.synth.max_iter", n=lim.max_iterations))
+
+
+def z3util_const(name, sort):
+    from ..certificate import _const
+
+    return _const(z3, name, sort)
+
+
+def z3util_value(sort, val):
+    from ..certificate import _value
+
+    return _value(z3, sort, val)
 
 
 # ---------------------------------------------------------------------------

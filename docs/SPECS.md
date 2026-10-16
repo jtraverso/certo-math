@@ -59,6 +59,8 @@ counterexamples can be spurious (`nu = -1/2`). Declare them with `z3.Int` /
 | `ProofSpec` | `compose` |
 | `InductSpec` | `induct` |
 | `IdealSpec` | `ideal` |
+| `CoveringSpec` | `covering` |
+| `RoleSpec` | `roles` |
 | `EliminateSpec` | `eliminate` |
 | `ParametricSpec` | `parametric` |
 | `PeakSpec` | `peak` |

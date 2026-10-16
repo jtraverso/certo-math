@@ -128,7 +128,21 @@ class SynthSpec:
     #                    so "no candidate" refutes the relaxed contract only)
     scope: dict = None
 
+    # THE BEST ONE, not just one: an integer expression over `impl_vars` to
+    # minimise (or maximise). `synth` keeps asking for a better candidate
+    # until none exists, and certifies both halves: the candidate works, and
+    # no candidate with a better value does (`synth_optimum`). Within the
+    # template and its bounded domain -- the scope still says which.
+    minimize: object = None
+    maximize: object = None
+
     SCOPE_KEYS = ("model", "relaxed", "counterexamples")
+
+    def obligation_names(self):
+        """`correctness` given as `{name: formula}`: the names, in order --
+        so a counterexample can say WHICH obligation it breaks. None for a
+        single formula."""
+        return list(self.correctness) if isinstance(self.correctness, dict) else None
 
     def scope_data(self):
         """The declared scope, checked, as plain data -- or None."""
@@ -156,10 +170,14 @@ class SynthSpec:
         import z3
 
         t = z3.BoolVal(True)
+        corr = self.correctness
+        if isinstance(corr, dict):
+            # Named obligations -- access AND payment -- are one contract.
+            corr = z3.And(*corr.values()) if corr else t
         return (
             self.impl_constraints if self.impl_constraints is not None else t,
             self.behavior if self.behavior is not None else t,
-            self.correctness if self.correctness is not None else t,
+            corr if corr is not None else t,
         )
 
 
@@ -946,6 +964,13 @@ class Lemma:
     # The named map, when this lemma's subject is not the theorem's. certo
     # does not check the map; it refuses to let the change be silent.
     transport: str = ""
+    # PREREQUISITES: the lemmas that must hold BEFORE this one means anything
+    # -- access before realisation before payment. A payment proved on its
+    # own stays proved; a theorem resting on it is not closed while any
+    # prerequisite in its chain is pending.
+    needs: list = field(default_factory=list)
+    # PENDING: declared, needed, not proved anywhere yet -- why, in a word.
+    pending: str = ""
 
     @property
     def is_bridge(self) -> bool:
@@ -1006,8 +1031,20 @@ class ProofSpec:
         self.cases.append((name, when))
         return self
 
+    def pending(self, name, states, why="not proved yet", needs=None):
+        """A step the chain NEEDS and nobody has proved: `states` is what it
+        would license. The composition records it, the card lists it, and a
+        theorem that rests on it -- directly or as a prerequisite of a lemma
+        it uses -- is reported NOT CLOSED."""
+        if any(l.name == name for l in self.lemmas):
+            raise ValueError(t("spec.duplicate_lemma", name=name))
+        self.lemmas.append(Lemma(name=name, states=states,
+                                 pending=str(why) or "not proved yet",
+                                 needs=list(needs or [])))
+        return self
+
     def lemma(self, name, proves=None, via="prove", certificate="",
-              states=None, bridge="", subject=None, transport=""):
+              states=None, bridge="", subject=None, transport="", needs=None):
         if any(l.name == name for l in self.lemmas):
             raise ValueError(t("spec.duplicate_lemma", name=name))
         if proves is None and not certificate:
@@ -1021,7 +1058,7 @@ class ProofSpec:
                                  certificate=certificate, states=states,
                                  bridge=bridge,
                                  subject=tuple(subject) if subject else None,
-                                 transport=transport))
+                                 transport=transport, needs=list(needs or [])))
         return self
 
     def assume(self, name: str, expr):
@@ -1693,6 +1730,64 @@ class NonnegSpec:
     region: list = field(default_factory=list)
     subdivide: int = 12              # how many times a box may be halved
     title: str = ""
+    # `poly` written with `/`: read as N / D, the SIGN of D proved on the box
+    # (Bernstein, strictly), and N -- or -N, when D is negative there -- is
+    # what is certified. The orientation, the denominator and its proof
+    # travel in the certificate; a D that changes sign or vanishes is refused.
+    clear_denominators: bool = False
+
+
+@dataclass
+class RoleSpec:
+    """One graph, roles on its vertices, and the roles changed WITHOUT
+    changing the graph.
+
+        RoleSpec(edges=[(0, 1), (1, 2), (2, 3), (3, 0)],
+                 roles={"T": [0], "S": [1, 3], "Q": [2]},
+                 roles_after={"T": [1], "S": [0, 2], "Q": [3]},
+                 properties=[("independent", "S"), ("complete_to", "T", "S")])
+
+    The certificate is a permutation of the vertices that maps the edge set
+    onto itself and each role onto its new one -- given as `mapping`, or
+    found (networkx proposes; the check below is certo's) -- with every
+    declared property checked before and after.
+    """
+
+    edges: list
+    roles: dict                      # name -> vertices, before
+    roles_after: dict = None         # name -> vertices, after (or from `mapping`)
+    mapping: dict = None             # vertex -> vertex, a permutation
+    properties: list = field(default_factory=list)
+    vertices: list = None            # vertices no edge or role names
+    title: str = ""
+
+
+@dataclass
+class CoveringSpec:
+    """A box, conditions on it, and alternative obligations: on every point
+    of the box where every condition holds, at least one obligation does.
+
+        CoveringSpec(
+            domain={"theta": (0, 1), "zeta": (0, "1/7")},
+            conditions=[("phys", theta * (16 + theta) / 64 - zeta)],  # >= 0
+            obligations=[("F", F), ("U", ">=", U)],                   # F > 0, U >= 0
+        )
+
+    certo cuts the box in halves until, on each leaf, an obligation keeps
+    its sign or a condition is negative (the leaf is outside the physical
+    domain), up to `subdivide` halvings. Every leaf and its reason go in the
+    certificate, and `verify` recomputes both and that the leaves tile the
+    box -- boundaries included, the boxes being closed. `leaves`, boxes of
+    your own (your partition), are taken as the starting cut and checked to
+    tile the box like any other.
+    """
+
+    domain: dict                     # name -> (lo, hi), a closed rational box
+    obligations: list                # [(name, expr)] read > 0, or (name, ">=", expr)
+    conditions: list = field(default_factory=list)  # [(name, expr)] read >= 0
+    leaves: list = None              # boxes of your own partition, to start from
+    subdivide: int = 12              # halvings allowed below each starting box
+    title: str = ""
 
 
 @dataclass
@@ -1823,6 +1918,10 @@ class SemigroupSpec:
 
     generators: dict                 # name -> integer coordinates
     points: dict = None              # name -> coordinates, to be decided
+    # name -> {"point": [None, 99], "from": 0, "up_to": 10}: the LEAST value of
+    # the one free (None) coordinate with the point in S -- every smaller one
+    # excluded, each exclusion a redone search, the minimum a membership
+    profiles: dict = None
     hilbert: object = None           # a PROPOSED minimal generating set
     order: object = None             # the order the generators are read in
     title: str = ""

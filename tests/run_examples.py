@@ -96,6 +96,10 @@ CASES = [
     ("ideal_supplied.py", "ideal", []),
     ("triangle_numbers.py", "mixed", ["--prove-optimal"]),
     ("triangle_cover_sat.py", "cover", ["--maximum"]),
+    ("covering_physical.py", "covering", []),
+    ("roles_square.py", "roles", []),
+    ("synth_minimum.py", "synth", []),
+    ("semigroup_profile.py", "semigroup", []),
     ("synth_prove_identity.py", "synth", ["--prove-candidate"]),
     ("ramsey.py", "cases", []),
     ("propositional.py", "cases", []),
@@ -275,6 +279,10 @@ def main() -> int:
             continue
 
         cert = OUT / (name[:-3] + ".json")
+        # A file left by an earlier run would be read as this run's answer:
+        # a `cover` that writes none was reported as having emitted `drat`.
+        if cert.exists():
+            cert.unlink()
         ok = run([command, "examples/" + name, *flags, "--cert", str(cert)],
                  label, expect)
         if not ok:

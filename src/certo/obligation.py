@@ -45,10 +45,12 @@ FAMILIES = {
     "drat": "cnf", "cnf_model": "cnf",
     "lp_dual": "lp", "gap": "lp",
     "unsat_core": "smt", "model": "smt", "propositional_refutation": "smt",
+    "parametric_atlas": "atlas", "conditioned_cover": "covering",
+    "role_transport": "roles",
 }
 
 #: families whose certificate carries the whole obligation
-WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp")
+WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp", "atlas", "covering", "roles")
 
 
 # --- canonical pieces ---------------------------------------------------------
@@ -104,6 +106,29 @@ def _of_cert(cert) -> dict:
                 else _poly_key(Poly.parse(vs, p["claim"])),
                 "nonzero": sorted((_poly_key(Poly.parse(vs, z))
                                    for z in p.get("nonzero") or []), key=json.dumps)}
+    if fam == "atlas":
+        vs = tuple(p["parameters"])
+        cl = p.get("claim") or {}
+        return {"variables": sorted(vs),
+                "domain": {n: [_fraction(lo), None if hi is None else _fraction(hi)]
+                           for n, (lo, hi) in p["domain"].items()},
+                "region": {n: _poly_key(Poly.parse(vs, g))
+                           for n, g in (p.get("region") or {}).items()},
+                "claim": [cl.get("relation"),
+                          _poly_key(Poly.parse(vs, cl["target"]))
+                          if cl.get("target") is not None else None]}
+    if fam == "roles":
+        return {"edges": [list(e) for e in p["edges"]], "roles": p["roles"],
+                "roles_after": p["roles_after"], "properties": p["properties"]}
+    if fam == "covering":
+        vs = tuple(p["parameters"])
+        return {"variables": sorted(vs),
+                "domain": {n: [_fraction(lo), _fraction(hi)]
+                           for n, (lo, hi) in p["domain"].items()},
+                "conditions": {n: _poly_key(Poly.parse(vs, g))
+                               for n, g in (p.get("conditions") or {}).items()},
+                "obligations": {n: [o["relation"], _poly_key(Poly.parse(vs, o["poly"]))]
+                                for n, o in (p.get("obligations") or {}).items()}}
     if fam == "nonneg":
         vs = tuple(p["parameters"])
         return {"variables": sorted(vs),
@@ -179,6 +204,45 @@ def _of_spec(spec, family, cert=None) -> dict:
                 "equations": [_poly_key(g) for g in gs],
                 "claim": None if claim is None else _poly_key(claim),
                 "nonzero": sorted((_poly_key(z) for z in nonzero), key=json.dumps)}
+    if family == "roles":
+        from . import roles as R
+
+        E, V, before, after, sigma, props = R.normalise(
+            spec.edges, spec.vertices, spec.roles, spec.roles_after,
+            spec.mapping, spec.properties)
+        if after is None and cert is not None:
+            after = cert.payload.get("roles_after")
+        return {"edges": sorted(sorted(e) for e in E), "roles": before,
+                "roles_after": after, "properties": props}
+    if family in ("atlas", "covering"):
+        from .polynomials import Poly
+
+        ring = tuple(spec.domain)
+
+        def P(x):
+            if isinstance(x, Poly):
+                return x
+            if isinstance(x, (int, Fraction)):
+                return Poly.const(ring, x)
+            return Poly.from_z3(x, ring)
+
+        dom = {n: [_fraction(spec.domain[n][0]),
+                   None if spec.domain[n][1] is None else _fraction(spec.domain[n][1])]
+               for n in ring}
+        if family == "covering":
+            return {"variables": sorted(ring), "domain": dom,
+                    "conditions": {str(n): _poly_key(P(g))
+                                   for n, g in (spec.conditions or [])},
+                    "obligations": {str(n): [rel, _poly_key(P(g))]
+                                    for n, rel, g in _obligations(spec.obligations)}}
+        rel, target = None, spec.claim
+        if isinstance(spec.claim, tuple):
+            rel, target = spec.claim
+        if rel is None and cert is not None:
+            rel = (cert.payload.get("claim") or {}).get("relation")
+        return {"variables": sorted(ring), "domain": dom,
+                "region": {str(n): _poly_key(P(g)) for n, g in (spec.region or [])},
+                "claim": [rel, None if target is None else _poly_key(P(target))]}
     if family == "nonneg":
         import z3  # noqa: F401 -- a z3 term is read through the same parser
 
@@ -193,8 +257,19 @@ def _of_spec(spec, family, cert=None) -> dict:
                 return Poly.const(ring, x)
             return Poly.from_z3(x, ring)
 
+        target = None
+        if getattr(spec, "clear_denominators", False) and not isinstance(
+                spec.poly, (Poly, int, Fraction)):
+            # read as the engine reads it: N, oriented by the certificate's
+            # proved sign of D (or + when there is none to read)
+            from .polynomials import rational_function
+
+            num, _den = rational_function(spec.poly, ring)
+            o = ((cert.payload.get("cleared") or {}).get("orientation", 1)
+                 if cert is not None else 1)
+            target = num.scaled(o)
         return {"variables": sorted(ring),
-                "poly": _poly_key(P(spec.poly)),
+                "poly": _poly_key(target if target is not None else P(spec.poly)),
                 "box": {n: [_fraction(spec.box[n][0]),
                             None if spec.box[n][1] is None else _fraction(spec.box[n][1])]
                         for n in ring},
@@ -276,8 +351,21 @@ def fingerprint(obj, family=None) -> str | None:
     return _digest(fam, _of_spec(obj, fam))
 
 
+def _obligations(obls):
+    """`[(name, relation, expr)]` from a CoveringSpec's obligations, given as
+    `[(name, expr)]` (read `expr > 0`) or `[(name, relation, expr)]`."""
+    out = []
+    for o in obls or []:
+        if len(o) == 2:
+            out.append((str(o[0]), ">", o[1]))
+        else:
+            out.append((str(o[0]), str(o[1]), o[2]))
+    return out
+
+
 def _family_of_spec(spec):
     return {"IdealSpec": "ideal", "NonnegSpec": "nonneg", "CoverSpec": "cover",
+            "AtlasSpec": "atlas", "CoveringSpec": "covering", "RoleSpec": "roles",
             "CNFSpec": "cnf", "LPSpec": "lp", "PackingSpec": "lp",
             "Spec": "smt"}.get(type(spec).__name__)
 

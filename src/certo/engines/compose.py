@@ -85,6 +85,29 @@ def _discharge(lem, limits):
     raise ValueError(t("engine.compose.bad_via", name=lem.name, via=lem.via))
 
 
+def not_closed(entries, used) -> list:
+    """`[{"pending", "via"}]`: every pending lemma the theorem rests on --
+    used by the final step itself, or a prerequisite (through `needs`, at any
+    depth) of a lemma it uses. Sorted, so a verifier can recompute it."""
+    by = {e["name"]: e for e in entries}
+    out = set()
+    for start in used:
+        if start not in by:
+            continue
+        stack, seen = [(start, start)], set()
+        while stack:
+            name, via = stack.pop()
+            if name in seen:
+                continue
+            seen.add(name)
+            e = by.get(name) or {}
+            if e.get("pending"):
+                out.add((name, via))
+            for n in e.get("needs") or []:
+                stack.append((n, via))
+    return [{"pending": p, "via": v} for p, v in sorted(out)]
+
+
 def compose(spec, limits: Limits | None = None, spec_path: str = "",
             base_dir=None) -> Result:
     lim = limits or Limits()
@@ -94,7 +117,23 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
         return _fail(t("engine.compose.no_goal"), t0, Status.OUT_OF_THEORY)
 
     entries, statements = [], []
+    known = {lem.name for lem in spec.lemmas}
     for lem in spec.lemmas:
+        missing = [n for n in getattr(lem, "needs", None) or [] if n not in known]
+        if missing:
+            return _fail(t("engine.compose.unknown_need", name=lem.name,
+                           needs=", ".join(missing)), t0)
+    for lem in spec.lemmas:
+        if getattr(lem, "pending", ""):
+            # PENDING: needed, unproved. Its statement may close the final
+            # step; the chain report below says the theorem is not closed.
+            statements.append((lem.name, lem.states))
+            entries.append({"name": lem.name,
+                            "statement_smt2": z3util.smt2(lem.states),
+                            "derived": False, "bridge": "", "pending": lem.pending,
+                            "needs": list(lem.needs), "engine": "pending",
+                            "cert": None})
+            continue
         if getattr(lem, "cited", ""):
             # CITED: nothing to discharge and nothing to verify. The statement
             # goes into the final step, and the source goes into the
@@ -157,6 +196,8 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
         entry = {"name": lem.name, "statement_smt2": z3util.smt2(phi),
                  "derived": derived, "bridge": bridge,
                  "engine": engine, "cert": sub}
+        if getattr(lem, "needs", None):
+            entry["needs"] = list(lem.needs)
         if lem.subject:
             entry["subject"] = list(lem.subject)
         if lem.transport:
@@ -243,6 +284,9 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
     ).stamp(spec_path or None)
     if cases_payload is not None:
         cert.payload["cases"] = cases_payload
+    open_ = not_closed(entries, used)
+    if any(e.get("pending") or e.get("needs") for e in entries):
+        cert.payload["not_closed"] = open_
 
     bridges = [e["name"] for e in entries
                if not e["derived"] and not e.get("cited")]
@@ -254,6 +298,17 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
     if cited_used:
         detail += " -- " + t("engine.compose.relative", n=len(cited_used),
                              names=", ".join(cited_used[:4]))
+    if open_:
+        # THE STEP CLOSES AND THE THEOREM DOES NOT: what it rests on includes
+        # a prerequisite nobody proved. Said as the verdict, not as a note.
+        return Result(
+            "compose", Status.UNSAT, Verdict.INCONCLUSIVE, ENGINE, ms, cert,
+            detail=t("engine.compose.not_closed",
+                     names=", ".join(o["pending"] + " (" + o["via"] + ")"
+                                     for o in open_[:4])) + " " + detail,
+            meta={"lemmas": [e["name"] for e in entries], "used": used,
+                  "unused": unused, "bridges": bridges, "cited": cited,
+                  "not_closed": open_})
     return Result(
         "compose", Status.UNSAT, Verdict.PROVED, ENGINE, ms, cert,
         detail=detail,

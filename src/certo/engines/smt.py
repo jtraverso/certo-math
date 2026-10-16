@@ -266,11 +266,29 @@ def prove(spec, limits: Limits | None = None, drat: bool = False) -> Result:
             detail=t("engine.prove.refuted"), meta=meta,
         )
 
-    return Result(
-        "prove", st, Verdict.INCONCLUSIVE, ENGINE, ms, None,
-        detail=t("engine.inconclusive", status=st.value,
-                 reason=readable_reason(s.reason_unknown())),
-    )
+    return _undecided("prove", st, ms, s, formulas, {})
+
+
+def _undecided(command, st, ms, s, formulas, meta):
+    """No answer -- and, where the question's STRUCTURE explains it, the
+    structure: the theory, the floors, the products and the hypotheses that
+    bring them, with the first thing to try. "Raise the limits" was the only
+    advice, and the user who followed the structure instead closed it."""
+    from .. import hardness
+
+    reason = readable_reason(s.reason_unknown())
+    meta = dict(meta)
+    try:
+        rep = hardness.report(dict(formulas))
+    except Exception:  # noqa: BLE001 -- a reading, never a failure
+        rep = None
+    if rep is not None:
+        meta["hardness"] = {k: v for k, v in rep.items() if k != "by_hypothesis"}
+        if rep["theory"] != "LRA" or rep["floors"] or rep["quantifiers"]:
+            reason = hardness.hint(rep)
+    return Result(command, st, Verdict.INCONCLUSIVE, ENGINE, ms, None,
+                  detail=t("engine.inconclusive", status=st.value, reason=reason),
+                  meta=meta)
 
 
 def _cited(spec, core) -> dict:
@@ -420,10 +438,7 @@ def check(spec, limits: Limits | None = None,
                       detail=t("engine.check.unsat_constant")
                       if constant == "false" else t("engine.check.unsat"),
                       meta=_constant_meta(constant))
-    return Result("check", st, Verdict.INCONCLUSIVE, ENGINE, ms, None,
-                  detail=t("engine.inconclusive", status=st.value,
-                           reason=readable_reason(s.reason_unknown())),
-                  meta=_constant_meta(constant))
+    return _undecided("check", st, ms, s, formulas, _constant_meta(constant))
 
 
 def _constant_meta(constant):
@@ -537,10 +552,7 @@ def _hypotheses_only(spec, lim, t0, integers=False, regime=None) -> Result:
                       detail=t("engine.check.regime_empty",
                                names=", ".join(clash)),
                       meta={"hypotheses_only": True, "clash": clash})
-    return Result("check", st, Verdict.INCONCLUSIVE, ENGINE, ms, None,
-                  detail=t("engine.inconclusive", status=st.value,
-                           reason=readable_reason(s.reason_unknown())),
-                  meta={"hypotheses_only": True})
+    return _undecided("check", st, ms, s, formulas, {"hypotheses_only": True})
 
 
 def audit(spec, limits: Limits | None = None, spec_path: str = "") -> Result:

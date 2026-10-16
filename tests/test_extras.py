@@ -9350,6 +9350,23 @@ def test_every_document_that_states_a_count_states_the_right_one():
                     wrong.append({"in": rel,
                                   "says": "{} {}".format(spelling, unit),
                                   "should be": want})
+        # "the fifty-three kinds" sat in the README's table of contents for a
+        # dozen releases: the bare unit, for a number no smaller kind count
+        # than twenty could be (Lean's "five kinds" is not this count).
+        for unit in ("kinds", "tipos"):
+            for spelling, value in SPELLINGS.items():
+                if value >= 20 and value != counts["kinds"] and re.search(
+                        r"(?<![\w-])" + re.escape(spelling) + r"\s+" + unit + r"(?![\w-])", low):
+                    wrong.append({"in": rel, "says": "{} {}".format(spelling, unit),
+                                  "should be": counts["kinds"]})
+    # and the spec types that build from JSON, in SECURITY.md
+    from certo import dataspec
+
+    sec = (pathlib.Path(__file__).resolve().parent.parent / "SECURITY.md").read_text("utf-8").lower()
+    for spelling, value in SPELLINGS.items():
+        if value != len(dataspec.BUILDABLE) and re.search(
+                r"(?<![\w-])" + re.escape(spelling) + r"\s+(spec types build|tipos se construyen)", sec):
+            wrong.append({"in": "SECURITY.md", "says": spelling, "should be": len(dataspec.BUILDABLE)})
     assert not wrong, wrong
 
 
@@ -15315,6 +15332,13 @@ FIND_GOLDEN = [
     ("repair a partition with frozen owners", "CoverSpec.repair"),
     ("reparar una partición con propietarios congelados", "CoverSpec.repair"),
     ("closed form of a floating point value", "--explore"),
+    # 0.32: the phrases of three reports that found nothing at the time
+    ("perfil minimo del semigrupo", "SemigroupSpec.profiles"),
+    ("cobertura por cajas con fronteras", "covering"),
+    ("cambio de roles sin cambiar el grafo", "roles"),
+    ("reconstruccion relativa con propietarios retirados", "CoverSpec.repair"),
+    ("prerrequisitos de un constructor", "ProofSpec.pending"),
+    ("divisor con signo en una caja", "NonnegSpec.clear_denominators"),
 ]
 
 
@@ -17467,6 +17491,357 @@ def test_0_31_a_synthesis_says_what_it_searched():
     assert found.verdict is Verdict.PROVED
     assert len(rounds) == found.meta["iterations"]
     assert rounds[-1].get("accepted") and rounds[-1]["counterexample"] is None
+
+
+# --- 0.32: budgets everywhere, coverings, roles, optima, chains, find ----------
+
+
+def test_0_32_every_engine_obeys_the_time_budget():
+    """Seventeen engines took `limits` and never read it: a semigroup asked
+    for 1 ms finished its whole search. Every runner either reads `limits`
+    or is wrapped by `honours_timeout`; a wrapped one refuses to start once
+    the run's deadline has passed, whatever its spec."""
+    import ast
+    import importlib
+    import inspect
+    import textwrap
+
+    from certo import clock, routing
+
+    unread = []
+    for cmd, (mod, fn) in sorted(routing.RUNNERS.items()):
+        f = getattr(importlib.import_module(mod), fn)
+        if getattr(f, "honours_timeout", False):
+            continue
+        tree = ast.parse(textwrap.dedent(inspect.getsource(f)))
+        names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)
+                 and isinstance(n.ctx, ast.Load)}
+        if "limits" not in names:
+            unread.append(cmd)
+    assert not unread, unread
+
+    with clock.run_deadline(0):
+        for cmd, (mod, fn) in sorted(routing.RUNNERS.items()):
+            f = getattr(importlib.import_module(mod), fn)
+            if getattr(f, "honours_timeout", False):
+                if fn in ("shrink_graph", "shrink_domain"):
+                    r = f(object(), None)
+                else:
+                    r = f(object())
+                assert r.status is Status.TIMEOUT, (cmd, r.status, r.detail)
+
+
+def test_0_32_a_semigroup_stops_inside_its_search_and_keeps_what_it_decided():
+    from math import comb
+
+    from certo import clock
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import SemigroupSpec
+
+    m = 21
+    s = SemigroupSpec(generators={"s%d" % k: (1, comb(k, 2)) for k in range(2, m + 1)},
+                      points={"gap": (2, m * (m - 2))},
+                      profiles={"q": {"point": [None, m * (m - 2)], "up_to": 12}})
+    calls = [0]
+    real = clock.expired
+
+    def soon():
+        calls[0] += 1
+        return calls[0] > 1          # the clock passes after the first look
+
+    clock.expired = soon
+    try:
+        r = algebra.affine_semigroup(s)
+    finally:
+        clock.expired = real
+    if r.status is Status.TIMEOUT:
+        assert r.certificate is not None and "undecided" in r.meta["points"].values()
+        assert verify(r.certificate).ok
+
+
+def test_0_32_semigroup_profiles_and_each_points_answer():
+    """A user's table: the least number of central cliques for m(m-2)
+    edges is 3, 4, 3 for m = 5, 11, 21 -- each smaller value excluded."""
+    import copy
+    from math import comb
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import SemigroupSpec
+
+    for m, want in ((5, 3), (11, 4), (21, 3)):
+        q = m * (m - 2)
+        s = SemigroupSpec(generators={"s%d" % k: (1, comb(k, 2)) for k in range(2, m + 1)},
+                          points={"gap": (2, q)},
+                          profiles={"q": {"point": [None, q], "up_to": 12}})
+        r = algebra.affine_semigroup(s)
+        assert r.meta["profiles"]["q"] == want, (m, r.meta["profiles"])
+        assert r.meta["points"]["gap"] == "not_member"
+        assert r.meta["points"]["q[{}]".format(want)] == "member"
+        assert verify(r.certificate).ok
+        d = copy.deepcopy(r.certificate.to_dict())
+        d["payload"]["profiles"]["q"]["minimum"] -= 1
+        assert not verify(Certificate.from_dict(d)).ok
+    from certo.scope import scope_of
+
+    assert any("COUNT" in x.upper() or "count" in x for x in scope_of(r.certificate))
+
+
+def test_0_32_a_conditioned_covering_tiles_the_box():
+    import copy
+
+    import z3
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import CoveringSpec
+
+    x, y = z3.Reals("x y")
+    s = CoveringSpec(domain={"x": (0, 1), "y": (0, 1)},
+                     conditions=[("phys", Fraction(3, 2) - x - y)],
+                     obligations=[("F", x - y + Fraction(1, 10)), ("U", ">=", y - x)])
+    r = algebra.covering(s)
+    assert r.verdict is Verdict.PROVED and r.meta["excluded_by"]
+    rep = verify(r.certificate)
+    assert rep.ok and rep.degree == "complete"
+    for forge in ("drop", "reason"):
+        d = copy.deepcopy(r.certificate.to_dict())
+        if forge == "drop":
+            d["payload"]["leaves"].pop()
+        else:
+            leaf = next(l for l in d["payload"]["leaves"] if l["by"] == "obligation")
+            leaf["name"] = "U" if leaf["name"] == "F" else "F"
+        assert not verify(Certificate.from_dict(d)).ok, forge
+    # a counterexample
+    bad = algebra.covering(CoveringSpec(domain={"x": (0, 1), "y": (0, 1)},
+                                        obligations=[("F", x - y)], subdivide=6))
+    assert bad.verdict is Verdict.REFUTED and verify(bad.certificate).ok
+    # unresolved leaves are listed, and the degree says so
+    tight = algebra.covering(CoveringSpec(domain={"x": (0, 1)},
+                                          obligations=[("F", ">=", x * x - x + Fraction(1, 4))],
+                                          subdivide=2))
+    if tight.verdict is Verdict.INCONCLUSIVE:
+        assert tight.meta["unresolved"] and verify(tight.certificate).degree == "partial"
+    # your own partition, checked to tile the box
+    own = algebra.covering(CoveringSpec(
+        domain={"x": (0, 1)}, obligations=[("F", x + 1)],
+        leaves=[{"x": (0, Fraction(1, 2))}, {"x": (Fraction(1, 3), 1)}]))
+    assert own.status is Status.OUT_OF_THEORY
+
+
+def test_0_32_roles_move_on_one_graph():
+    import copy
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import RoleSpec
+
+    c4 = [(0, 1), (1, 2), (2, 3), (3, 0)]
+    ok = algebra.roles(RoleSpec(edges=c4, roles={"T": [0], "S": [1, 3], "Q": [2]},
+                                roles_after={"T": [1], "S": [0, 2], "Q": [3]},
+                                properties=[("independent", "S"),
+                                            ("complete_to", "T", "S")]))
+    assert ok.verdict is Verdict.PROVED and verify(ok.certificate).ok
+    d = copy.deepcopy(ok.certificate.to_dict())
+    d["payload"]["mapping"]["0"], d["payload"]["mapping"]["2"] = \
+        d["payload"]["mapping"]["2"], d["payload"]["mapping"]["0"]
+    assert not verify(Certificate.from_dict(d)).ok
+    path = [(0, 1), (1, 2), (2, 3)]
+    none = algebra.roles(RoleSpec(edges=path, roles={"T": [0], "S": [1, 3], "Q": [2]},
+                                  roles_after={"T": [1], "S": [0, 2], "Q": [3]}))
+    assert none.verdict is Verdict.INCONCLUSIVE and none.certificate is None
+    moved = algebra.roles(RoleSpec(edges=path, roles={"T": [0], "S": [1]},
+                                   mapping={0: 1, 1: 0, 2: 2, 3: 3}))
+    assert moved.verdict is Verdict.REFUTED
+    fails = algebra.roles(RoleSpec(edges=c4, roles={"T": [0], "S": [1, 2], "Q": [3]},
+                                   mapping={0: 0, 1: 1, 2: 2, 3: 3},
+                                   properties=[("independent", "S")]))
+    assert fails.verdict is Verdict.REFUTED
+
+
+def test_0_32_the_best_candidate_and_which_obligation_breaks():
+    import copy
+
+    import z3
+
+    from certo import Limits, SynthSpec
+    from certo.certificate import verify
+    from certo.engines import cegis
+
+    a, x = z3.Ints("a x")
+    spec = SynthSpec(impl_vars=[a], input_vars=[x],
+                     impl_constraints=z3.And(a >= 0, a <= 20),
+                     behavior=z3.And(x >= 0, x <= 3),
+                     correctness={"access": a >= x + 2, "payment": a >= 2 * x},
+                     minimize=a)
+    r = cegis.synth(spec, Limits(timeout_ms=10000, max_iterations=50))
+    assert r.verdict is Verdict.PROVED and r.meta["value"] == 6
+    assert r.certificate.kind == "synth_optimum" and verify(r.certificate).ok
+    assert any(e.get("breaks") for e in r.meta["trace"])
+    d = copy.deepcopy(r.certificate.to_dict())
+    d["payload"]["value"] = 5
+    assert not verify(Certificate.from_dict(d)).ok
+    top = cegis.synth(SynthSpec(impl_vars=[a], input_vars=[x],
+                                impl_constraints=z3.And(a >= 0, a <= 20),
+                                behavior=z3.And(x >= 0, x <= 3),
+                                correctness=a + x <= 20, maximize=a),
+                      Limits(timeout_ms=10000, max_iterations=50))
+    assert top.meta["value"] == 17 and verify(top.certificate).ok
+
+
+def test_0_32_a_chain_resting_on_a_pending_prerequisite_is_not_closed():
+    import copy
+    import tempfile
+
+    import z3
+
+    from certo.certificate import verify
+    from certo.engines.compose import compose
+    from certo.spec import ProofSpec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as d:
+        from certo import cli
+        import contextlib
+        import io
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            cli.main(["farkas", str(root / "examples" / "farkas_linear.py"),
+                      "--cert", str(pathlib.Path(d) / "pay.json")])
+        paid, acc = z3.Bools("paid acc")
+        p = ProofSpec(title="constructor")
+        p.pending("access", states=acc, why="bank access not proved")
+        p.lemma("payment", certificate=str(pathlib.Path(d) / "pay.json"),
+                states=paid, bridge="the payment count", needs=["access"])
+        p.conclude(paid)
+        r = compose(p)
+    assert r.verdict is Verdict.INCONCLUSIVE and "access" in r.detail
+    assert r.certificate.payload["not_closed"] == [{"pending": "access", "via": "payment"}]
+    rep = verify(r.certificate)
+    assert rep.ok and rep.degree == "relative"
+    d = copy.deepcopy(r.certificate.to_dict())
+    d["payload"]["not_closed"] = []
+    assert not verify(Certificate.from_dict(d)).ok
+    q = ProofSpec(title="x")
+    q.lemma("payment", certificate="nowhere.json", states=paid, needs=["nope"])
+    q.conclude(paid)
+    assert compose(q).verdict is not Verdict.PROVED
+
+
+def test_0_32_a_divided_polynomial_with_its_divisors_sign():
+    import copy
+
+    import z3
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import NonnegSpec
+
+    x = z3.Real("x")
+    r = algebra.nonneg(NonnegSpec(poly=(x * x + 1) / (2 - x), box={"x": (0, 1)},
+                                  clear_denominators=True))
+    assert r.verdict is Verdict.PROVED
+    assert r.certificate.payload["cleared"]["orientation"] == -1
+    assert verify(r.certificate).ok
+    d = copy.deepcopy(r.certificate.to_dict())
+    d["payload"]["cleared"]["orientation"] = 1
+    assert not verify(Certificate.from_dict(d)).ok
+    vanish = algebra.nonneg(NonnegSpec(poly=(x * x + 1) / (x - Fraction(1, 2)),
+                                       box={"x": (0, 1)}, clear_denominators=True))
+    assert vanish.status is Status.OUT_OF_THEORY
+
+
+def test_0_32_a_timeout_says_what_makes_the_question_hard():
+    import z3
+
+    from certo import Limits, Spec, hardness
+    from certo.engines import smt
+
+    t_, r, pool = z3.Ints("t r pool")
+    s = Spec(title="x")
+    s.assume("budget", pool == t_ - 4 * (t_ / 24) - 17 - r - 200)
+    s.assume("r", z3.And(r >= 0, r < 24))
+    s.claim(pool * (pool - 1) > 44 * pool + 128 + (t_ % 7))
+    rep = hardness.report({n: f for n, f in s.assumptions} | {"claim": s.goal})
+    assert rep["theory"] == "NIA" and rep["floors"]
+    assert rep["floors_in"] == ["budget", "claim"] and rep["nonlinear_in"] == ["claim"]
+    assert "floor" in hardness.hint(rep).lower() or "piso" in hardness.hint(rep).lower()
+    out = smt.prove(s, Limits(timeout_ms=1, rlimit=1000))
+    if out.verdict is Verdict.INCONCLUSIVE:
+        assert out.meta["hardness"]["theory"] in ("NIA", "NIRA")
+
+
+def test_0_32_find_says_what_is_there_what_is_not_and_how_to_call_it():
+    from certo import discovery
+    from certo.hypergraph import HypergraphSpec
+
+    want = {
+        "perfil minimo del semigrupo": ("found", "SemigroupSpec.profiles"),
+        "cobertura por cajas con fronteras": ("found", "covering"),
+        "cambio de roles sin cambiar el grafo": ("found", "roles"),
+        "umbral minimo sintetizado": ("found", "SynthSpec.minimize"),
+        "reconstruccion relativa con propietarios retirados": ("found", "CoverSpec.repair"),
+        "sos de rango reducido": ("not_available", "na:sos_rank_reduction"),
+        "exportar a coq": ("not_available", "na:other_provers"),
+        "resolver ecuaciones diferenciales": ("not_in_certo", None),
+    }
+    for q, (verdict, top) in want.items():
+        a = discovery.answer(q, n=3)
+        assert a["verdict"] == verdict, (q, a["verdict"], [r["id"] for r in a["results"]])
+        if top:
+            assert top in [r["id"] for r in a["results"]], (q, a["results"])
+    got = discovery.answer("maximum packing of a hypergraph", n=3)
+    row = next(r for r in got["results"] if r["id"] == "cover --maximum")
+    assert row["call"]["api"] == "certo.api.run('cover', spec, maximum=True)"
+    assert row["confidence"] == "high"
+    plan = discovery.for_spec(HypergraphSpec(edges=[[1, 2], [3, 4]], problem="matching"))
+    assert {"opt", "mixed", "cover"} <= {c["command"] for c in plan["commands"]}
+    assert plan["notes"]
+
+
+def test_0_32_what_find_says_is_missing_is_on_the_backlog():
+    from certo import discovery
+
+    text = (pathlib.Path(__file__).resolve().parent.parent / "BACKLOG.md").read_text("utf-8")
+    missing = [na["id"] for na in discovery.NOT_AVAILABLE if na["backlog"] not in text]
+    assert not missing, missing
+
+
+def test_0_32_the_shipped_doc_contracts_are_the_docs():
+    """`find` quotes COMMANDS.md; the copy in the package is rebuilt from it
+    (python -m certo.discovery .), and this keeps the two the same."""
+    import json
+
+    from certo import discovery
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    shipped = json.loads((root / "src" / "certo" / "data" / "doc_contracts.json")
+                         .read_text(encoding="utf-8"))
+    assert shipped == json.loads(json.dumps(discovery.build_doc_contracts(root))), \
+        "rebuild with: python -m certo.discovery ."
+    from certo import catalogue
+
+    assert set(shipped["en"]) == {c["name"] for c in catalogue.commands()} & set(shipped["en"])
+    assert {"covering", "roles"} <= set(shipped["en"]) and {"covering", "roles"} <= set(shipped["es"])
+
+
+def test_0_32_obligation_covers_atlas_covering_and_cleared_nonneg():
+    import z3
+
+    from certo.engines import algebra
+    from certo.obligation import same_obligation
+    from certo.spec import CoveringSpec, NonnegSpec
+
+    x, y = z3.Reals("x y")
+    s = CoveringSpec(domain={"x": (0, 1), "y": (0, 1)},
+                     obligations=[("F", x + y + 1)])
+    c = algebra.covering(s).certificate
+    assert same_obligation(c, s)["same"]
+    other = CoveringSpec(domain={"x": (0, 1), "y": (0, 2)}, obligations=[("F", x + y + 1)])
+    assert same_obligation(c, other)["same"] is False
+    n = NonnegSpec(poly=(x * x + 1) / (2 - x), box={"x": (0, 1)}, clear_denominators=True)
+    assert same_obligation(algebra.nonneg(n).certificate, n)["same"]
 
 
 if __name__ == "__main__":

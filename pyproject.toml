@@ -82,4 +82,4 @@ version = {attr = "certo.__version__"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-certo = ["locales/*.json"]
+certo = ["locales/*.json", "data/*.json"]

@@ -570,6 +570,18 @@ def cegis_certificate(impl, counterexamples, smt2, iterations,
                        note_key="cert.note.cegis")
 
 
+def synth_optimum_certificate(found, below, base_smt2, value_smt2, sense,
+                              value) -> Certificate:
+    """The best candidate within the template: `found` (a `cegis`) works and
+    has the value; `below` (a `cegis_none`) shows no candidate with a better
+    one -- its implementation constraints are the base ones and the bound."""
+    return Certificate(
+        kind="synth_optimum", solver_free=False,
+        payload={"found": found, "below": below, "base_smt2": base_smt2,
+                 "value_smt2": value_smt2, "sense": sense, "value": value},
+        note_key="cert.note.synth_optimum")
+
+
 def cnf_model_certificate(dimacs: str, true_vars) -> Certificate:
     return Certificate(
         kind="cnf_model",
@@ -1300,6 +1312,22 @@ def polynomial_nonneg_certificate(payload) -> Certificate:
     with any multipliers -- or, refuted, the point and its exact value."""
     return Certificate(kind="polynomial_nonneg", solver_free=True,
                        payload=payload, note_key="cert.note.polynomial_nonneg")
+
+
+def role_transport_certificate(payload) -> Certificate:
+    """A permutation of the vertices that is an automorphism of the graph
+    and maps each role onto its new one, with the declared properties on
+    both sides. Checked by comparing edge sets -- no solver."""
+    return Certificate(kind="role_transport", solver_free=True, payload=payload,
+                       note_key="cert.note.role_transport")
+
+
+def conditioned_cover_certificate(payload) -> Certificate:
+    """A box tiled by leaves, each with its reason: an obligation that keeps
+    its sign there, or a condition negative there. Bernstein coefficients,
+    recomputed -- no solver."""
+    return Certificate(kind="conditioned_cover", solver_free=True,
+                       payload=payload, note_key="cert.note.conditioned_cover")
 
 
 def atlas_certificate(payload) -> Certificate:
@@ -2290,6 +2318,14 @@ def _verify_proof(cert, limits) -> VerifyReport:
         phi = _parse_one(lem["statement_smt2"])
         statements.append(phi)
         sub = lem.get("cert")
+        if lem.get("pending"):
+            # Declared and unproved: nothing to verify, and said every time.
+            checks.append((t("verify.proof.pending_shape", name=name),
+                           sub is None and not lem.get("derived"),
+                           str(lem.get("pending"))))
+            warnings.append(_note("assumed", "verify.proof.pending", name=name,
+                                  why=lem["pending"], statement=str(phi)[:160]))
+            continue
         if lem.get("cited"):
             # Nothing to verify, by declaration -- and a cited lemma carrying
             # a certificate is not one, so the combination is refused.
@@ -2406,6 +2442,18 @@ def _verify_proof(cert, limits) -> VerifyReport:
             ("unused", sorted(p.get("unused") or [])
              == sorted(n for n in lemma_names if n not in core)))
             if not ok]
+        if "not_closed" in p:
+            # THE CHAIN, recomputed from the lemmas' `needs` and the core.
+            from .engines.compose import not_closed
+
+            names_ok = all(n in lemma_names for l in p["lemmas"]
+                           for n in l.get("needs") or [])
+            want = not_closed(p["lemmas"], sorted(core))
+            if not names_ok or list(p["not_closed"]) != want:
+                off.append("not_closed")
+            if want:
+                warnings.append(_note("assumed", "verify.proof.not_closed",
+                                      names=", ".join(o["pending"] for o in want)))
         checks.append((t("verify.proof.summaries"), not off,
                        ", ".join(off) or "-"))
         # EACH NAME IS ITS FORMULA. The step's core lists formulas and the
@@ -3509,6 +3557,109 @@ def _verify_pinned_value(cert, limits) -> VerifyReport:
                  r="" if p.get("max_size") is None else "_{}".format(p["max_size"])))
 
 
+def _verify_role_transport(cert, limits) -> VerifyReport:
+    """Every part redone from the edges, the roles and the permutation."""
+    from . import roles as R
+
+    p = cert.payload
+    try:
+        E, V, before, after, sigma, props = R.normalise(
+            p["edges"], p["vertices"], p["roles"], p["roles_after"],
+            p["mapping"], p["properties"])
+        got = R.check(E, V, before, after, sigma, props)
+    except (KeyError, TypeError, ValueError, R.NotRoles) as e:
+        return VerifyReport(False, "role_transport", True, checks=[(
+            t("verify.roles.shape"), False, "{}: {}".format(type(e).__name__, e))])
+    # THE GRAPH AS THE ENGINE WROTE IT: each edge once, sorted, and exactly
+    # the vertices the edges and roles name. A duplicated edge or a vertex
+    # renamed in one list only read as the same graph and verified.
+    canonical = (p["edges"] == sorted(sorted(e) for e in E)
+                 and p["vertices"] == V
+                 and p["roles"] == before and p["roles_after"] == after
+                 and p["properties"] == props
+                 and len({json.dumps(x) for x in props}) == len(props))
+    checks = [
+        (t("verify.roles.canonical"), canonical, str(len(E))),
+        (t("verify.roles.bijective"), got["bijective"], str(len(V))),
+        (t("verify.roles.automorphism"), got["automorphism"],
+         t("verify.roles.edges", n=len(E))),
+        (t("verify.roles.onto"), got["roles_onto"], ", ".join(sorted(before))),
+    ]
+    for r in got["properties"]:
+        checks.append((t("verify.roles.property", prop=" ".join(
+            x if isinstance(x, str) else "[" + ", ".join(x) + "]" for x in r["property"])),
+            r["before"] is True and r["after"] is True, ""))
+    claimed = p.get("results")
+    checks.append((t("verify.roles.results"), claimed == got["properties"], ""))
+    return VerifyReport(all(c[1] for c in checks), "role_transport", True,
+                        checks=checks,
+                        detail=t("verify.roles.detail", n=len(V), m=len(E),
+                                 k=len(props)))
+
+
+def _verify_conditioned_cover(cert, limits) -> VerifyReport:
+    """The tiling, every leaf's reason, and the counterexample, redone."""
+    from fractions import Fraction
+
+    from . import covering as C
+    from .parametric import evaluate
+    from .polynomials import Poly
+
+    p = cert.payload
+    checks, warnings = [], []
+    try:
+        ring = tuple(p["parameters"])
+        domain = C._box(p["domain"], ring)
+        conds = [(n, Poly.parse(ring, g)) for n, g in sorted((p.get("conditions") or {}).items())]
+        obls = [(n, o["relation"], Poly.parse(ring, o["poly"]))
+                for n, o in sorted((p.get("obligations") or {}).items())]
+        if any(rel not in (">", ">=") for _n, rel, _p in obls) or not obls:
+            raise ValueError("relation")
+        leaves = [(C._box(l["box"], ring), l["by"], l.get("name")) for l in p["leaves"]]
+    except (KeyError, TypeError, ValueError, ZeroDivisionError, C.NotACovering) as e:
+        return VerifyReport(False, "conditioned_cover", True, checks=[(
+            t("verify.covering.shape"), False, "{}: {}".format(type(e).__name__, e))])
+    ok_t, why = C.tiles(domain, [b for b, _by, _n in leaves])
+    checks.append((t("verify.covering.tiles"), ok_t, why or str(len(leaves))))
+    by_o = {n: (rel, q) for n, rel, q in obls}
+    by_c = dict(conds)
+    bad, unresolved = [], 0
+    for b, by, name in leaves:
+        if by == "obligation":
+            ok = name in by_o and C.holds(by_o[name][1], by_o[name][0], b)
+        elif by == "excluded":
+            ok = name in by_c and C.excludes(by_c[name], b)
+        elif by == "unresolved":
+            ok, unresolved = name is None, unresolved + 1
+        else:
+            ok = False
+        if not ok:
+            bad.append(str(C._text(b)))
+    checks.append((t("verify.covering.reasons"), not bad,
+                   ", ".join(bad[:2]) or t("verify.covering.counts", n=len(leaves),
+                                           unresolved=unresolved)))
+    ce = p.get("counterexample")
+    if ce is not None:
+        try:
+            pt = {n: Fraction(ce["point"][n]) for n in ring}
+            inside = all(domain[n][0] <= pt[n] <= domain[n][1] for n in ring)
+            meets = all(evaluate(g, pt) >= 0 for _n, g in conds)
+            fails = all((evaluate(q, pt) <= 0) if rel == ">" else (evaluate(q, pt) < 0)
+                        for _n, rel, q in obls)
+            ok_ce = inside and meets and fails
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            ok_ce = False
+        checks.append((t("verify.covering.counterexample"), ok_ce, str(ce.get("point"))))
+    want = False if ce is not None else (None if unresolved else True)
+    checks.append((t("verify.covering.holds"), p.get("holds") is want, str(want)))
+    if unresolved and ce is None:
+        warnings.append(_note("partial", "verify.covering.unresolved", n=unresolved))
+    return VerifyReport(all(c[1] for c in checks), "conditioned_cover", True,
+                        checks=checks, warnings=warnings,
+                        detail=t("verify.covering.detail", n=len(leaves),
+                                 obligations=", ".join(n for n, _r, _q in obls)))
+
+
 def _verify_polynomial_nonneg(cert, limits) -> VerifyReport:
     """The tree's leaves recomputed, or the counterexample evaluated."""
     from fractions import Fraction
@@ -3536,6 +3687,20 @@ def _verify_polynomial_nonneg(cert, limits) -> VerifyReport:
         if not isinstance(holds, bool):
             raise ValueError("holds")
         open_end = any(hi is None for _lo, hi in box.values())
+        cl = p.get("cleared")
+        if cl is not None:
+            # N / D, cleared: the certified polynomial IS the orientation
+            # times N, and the orientation times D is > 0 on the whole box,
+            # leaf by leaf.
+            num = Poly.parse(ring, cl["numerator"])
+            den = Poly.parse(ring, cl["denominator"])
+            o = cl.get("orientation")
+            ok_c = (o in (1, -1) and not open_end and den.degree > 0
+                    and poly == num.scaled(o)
+                    and bernstein.check_positive(den.scaled(o), box,
+                                                 cl.get("denominator_tree")))
+            checks.append((t("verify.nonneg.cleared"), ok_c,
+                           "{} {} 0".format(den, ">" if o == 1 else "<")))
         if holds and open_end:
             # The shift test re-derived: no tree can cover an infinite box,
             # and a tree offered for one is not read.
@@ -3810,12 +3975,15 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
     # 4. THE NEGATIVES, redone rather than believed. A point the certificate
     # says is not in the semigroup is searched for again, under the bound the
     # certificate itself states.
-    wrong = []
+    wrong, out_of_time = [], False
     if vec is not None:
         for name, e in sorted((p.get("points") or {}).items()):
             if e.get("in_semigroup") is not False:
                 continue
             got = sg.in_semigroup(A, [int(x) for x in e["point"]], vec)
+            if got.get("why") == "time":
+                out_of_time = True       # not redone: said, not counted wrong
+                continue
             if got.get("coefficients") is not None or got.get("gave_up"):
                 wrong.append(name)
     checks.append((t("verify.semigroup.absence"), not wrong,
@@ -3834,6 +4002,35 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
                    t("verify.semigroup.witnesses",
                      n=len(p.get("normality_witnesses") or []),
                      bad=", ".join(forged[:3]) or "-")))
+
+    # 5b. A PROFILE is its points: every k from `from` to the minimum is
+    # there, with the template's coordinates; each below is an absence
+    # (redone in 4), the minimum a membership (multiplied out in 2).
+    bad_prof = []
+    for name, pr in sorted((p.get("profiles") or {}).items()):
+        tmpl, i = pr.get("point") or [], pr.get("free")
+        lo, top, k = pr.get("from", 0), pr.get("up_to"), pr.get("minimum")
+        und = pr.get("undecided")
+        ok = (isinstance(i, int) and 0 <= i < d and len(tmpl) == d
+              and isinstance(lo, int) and isinstance(top, int)
+              and (k is None or (isinstance(k, int) and lo <= k <= top))
+              and (und is None or (isinstance(und, int) and k is None)))
+        if ok:
+            want_ex = list(range(lo, k if k is not None else
+                                 (pr["undecided"] if pr.get("undecided") is not None
+                                  else top + 1)))
+            ok = list(pr.get("excluded") or []) == want_ex
+            for kk in want_ex + ([k] if k is not None else []):
+                e = (p.get("points") or {}).get("{}[{}]".format(name, kk))
+                v = [kk if j == i else tmpl[j] for j in range(len(tmpl))]
+                if e is None or [int(x) for x in e["point"]] != v or \
+                        e.get("in_semigroup") is not (kk == k):
+                    ok = False
+        if not ok:
+            bad_prof.append(name)
+    if p.get("profiles"):
+        checks.append((t("verify.semigroup.profiles"), not bad_prof,
+                       ", ".join(bad_prof[:3]) or str(len(p["profiles"]))))
 
     # 6. normality is never asserted, and a payload claiming it is refused
     checks.append((t("verify.semigroup.never_normal"),
@@ -3913,7 +4110,9 @@ def _verify_affine_semigroup(cert, limits) -> VerifyReport:
                          n=len(pairs),
                          verdict=str(hb.get("is_minimal_generating_set")))))
 
-    warnings = [t("verify.semigroup.scope")]
+    warnings = [t("verify.semigroup.scope"), t("verify.semigroup.counts")]
+    if out_of_time:
+        warnings.append(_note("partial", "verify.semigroup.out_of_time"))
     if u is None and wit is None and p.get("pointed") is False:
         warnings.append(_note("partial", "verify.semigroup.legacy_not_pointed"))
     return VerifyReport(
@@ -6527,6 +6726,66 @@ def _synth_scope_notes(p, found) -> list:
     return out
 
 
+def _verify_synth_optimum(cert, limits) -> VerifyReport:
+    """Both halves verified, and tied: the found candidate has the stated
+    value under the base constraints; the refuted search is the same
+    contract with the base constraints and the bound `objective < value`
+    (`>` for a maximum) -- equivalences asked of a solver."""
+    import z3
+
+    from .limits import Limits
+
+    lim = limits or Limits()
+    p = cert.payload
+    checks = []
+    found = Certificate.from_dict(p["found"])
+    below = Certificate.from_dict(p["below"])
+    rf, rb = verify(found, lim), verify(below, lim)
+    checks.append((t("verify.synth_opt.found"), found.kind == "cegis" and rf.ok,
+                   rf.detail))
+    checks.append((t("verify.synth_opt.below"), below.kind == "cegis_none" and rb.ok,
+                   rb.detail))
+    decls: dict = {}
+
+    def parse(s):
+        return z3.And(*z3.parse_smt2_string(s, decls=decls))
+
+    def equivalent(a, b):
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.add(z3.Xor(a, b))
+        return s.check() == z3.unsat
+
+    try:
+        fs, bs = found.payload["smt2"], below.payload["smt2"]
+        same = (equivalent(parse(fs["behavior"]), parse(bs["behavior"]))
+                and equivalent(parse(fs["correctness"]), parse(bs["correctness"])))
+        checks.append((t("verify.synth_opt.same_contract"), same, ""))
+        base = parse(p["base_smt2"])
+        eq = list(z3.parse_smt2_string(p["value_smt2"], decls=decls))[0]
+        obj, val = eq.arg(0), eq.arg(1)
+        ok_val = (z3.is_eq(eq) and val.eq(z3.IntVal(p["value"]))
+                  and p.get("sense") in ("min", "max"))
+        fix = [_const(z3, n, s) == _value(z3, s, v)
+               for n, (s, v) in found.payload["implementation"].items()]
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.add(*fix)
+        s.add(z3.Not(z3.And(base, eq)))
+        attains = ok_val and s.check() == z3.unsat
+        checks.append((t("verify.synth_opt.attains"), attains, str(p["value"])))
+        bound = obj < val if p["sense"] == "min" else obj > val
+        tied = equivalent(parse(bs["impl_constraints"]), z3.And(base, bound))
+        checks.append((t("verify.synth_opt.bound"), tied,
+                       "{} {} {}".format(obj, "<" if p["sense"] == "min" else ">", val)))
+    except (KeyError, IndexError, TypeError, z3.Z3Exception) as e:
+        checks.append((t("verify.synth_opt.bound"), False, str(e)[:120]))
+    return VerifyReport(all(c[1] for c in checks), "synth_optimum", False,
+                        checks=checks, warnings=list(rf.warnings),
+                        detail=t("verify.synth_opt.detail", sense=p.get("sense"),
+                                 value=p.get("value")))
+
+
 def _verify_cegis_none(cert, limits) -> VerifyReport:
     import z3
 
@@ -7600,6 +7859,9 @@ VERIFIERS = {
     "lp_dual": _verify_lp_dual,
     "cegis": _verify_cegis,
     "cegis_none": _verify_cegis_none,
+    "synth_optimum": _verify_synth_optimum,
+    "conditioned_cover": _verify_conditioned_cover,
+    "role_transport": _verify_role_transport,
     "graph_set": _verify_graph_set,
     "cnf_model": _verify_cnf_model,
     "drat": _verify_drat,

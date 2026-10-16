@@ -87,6 +87,22 @@ def set_process_deadline(seconds):
 
 
 @contextmanager
+def within(seconds):
+    """A deadline `seconds` from now for this context, or the one already in
+    force if that is earlier -- an engine's own budget never EXTENDS a run's."""
+    if seconds is None:
+        yield
+        return
+    own = time.monotonic() + float(seconds)
+    current = deadline()
+    token = _CALL.set(own if current is None else min(own, current))
+    try:
+        yield
+    finally:
+        _CALL.reset(token)
+
+
+@contextmanager
 def run_deadline(seconds):
     """For one MCP call (or any caller sharing a process): the deadline holds
     in this context and in threads started from it with a copy of it."""

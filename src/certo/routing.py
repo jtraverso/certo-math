@@ -40,12 +40,12 @@ SPEC_OF = {
     "semigroup": "SemigroupSpec", "profile": "ProfileSpec",
     "columns": "CliqueLPSpec", "atlas": "AtlasSpec", "nonneg": "NonnegSpec", "pin": "PinSpec", "assign": "AssignmentSpec",
     "range": "Spec", "cycle": "CycleSpec",
-    "bind": "BindSpec",
+    "bind": "BindSpec", "covering": "CoveringSpec", "roles": "RoleSpec",
 }
 
 #: Which commands leave a certificate that re-checks with NO solver.
 SOLVER_FREE = {
-    "cone", "semigroup", "columns", "atlas", "nonneg", "pin", "assign", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists",
+    "cone", "semigroup", "columns", "atlas", "nonneg", "pin", "assign", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists", "covering", "roles",
     "cover", "ideal", "eliminate", "sos", "number", "order", "bounds",
     "cases",
 }
@@ -80,6 +80,7 @@ BY_QUESTION = (
         ("commands.q.columns", "columns"),
         ("commands.q.atlas", "atlas"),
         ("commands.q.nonneg", "nonneg"),
+        ("commands.q.covering", "covering"),
         ("commands.q.pin", "pin"),
         ("commands.q.assign", "assign"),
         ("commands.q.range", "range --var X"),
@@ -106,6 +107,7 @@ BY_QUESTION = (
         ("commands.q.sos", "sos"),
         ("commands.q.number", "number"),
         ("commands.q.cover", "cover"),
+        ("commands.q.roles", "roles"),
     )),
     ("commands.group.keep", (
         ("commands.q.synth", "synth"),
@@ -236,7 +238,7 @@ TIER = {
     "cases": YES, "number": YES, "sos": YES, "ideal": YES, "eliminate": YES,
     "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "columns": YES, "atlas": YES, "nonneg": YES, "pin": YES, "assign": YES, "reduce": YES,
     "order": YES, "bounds": YES, "check": YES, "enum": YES, "shrink": YES,
-    "range": YES, "cycle": YES,
+    "range": YES, "cycle": YES, "covering": YES, "roles": YES,
 
     # It depends on the answer, or on what you handed in.
     # `opt` alone gives `lp_dual`, which re-checks by rational arithmetic.
@@ -271,7 +273,7 @@ KIND_OF = {
     "audit": "hypothesis_audit", "farkas": "farkas", "compose": "proof",
     "induct": "induction",
     # `--prove-candidate` adds the universal half to the bounded one.
-    "synth": ("cegis", "synth_proved", "cegis_none"),
+    "synth": ("cegis", "synth_proved", "cegis_none", "synth_optimum"),
     # `--gap` pairs the relaxation with an integer optimum, and that
     # pairing is its own kind -- the same flag that makes the tier
     # `depends` rather than `yes`.
@@ -292,6 +294,7 @@ KIND_OF = {
     "nonneg": "polynomial_nonneg", "pin": "pinned_value", "assign": "assignment",
     "range": "variable_range",
     "cycle": "dependency_cycle", "bind": "lean_binding",
+    "covering": "conditioned_cover", "roles": "role_transport",
     "family": "family_extremum", "ratio": "ratio_bound",
     "moment": "first_moment", "entry": "first_entry", "exists": ("drat", "cnf_model", "exact_cover"),
     "cover": ("exact_cover", "repair_refusal", "recurrence_table", "sat_optimum"), "sos": "sos", "number": "number",
@@ -343,6 +346,8 @@ RUNNERS = {
     # is the whole point of having one entry point.
     "cycle": ("certo.engines.algebra", "dependency_cycle"),
     "bind": ("certo.engines.algebra", "lean_binding"),
+    "covering": ("certo.engines.algebra", "covering"),
+    "roles": ("certo.engines.algebra", "roles"),
     "family": ("certo.engines.algebra", "family_max"),
     # `CoverSpec` answers two questions: `cover` checks one you have, and
     # `exists` asks whether any does. `ask` takes the first as the default,

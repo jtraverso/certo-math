@@ -1,4 +1,4 @@
-# The fifty-nine commands
+# The sixty-one commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -65,6 +65,13 @@ base (`examples/hall_drat.py`). A core that is not Boolean keeps its
 constant and the hypotheses are linear, `prove` runs `range` itself and says
 the constant the hypotheses DO give -- `l <= 7/2` where `l <= 3` was claimed --
 with its `variable_range` certificate in `best_constant`.
+
+**Why it did not settle.** A `timeout` or `unknown` now reads the question:
+its theory (linear or not, integer, real, both), floors and remainders,
+divisions by variables, the degree, and WHICH hypotheses bring each -- and
+says the first thing to try instead of "raise the limits": nonlinear integer
+arithmetic with floors has no decision procedure, so split the linear
+consequences of the floors from the polynomial step. In `meta["hardness"]`.
 
 ### `certo core`
 
@@ -1161,6 +1168,15 @@ decomposition, because "not irreducible" is a claim.
 set breaks the grading and nothing below it terminates; that is reported as
 `None`, never as "does not generate".
 
+**Profiles, and each point's own answer.** `profiles={"q": {"point": [None,
+99], "up_to": 10}}` asks for the LEAST value of the free coordinate with the
+point in S: every smaller value excluded (each a redone search), the minimum a
+membership. The result's `meta["points"]` says `member`, `not_member` or
+`undecided` for each point -- the run's status is one word for many questions
+-- and the scope says what the semigroup is: COUNTS, a combination of
+generator vectors, not a physical object built from them. The search obeys
+the time budget and stops as `undecided`, never as "no".
+
 ### `certo range`
 
 **Question** — How far can this variable go — the whole interval, not one
@@ -1218,6 +1234,31 @@ have the same supremum and only one contains it.
 Linear hypotheses only. A non-linear one is refused by name rather than
 dropped, because dropping it would *widen* the range — wrong in the direction
 that looks safe.
+
+### `certo covering`
+
+**Question** — On every point of this box where the conditions hold, does one
+of these obligations hold?
+**Spec** — `CoveringSpec`
+**Answers** — the leaves of a partition of the box, each with its reason (an
+obligation that keeps its sign on the whole leaf, or a condition negative on
+it), the leaves left unresolved, or a point where every condition holds and
+every obligation fails
+**Certificate** — `conditioned_cover`, **solver-free**: Bernstein coefficients
+and the tiling, recomputed
+**Not established** — anything outside the box, or for an obligation not
+listed. A leaf proved by an obligation is proved on the WHOLE leaf, which is
+stronger than needed; an unresolved leaf is listed, and the statement holds
+on the others only.
+
+The shape users kept in code of their own: a physical domain (conditions
+`g >= 0`, a selector, hypotheses), alternative sufficient obligations (`F > 0`
+here, `U >= 0` there), thousands of leaves and their exhaustiveness. certo
+halves the box along its widest side until a reason holds or `subdivide` runs
+out. The leaves TILE the box -- each inside it, interiors pairwise disjoint,
+volumes summing to the box's -- so the closed leaves cover every point,
+boundaries included. `leaves=[{...}, ...]`, your own partition, is the
+starting cut, checked to tile the box like the rest.
 
 ### `certo cycle`
 
@@ -1476,6 +1517,12 @@ Rays and bounded sides mix in one box, and the ceilings are used:
 
 `meta["method"]` says which test ran -- `bernstein` or `shift` -- for a
 client that should not parse it out of the detail.
+
+**A polynomial written with `/`.** `NonnegSpec(clear_denominators=True)` reads
+`poly` as `N / D`, proves the SIGN of `D` on the whole box (Bernstein, strict)
+and certifies `N` -- or `-N` when `D` is negative there. The orientation, the
+denominator and its proof travel in the certificate (`cleared`), and `verify`
+redoes both; a `D` that vanishes or changes sign on the box is refused.
 
 ### `certo assign`
 
@@ -2102,6 +2149,15 @@ callback now also receives the ACCEPTED round (`"accepted": True`,
 `"counterexample": None`), so it is called `iterations` times; `--trace`
 prints it.
 
+**Which obligation, and the best candidate.** `correctness={"access": ...,
+"payment": ...}` is one contract with named parts, and each counterexample in
+the trace says which it `breaks`. `minimize=expr` (or `maximize`), an integer
+expression over the implementation variables, keeps asking for a better
+candidate until none exists: `synth_optimum` carries the candidate that
+attains the value and the refuted search for a better one, both verified and
+tied to the same contract -- optimal within the template and its bounded
+domain, which the scope repeats.
+
 ### `certo compose`
 
 **Question** — How do I assemble my lemmas into one proof?
@@ -2168,6 +2224,15 @@ its own, and `verify` checks that it is about these cases and these
 hypotheses. A gap between the cases refuses the proof with the instance that
 falls in it.
 
+**Prerequisites, and a chain that is not closed.** `p.pending("access",
+states=..., why="...")` declares a step the chain needs and nobody has proved;
+`p.lemma("payment", ..., needs=["access"])` says payment means nothing before
+access. A payment proved on its own stays proved. A theorem that rests on a
+pending step -- directly, or as a prerequisite of a lemma it uses, at any
+depth -- is reported **NOT CLOSED**, with the chain (`not_closed` in the
+certificate, recomputed by `verify`), the card lists it as pending, and
+`status` counts it as resting on pending.
+
 ### `certo verify`
 
 **Question** — Is this stored certificate still good?
@@ -2227,6 +2292,25 @@ composition ... (`evidence` in the JSON and the MCP).
 
 `--spec` that matches by hash and sits elsewhere than the recorded path is a
 relocation, said as such, not a warning that the spec is gone.
+
+### `certo roles`
+
+**Question** — Can these roles be exchanged without changing the graph?
+**Spec** — `RoleSpec`
+**Answers** — the permutation of the vertices that maps the edge set onto
+itself and each old role onto its new one, and each declared property
+(`independent`, `clique`, `disjoint`, `complete_to`, `anticomplete_to`,
+`neighbourhood_within`) before and after
+**Certificate** — `role_transport`, **solver-free**: edge sets compared
+**Not established** — that the roles mean what their names say, or anything
+about another graph. When no permutation is found, that is an exhaustive VF2
+search and not a certificate.
+
+`q' = q`, a scalar identity, says nothing about whether the configuration
+with the new roles is the same configuration renamed; an automorphism that
+carries the roles says exactly that, and every property transports with it.
+Give `roles_after` and certo looks for the permutation (networkx proposes, the
+check is certo's), or give `mapping` and it is checked.
 
 ### `certo bind`
 
@@ -2426,6 +2510,15 @@ what a flag already did: `opt --round` by hand, a rational endpoint where
 the argument parser, the routing table, the spec dataclasses (their field
 comments included), the verifiers and the public API, so it cannot drift from
 what ships. `--json` gives the rows; over MCP it is the `find` tool.
+
+**A verdict, not only a ranking.** `find` now answers `found`,
+`not_available` (certo does not do this: why, and what to use instead) or
+`not_in_certo`, and each result carries its `confidence`, the words it
+`matched`, what it does NOT establish (from this file), an `example`, and its
+`call` for each surface -- the CLI line, the MCP tool, `certo.api.run`.
+Spec methods (`ProofSpec.pending`) are indexed. `find --spec FILE` lists what
+can be done with that spec: every command that takes it, how it is read there,
+and what to know before running it.
 
 ### `certo commands`
 

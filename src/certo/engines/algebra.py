@@ -37,6 +37,7 @@ from ..certificate import (cover_certificate, ideal_certificate,
                            integer_peak_certificate,
                            resultant_certificate, sos_certificate)
 from ..i18n import t
+from ..budget import honours_timeout
 from ..limits import Limits
 
 ENGINE_COLGEN = "certo/column-generation"
@@ -346,6 +347,7 @@ def cover_bounds(spec, limits=None, prove_optimal=False, max_nodes=5_000,
     return out
 
 
+@honours_timeout("entry", ENGINE_PARAM)
 def entry(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """Where a sequence first crosses a threshold, and how far past it lands."""
     from ..entry import NotAnEntry, certify
@@ -388,6 +390,7 @@ def entry(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                         "window": out["window"] or ""})
 
 
+@honours_timeout("moment", ENGINE_PARAM)
 def moment(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """The first moment, exactly, and the existence a mean below one buys."""
     from ..moment import NotAMoment, certify
@@ -470,6 +473,7 @@ def reduce_parametric(spec, limits: Limits | None = None,
               "objects": out["objects_text"]})
 
 
+@honours_timeout("solve", ENGINE_EXACT)
 def linear_system(spec, limits: Limits | None = None,
                   spec_path: str = "") -> Result:
     """`A x = b` exactly, with a witness whichever way it goes."""
@@ -509,6 +513,7 @@ def linear_system(spec, limits: Limits | None = None,
                         "solution": out["solution"]})
 
 
+@honours_timeout("quotient", ENGINE_ORBIT)
 def equitable_quotient(spec, limits: Limits | None = None,
                        spec_path: str = "") -> Result:
     """The quotient as an equivalence: same attainable values, by two maps."""
@@ -678,6 +683,7 @@ def pin(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                   meta={"value": None, "lower": L, "upper": X})
 
 
+@honours_timeout("assign", ENGINE_COVER)
 def assign(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """The largest assignment of items to receivers, and the Hall set that
     proves no larger one exists; against a target, met or refuted."""
@@ -731,6 +737,15 @@ def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     res = _nonneg(spec, limits, spec_path)
     if res.status is not Status.OUT_OF_THEORY:
         res.meta.setdefault("method", "bernstein")
+    cl = (res.certificate.payload.get("cleared")
+          if res.certificate is not None else None)
+    if cl:
+        from ..polynomials import Poly as _P
+
+        den = _P.parse(tuple(res.certificate.payload["parameters"]), cl["denominator"])
+        res.detail = (res.detail or "").rstrip(". ") + ". " + t(
+            "nonneg.cleared", d=str(den), sign=">" if cl["orientation"] == 1 else "<")
+        res.meta["cleared"] = {"denominator": str(den), "orientation": cl["orientation"]}
     return res
 
 
@@ -776,8 +791,32 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             return Poly.const(ring, x)
         return Poly.from_z3(x, ring)
 
+    cleared = None
     try:
-        poly = P(spec.poly)
+        if getattr(spec, "clear_denominators", False) and not isinstance(
+                spec.poly, (Poly, int, Fraction)):
+            from ..polynomials import rational_function
+
+            num, den = rational_function(spec.poly, ring)
+            poly = num
+            if den.degree > 0:
+                # THE DIVISOR'S SIGN, PROVED, AND THE ORIENTATION WITH IT:
+                # N / D >= 0 is N >= 0 where D > 0 and -N >= 0 where D < 0.
+                # A user's canonical divisor was negative and the first
+                # positivity proof was of the wrong polynomial.
+                if any(hi is None for _lo, hi in box.values()):
+                    return refuse(t("nonneg.clear_open"))
+                depth = max(0, int(spec.subdivide or 0))
+                orient, (ok, dtree) = 1, bernstein.positive(den, box, depth)
+                if not ok:
+                    orient, (ok, dtree) = -1, bernstein.positive(den.scaled(-1), box, depth)
+                if not ok:
+                    return refuse(t("nonneg.denominator_sign", d=str(den)))
+                poly = num.scaled(orient)
+                cleared = {"numerator": num.serialize(), "denominator": den.serialize(),
+                           "orientation": orient, "denominator_tree": dtree}
+        else:
+            poly = P(spec.poly)
         conditions = [(str(n), P(g)) for n, g in (spec.region or [])]
     except (ValueError, TypeError, KeyError) as e:
         return refuse(e)
@@ -786,6 +825,8 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                        for n, (lo, hi) in box.items()},
                "region": {n: g.serialize() for n, g in conditions},
                "title": spec.title}
+    if cleared is not None:
+        payload["cleared"] = cleared
     if any(hi is None for _lo, hi in box.values()):
         return _with_method(
             _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path),
@@ -1139,6 +1180,7 @@ def capacity_profile(spec, limits: Limits | None = None,
               "piecewise": [p["value"] for p in out["piecewise"]]})
 
 
+@honours_timeout("semigroup", ENGINE_SEMIGROUP)
 def affine_semigroup(spec, limits: Limits | None = None,
                     spec_path: str = "") -> Result:
     """The finite questions about `S = N.a_1 + ... + N.a_k`, each with its
@@ -1189,13 +1231,35 @@ def affine_semigroup(spec, limits: Limits | None = None,
         detail += " -- " + t("engine.semigroup.redundant",
                              n=len(out["redundant"]))
 
+    # EACH CLAIM WITH ITS OWN ANSWER. The run's status is one word for many
+    # questions, and a client read UNSAT as "every point failed" when one of
+    # them was a membership.
+    claims = {}
+    for name, e in sorted(out["points"].items()):
+        claims[name] = ("member" if e["in_semigroup"] is True
+                        else "not_member" if e["in_semigroup"] is False
+                        else "undecided")
     meta = {"generators": len(out["order"]), "rank": out["rank"],
             "dimension": out["dimension"], "pointed": True,
             "backend": out["backend"],
             "minimal": out["minimal"],
             "not_normal": out["not_normal"],
             "witnesses": list(out["normality_witnesses"]),
-            "redundant": sorted(out["redundant"])}
+            "redundant": sorted(out["redundant"]),
+            "points": claims,
+            "profiles": {n: pr["minimum"] for n, pr in out["profiles"].items()}}
+    if claims:
+        detail += " -- " + t("engine.semigroup.claims",
+                             member=sum(v == "member" for v in claims.values()),
+                             not_member=sum(v == "not_member" for v in claims.values()),
+                             undecided=sum(v == "undecided" for v in claims.values()))
+    for n, pr in sorted(out["profiles"].items()):
+        detail += " -- " + (
+            t("engine.semigroup.profile", name=n, k=pr["minimum"],
+              below=len(pr["excluded"])) if pr["minimum"] is not None
+            else t("engine.semigroup.profile_none", name=n, up_to=pr["up_to"])
+            if pr["undecided"] is None
+            else t("engine.semigroup.profile_undecided", name=n, k=pr["undecided"]))
 
     hb = out.get("hilbert")
     if hb is not None:
@@ -1209,11 +1273,18 @@ def affine_semigroup(spec, limits: Limits | None = None,
         else:
             detail += " -- " + t("engine.semigroup.hilbert_unknown")
 
+    timed = any(e.get("why_unknown") == "time" for e in out["points"].values())
+    if timed:
+        # What WAS decided travels in the certificate; the run says it stopped.
+        return Result("semigroup", Status.TIMEOUT, Verdict.INCONCLUSIVE,
+                      ENGINE_SEMIGROUP, ms, cert,
+                      detail=t("engine.semigroup.timeout") + " " + detail, meta=meta)
     return Result(
         "semigroup", Status.UNSAT, Verdict.PROVED, ENGINE_SEMIGROUP, ms, cert,
         detail=detail, meta=meta)
 
 
+@honours_timeout("cone", ENGINE_TORIC)
 def toric_cone(spec, limits: Limits | None = None,
                spec_path: str = "") -> Result:
     """The local data of a cone: primitivity, multiplicity, height,
@@ -1278,6 +1349,7 @@ def variable_range(spec, var, limits: Limits | None = None,
               "lower": out["lower"]["bound"], "upper": out["upper"]["bound"]})
 
 
+@honours_timeout("cycle", ENGINE_CYCLE)
 def dependency_cycle(spec, limits: Limits | None = None,
                      spec_path: str = "") -> Result:
     """Compose the declared growth classes around the chain and close it."""
@@ -1422,6 +1494,7 @@ def integer_matrix(spec, limits: Limits | None = None,
                         "invariants": out.get("invariants")})
 
 
+@honours_timeout("matrix", ENGINE_LATTICE)
 def symmetric_inertia(spec, limits: Limits | None = None,
                       spec_path: str = "") -> Result:
     """The inertia of a symmetric rational matrix, by a congruence `S A S^T =
@@ -1472,6 +1545,7 @@ def symmetric_inertia(spec, limits: Limits | None = None,
                   meta=meta)
 
 
+@honours_timeout("reduce", ENGINE_PARAM)
 def reduce_symmetry(spec, limits: Limits | None = None,
                     spec_path: str = "") -> Result:
     """Check the group, then quotient the program by its orbits."""
@@ -1504,6 +1578,7 @@ def reduce_symmetry(spec, limits: Limits | None = None,
                         "reduced_rows": out["reduced_rows"]})
 
 
+@honours_timeout("ratio", ENGINE_PARAM)
 def ratio(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """A rational-function inequality, for every parameter at once, no solver."""
     from ..ratio import NotARatio, certify
@@ -1685,6 +1760,7 @@ def _chosen(cnf, got) -> list:
     return sorted(out)
 
 
+@honours_timeout("peak", ENGINE_PARAM)
 def peak(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """The best integer choice, for every parameter value at once."""
     from ..peak import NotAPeak, certify
@@ -1736,6 +1812,7 @@ def peak(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                         "floor": floor})
 
 
+@honours_timeout("parametric", ENGINE_PARAM)
 def parametric(spec, limits: Limits | None = None,
                spec_path: str = "") -> Result:
     """`opt(p) <= b(p).y` for every p at or above the floor, or why not."""
@@ -2344,6 +2421,158 @@ def sos(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
 # ---------------------------------------------------------------------------
 
 
+ENGINE_ROLES = "certo/role-transport"
+
+
+@honours_timeout("roles", ENGINE_ROLES)
+def roles(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """Roles changed on one graph: the automorphism that carries them, or
+    what stops one."""
+    from .. import roles as R
+    from ..certificate import role_transport_certificate
+
+    t0 = time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    try:
+        E, V, before, after, sigma, props = R.normalise(
+            spec.edges, spec.vertices, spec.roles, spec.roles_after,
+            spec.mapping, spec.properties)
+    except (R.NotRoles, ValueError, TypeError) as e:
+        return Result("roles", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_ROLES, ms(), None, detail=str(e))
+    if after is None and sigma is None:
+        return Result("roles", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_ROLES, ms(), None, detail=t("roles.nothing_to_move"))
+    proposed = False
+    if sigma is None:
+        sigma = R.find_mapping(E, V, before, after)
+        proposed = True
+        if sigma is None:
+            return Result("roles", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                          ENGINE_ROLES, ms(), None, detail=t("roles.none_found"))
+    if after is None:
+        after = {n: sorted(sigma.get(v, v) for v in vs) for n, vs in before.items()}
+    got = R.check(E, V, before, after, sigma, props)
+    meta = {"vertices": len(V), "edges": len(E), "mapping_found": proposed,
+            "automorphism": got["automorphism"], "roles_onto": got["roles_onto"]}
+    failed = [" ".join(map(str, r["property"])) for r in got["properties"]
+              if not (r["before"] and r["after"])]
+    if not got["bijective"]:
+        return Result("roles", Status.SAT, Verdict.REFUTED, ENGINE_ROLES, ms(), None,
+                      detail=t("roles.not_bijective"), meta=meta)
+    if not got["automorphism"]:
+        return Result("roles", Status.SAT, Verdict.REFUTED, ENGINE_ROLES, ms(), None,
+                      detail=t("roles.changes_graph", n=got["lost_edges"]), meta=meta)
+    if not got["roles_onto"]:
+        return Result("roles", Status.SAT, Verdict.REFUTED, ENGINE_ROLES, ms(), None,
+                      detail=t("roles.not_onto"), meta=meta)
+    if failed:
+        return Result("roles", Status.SAT, Verdict.REFUTED, ENGINE_ROLES, ms(), None,
+                      detail=t("roles.property_fails", names="; ".join(failed[:3])),
+                      meta=dict(meta, failed=failed))
+    payload = {"vertices": V, "edges": sorted(sorted(e) for e in E),
+               "roles": before, "roles_after": after,
+               "mapping": {v: sigma[v] for v in sorted(sigma)},
+               "properties": props, "results": got["properties"],
+               "title": spec.title}
+    cert = role_transport_certificate(payload).stamp(spec_path or None)
+    return Result("roles", Status.UNSAT, Verdict.PROVED, ENGINE_ROLES, ms(), cert,
+                  detail=t("roles.proved", n=len(V), m=len(E), k=len(props),
+                           how=t("roles.found") if proposed else t("roles.given")),
+                  meta=meta)
+
+
+ENGINE_COVERING = "certo/bernstein-covering"
+
+
+@honours_timeout("covering", ENGINE_COVERING)
+def covering(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """A box, conditions and alternative obligations: the leaves, each with
+    its reason, or the leaves left unresolved, or a counterexample."""
+    from fractions import Fraction
+
+    from .. import covering as C
+    from ..budget import tick
+    from ..certificate import conditioned_cover_certificate
+    from ..obligation import _obligations
+
+    t0 = time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+
+    def refuse(msg):
+        return Result("covering", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVERING, ms(), None, detail=str(msg))
+
+    try:
+        ring = tuple(spec.domain)
+        domain = C._box(spec.domain, ring)
+
+        def P(x):
+            if isinstance(x, Poly):
+                if x.vars != ring:
+                    raise C.NotACovering(t("poly.ring_mismatch", got=", ".join(x.vars),
+                                           want=", ".join(ring)))
+                return x
+            if isinstance(x, (int, Fraction)):
+                return Poly.const(ring, x)
+            return Poly.from_z3(x, ring)
+
+        obls = [(n, rel, P(e)) for n, rel, e in _obligations(spec.obligations)]
+        if not obls:
+            return refuse(t("covering.no_obligations"))
+        if any(rel not in (">", ">=") for _n, rel, _e in obls):
+            return refuse(t("covering.relation"))
+        conds = [(str(n), P(g)) for n, g in (spec.conditions or [])]
+        roots = [C._box(b, ring) for b in spec.leaves] if spec.leaves else None
+        if roots:
+            ok, why = C.tiles(domain, roots)
+            if not ok:
+                return refuse(t("covering.supplied_tiling", why=why))
+    except (C.NotACovering, ValueError, TypeError, KeyError) as e:
+        return refuse(e)
+
+    leaves = C.build(domain, obls, conds, max(0, int(spec.subdivide or 0)),
+                     roots=roots, deadline_check=lambda: tick(64))
+    ce = C.counterexample(leaves, obls, conds)
+    unresolved = [l for l in leaves if l["by"] == "unresolved"]
+    holds = False if ce is not None else (None if unresolved else True)
+    payload = {"parameters": list(ring), "domain": C._text(domain),
+               "conditions": {n: g.serialize() for n, g in conds},
+               "obligations": {n: {"relation": rel, "poly": q.serialize()}
+                               for n, rel, q in obls},
+               "leaves": [{"box": C._text(l["box"]), "by": l["by"], "name": l["name"]}
+                          for l in leaves],
+               "holds": holds,
+               "counterexample": None if ce is None else {
+                   "point": {n: str(v) for n, v in ce.items()}},
+               "title": spec.title}
+    depth = int(spec.subdivide or 0)
+    cert = conditioned_cover_certificate(payload).stamp(spec_path or None)
+    counts = {"obligation": {}, "excluded": {}}
+    for l in leaves:
+        if l["by"] in counts:
+            counts[l["by"]][l["name"]] = counts[l["by"]].get(l["name"], 0) + 1
+    meta = {"leaves": len(leaves), "unresolved": len(unresolved),
+            "by_obligation": counts["obligation"], "excluded_by": counts["excluded"],
+            "unresolved_boxes": [C._text(l["box"]) for l in unresolved[:5]]}
+    if ce is not None:
+        meta["counterexample"] = {n: str(v) for n, v in ce.items()}
+        return Result("covering", Status.SAT, Verdict.REFUTED, ENGINE_COVERING, ms(),
+                      cert, detail=t("covering.refuted", point=", ".join(
+                          "{} = {}".format(n, v) for n, v in ce.items())), meta=meta)
+    if unresolved:
+        return Result("covering", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                      ENGINE_COVERING, ms(), cert,
+                      detail=t("covering.unresolved", n=len(unresolved), total=len(leaves),
+                               depth=depth), meta=meta)
+    return Result("covering", Status.UNSAT, Verdict.PROVED, ENGINE_COVERING, ms(), cert,
+                  detail=t("covering.proved", n=len(leaves),
+                           obligations=", ".join("{} {}".format(n, k) for n, k in
+                                                 sorted(counts["obligation"].items())),
+                           excluded=sum(counts["excluded"].values())), meta=meta)
+
+
+@honours_timeout("number", ENGINE_NUM)
 def number(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     from .. import numbers
 

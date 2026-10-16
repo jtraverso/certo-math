@@ -60,6 +60,8 @@ es entero.
 | `ProofSpec` | `compose` |
 | `InductSpec` | `induct` |
 | `IdealSpec` | `ideal` |
+| `CoveringSpec` | `covering` |
+| `RoleSpec` | `roles` |
 | `EliminateSpec` | `eliminate` |
 | `ParametricSpec` | `parametric` |
 | `PeakSpec` | `peak` |

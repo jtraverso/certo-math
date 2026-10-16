@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The sixty-one kinds
+## The sixty-four kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -85,6 +85,9 @@ answers"*. The table below is the map; the header is the territory.
 | `cegis_none` | NO implementation exists: its constraints and the contract at the counterexamples are unsatisfiable; the counterexamples assign inputs only | no, re-solves |
 | `propositional_refutation` | a Boolean core is contradictory: each name with its formula, re-encoded by certo, and a DRUP proof | **yes**, unit propagation |
 | `sat_optimum` | the optimum of a cover, partition or packing: the chosen parts attain it, and a DRUP proof refutes certo's own encoding of one part fewer (or more) | **yes**, counting and unit propagation |
+| `conditioned_cover` | a box tiled by leaves, each with an obligation that keeps its sign there or a condition negative there | **yes**, Bernstein coefficients and the tiling |
+| `role_transport` | an automorphism of a graph carrying each role onto its new one, with the declared properties before and after | **yes**, edge sets compared |
+| `synth_optimum` | the best candidate within a template: one synthesis attains the value, one refuted search shows nothing better meets the contract | no, both halves ask a solver |
 | `recurrence_table` | the minimum number of candidates partitioning (or covering) a universe: every state of the recurrence over masks, each the minimum over its children | **yes**, comparing integers |
 | `repair_refusal` | a change of a partition is NOT admissible, at the step and for the reasons recorded -- re-checked by the rules that accept repairs | **yes**, counting |
 | `synth_proved` | the bounded discovery **and** the universal statement | no, re-solves |

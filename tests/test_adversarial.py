@@ -74,6 +74,16 @@ from certo.tamper import probe as _probe                            # noqa: E402
 #: `used`, `unused` and hypothesis labels; a core's names; polynomial
 #: exponents read in a ring of the wrong size; duplicated variable names.
 STRUCTURAL_BENIGN = {
+    # A covering's leaves in another order are the same tiling; a value
+    # relabelled everywhere is another box, consistently; an obligation with
+    # a term dropped (or emptied to 0 >= 0) is ANOTHER obligation, still true
+    # on its leaves -- the certificate is about what it carries, and
+    # `verify --obligation SPEC` is what ties it to the one you meant.
+    # A graph with an edge less is another graph, and the roles may well be
+    # transported on it too: `verify --obligation SPEC` ties it to yours.
+    'role_transport': {'edges:short'},
+    'conditioned_cover': {'=1:coherent', 'leaves:reversed',
+                          'obligations.F.poly:dropkey', 'obligations.U.poly:empty'},
     # the evaluations are the search's trace; the ends are what is checked
     'bisect': {
         '=5:coherent', 'bad_cert.provenance:dropkey',
@@ -110,6 +120,27 @@ STRUCTURAL_BENIGN = {
     },
     # the same counterexample twice is the same instance twice
     'cegis_none': {'counterexamples:dup'},
+    # A number rewritten everywhere is another problem, consistently, with
+    # its own optimum; a counterexample with its input dropped leaves the
+    # contract's instance with that input free -- still a consequence of the
+    # contract, so the refutation of a better value stays sound.
+    # The halves keep their own: the found candidate's counterexamples are
+    # the loop's history (as `cegis`'s), the refuted search's instances are
+    # each a consequence of the contract in any order or number, and a nested
+    # provenance is a record, not a claim.
+    'synth_optimum': {'=0:coherent', '=2:coherent', '=5:coherent',
+                      'below.payload.counterexamples.*:dropkey',
+                      'below.payload.counterexamples.*:empty',
+                      'below.payload.counterexamples:dup',
+                      'below.payload.counterexamples:reversed',
+                      'below.provenance:dropkey', 'below.provenance:empty',
+                      'found.provenance:dropkey', 'found.provenance:empty'}
+                     | {'found.payload.' + lab for lab in (
+                         'counterexamples.*.x:dup', 'counterexamples.*.x:empty',
+                         'counterexamples.*.x:reversed', 'counterexamples.*.x:short',
+                         'counterexamples.*:dropkey', 'counterexamples.*:empty',
+                         'counterexamples:dup', 'counterexamples:empty',
+                         'counterexamples:reversed', 'counterexamples:short')},
     # as a recurrence table's: the candidates ARE the problem -- reordered or
     # repeated they are the same sets, and one not chosen made smaller is
     # another problem, whose optimum the re-encoded refutation still proves
@@ -365,6 +396,12 @@ STRUCTURAL_BENIGN = {
         'lower.payload.edges:reversed',
     },
     'affine_semigroup': {
+        # a profile dropped (or emptied) is a claim withdrawn: its points stay,
+        # each checked; a profile point's last field is the normality flag,
+        # which a missing one reads as False -- as for every other point
+        'profiles:dropkey', 'profiles:empty',
+        'points.q[0]:dropkey', 'points.q[1]:dropkey', 'points.q[2]:dropkey',
+        'points.q[3]:dropkey', 'points.q[4]:dropkey',
         'points.outside:dropkey', 'points.reachable:dropkey',
         'points.w.group_coefficients:negative', 'points:dropkey',
     },
@@ -1487,6 +1524,10 @@ EXAMPLE_FIXTURES = [
     ("repair_refused.py", "cover", ()),
     ("hall_drat.py", "prove", ("--drat",)),
     ("triangle_cover_sat.py", "cover", ("--maximum",)),
+    ("covering_physical.py", "covering", ()),
+    ("roles_square.py", "roles", ()),
+    ("synth_minimum.py", "synth", ()),
+    ("semigroup_profile.py", "semigroup", ()),
     ("core_matrix.py", "core", ()),
     ("dependency_cycle.py", "cycle", ()),
     ("equitable_quotient.py", "quotient", ()),
@@ -1556,6 +1597,9 @@ EXAMPLE_SKIPS = {
     "lean_binding": ("certificate", "declaration", "spec"),  # path, Lean name, record
     "orbit_witnesses": ("sweep",),    # `mutate` reaches the nested title
     "branch_frontier": ("reason",),   # why the search stopped
+    # an edge less is another graph, on which the roles may move too;
+    # `verify --obligation SPEC` is what ties the certificate to yours
+    "role_transport": ("edges",),
 }
 
 #: The kinds the hand-built fixtures above cover; with EXAMPLE_FIXTURES and

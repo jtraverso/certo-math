@@ -668,6 +668,8 @@ def in_semigroup(gens, v, u, max_nodes=MAX_NODES):
     seen = {start: []}
     frontier = [(start, 0)]
     nodes = 0
+    from . import clock
+
     while frontier:
         nxt = []
         for point, deg in frontier:
@@ -677,6 +679,12 @@ def in_semigroup(gens, v, u, max_nodes=MAX_NODES):
                     return {"coefficients": None, "gave_up": True,
                             "why": "budget", "nodes": nodes,
                             "bound": bound}
+                # THE RUN'S CLOCK, every 4096 nodes: `Limits(timeout_ms=1)`
+                # used to finish the whole search anyway. Stopping is a
+                # give-up, never a "no".
+                if not nodes & 4095 and clock.expired():
+                    return {"coefficients": None, "gave_up": True,
+                            "why": "time", "nodes": nodes, "bound": bound}
                 cdeg = deg + step[j]
                 if cdeg > limit:
                     continue
@@ -906,6 +914,49 @@ def certify(spec, max_nodes=MAX_NODES) -> dict:
             and entry["in_semigroup"] is False)
         points[str(name)] = entry
 
+    # THE LEAST k WITH (.., k, ..) IN S, asked as a profile: the point with
+    # one coordinate free, tried from `from` upwards. Each k below the answer
+    # is a NON-membership, redone by `verify`; the answer is a membership,
+    # with its coefficients. Users prepared these points by hand.
+    profiles = {}
+    for name, req in sorted(dict(getattr(spec, "profiles", {}) or {}).items()):
+        name = str(name)
+        template = list((req or {}).get("point") or [])
+        free = [i for i, x in enumerate(template) if x is None]
+        if len(template) != d or len(free) != 1:
+            raise NotASemigroup(_t("semigroup.profile_shape", name=name, want=d))
+        lo = int((req or {}).get("from", 0))
+        hi = (req or {}).get("up_to")
+        if hi is None:
+            raise NotASemigroup(_t("semigroup.profile_up_to", name=name))
+        hi = int(hi)
+        i = free[0]
+        found, excluded, undecided = None, [], None
+        for k in range(lo, hi + 1):
+            v = [k if j == i else int(x) for j, x in enumerate(template)]
+            sg = in_semigroup(A, v, u, max_nodes) if graded else {
+                "coefficients": None, "gave_up": True, "why": "ungraded"}
+            pname = "{}[{}]".format(name, k)
+            member = (None if sg.get("gave_up")
+                      else sg.get("coefficients") is not None)
+            points[pname] = {
+                "point": v, "in_cone": None, "cone_coefficients": None,
+                "separating": None, "in_group": None, "group_coefficients": None,
+                "in_semigroup": member,
+                "semigroup_coefficients": sg.get("coefficients"),
+                "degree": sg.get("degree"), "search_bound": sg.get("bound"),
+                "why_unknown": sg.get("why"), "refutes_normality": False}
+            if member is None:
+                undecided = k
+                break
+            if member:
+                found = k
+                break
+            excluded.append(k)
+        profiles[name] = {"point": template, "free": i, "from": lo, "up_to": hi,
+                          "minimum": found, "excluded": excluded,
+                          "undecided": undecided}
+
     # A PROPOSED minimal generating set, checked rather than computed. Unlike
     # normality this is DECIDED: for a pointed semigroup the minimal
     # generating set is unique and is the set of irreducibles, so the two
@@ -942,6 +993,7 @@ def certify(spec, max_nodes=MAX_NODES) -> dict:
         "minimal": (None if not graded else not redundant),
         "redundant": redundant,
         "points": points,
+        "profiles": profiles,
         "not_normal": bool(witnesses),
         "normality_witnesses": witnesses,
         # Said in the payload rather than only in the prose, because a reader

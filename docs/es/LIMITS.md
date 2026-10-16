@@ -173,3 +173,11 @@ reconstrucción racional, LDLᵀ exacto.
 
 **¿Puedo usarlo sin conexión y sin nada más instalado?**
 Sí. `z3-solver` y `pulp` traen sus binarios; el resto es Python puro.
+
+**Cada motor respeta el presupuesto de tiempo (0.32).** Diecisiete motores
+recibían un argumento `limits` y nunca lo leían -- un semigrupo al que se le
+pedía `Limits(timeout_ms=1)` terminaba su búsqueda entera. Cada uno corre
+ahora bajo el menor entre su propio `timeout_ms` y el plazo de la ejecución,
+no empieza si ya pasó, y se detiene dentro de sus bucles largos; `semigroup`
+conserva lo que decidió y marca el resto `undecided`. Un test corre cada motor
+pasado su plazo.
