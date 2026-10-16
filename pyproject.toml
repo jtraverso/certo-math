@@ -36,10 +36,13 @@ classifiers = [
 # the `cbc` extra brings CBC back (the `cbcbox` wheel, for Linux, macOS and
 # Windows) -- without it the integer solves fall to HiGHS, or refuse. The
 # upper bound is the next major nobody has run the suite against yet.
+# 4.0.1 (a compiled wheel) imports numpy without declaring it: a minimal
+# install could not import PuLP at all, and `doctor` said so. Excluded until
+# a release declares what it imports.
 dependencies = [
     "z3-solver>=4.12",
     "pulp>=2.7,<4; python_version < '3.12'",
-    "pulp[cbc]>=2.7,<5; python_version >= '3.12'",
+    "pulp[cbc]>=2.7,<5,!=4.0.1; python_version >= '3.12'",
 ]
 
 [project.urls]

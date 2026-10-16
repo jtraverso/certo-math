@@ -86,7 +86,7 @@ STRUCTURAL_BENIGN = {
                           'obligations.F.poly:dropkey', 'obligations.U.poly:empty'},
     # the evaluations are the search's trace; the ends are what is checked
     'bisect': {
-        '=5:coherent', 'bad_cert.provenance:dropkey',
+        '=1:coherent', '=5:coherent', 'bad_cert.provenance:dropkey',
         'bad_cert.provenance:empty', 'evaluations.*:dropkey',
         'evaluations.*:empty', 'evaluations:dup', 'evaluations:empty',
         'evaluations:reversed', 'evaluations:short',
