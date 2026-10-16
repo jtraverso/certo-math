@@ -94,24 +94,48 @@ def normalise(edges, vertices, roles, roles_after, mapping, properties):
     return E, sorted(V), roles, after, sigma, props
 
 
-def find_mapping(E, V, roles, after):
-    """An automorphism sending each role onto its new self, proposed by
-    networkx's VF2 (or None) -- checked below like any supplied one."""
-    import networkx as nx
-    from networkx.algorithms import isomorphism
+def find_mapping(E, V, roles, after, max_nodes=2_000_000):
+    """An automorphism sending each role onto its new self, or None -- a
+    backtracking search of certo's own (no networkx), pruned by role labels
+    and degrees, and checked below like any supplied mapping. Exhaustive
+    within `max_nodes`; past it, None says "not found", not "none exists"."""
+    adj = {v: set() for v in V}
+    for e in E:
+        a, b = tuple(e)
+        adj[a].add(b)
+        adj[b].add(a)
 
-    def labelled(rs):
-        G = nx.Graph()
-        for v in V:
-            G.add_node(v, roles=tuple(sorted(n for n, vs in rs.items() if v in vs)))
-        G.add_edges_from(tuple(e) for e in E)
-        return G
+    def label(rs, v):
+        return tuple(sorted(n for n, vs in rs.items() if v in vs))
 
-    gm = isomorphism.GraphMatcher(labelled(roles), labelled(after),
-                                  node_match=lambda a, b: a["roles"] == b["roles"])
-    for m in gm.isomorphisms_iter():
-        return dict(m)
-    return None
+    src = {v: (label(roles, v), len(adj[v])) for v in V}
+    dst = {v: (label(after, v), len(adj[v])) for v in V}
+    if sorted(src.values()) != sorted(dst.values()):
+        return None
+    order = sorted(V, key=lambda v: (sum(1 for w in V if src[w] == src[v]), -len(adj[v]), v))
+    sigma, used, nodes = {}, set(), [0]
+
+    def extend(k):
+        if k == len(order):
+            return True
+        v = order[k]
+        for w in V:
+            nodes[0] += 1
+            if nodes[0] > max_nodes:
+                return False
+            if w in used or dst[w] != src[v]:
+                continue
+            if any((sigma[u] in adj[w]) != (u in adj[v]) for u in sigma):
+                continue
+            sigma[v] = w
+            used.add(w)
+            if extend(k + 1):
+                return True
+            del sigma[v]
+            used.discard(w)
+        return False
+
+    return dict(sigma) if extend(0) else None
 
 
 def check(E, V, roles, after, sigma, props) -> dict:

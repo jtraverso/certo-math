@@ -1749,7 +1749,7 @@ class RoleSpec:
 
     The certificate is a permutation of the vertices that maps the edge set
     onto itself and each role onto its new one -- given as `mapping`, or
-    found (networkx proposes; the check below is certo's) -- with every
+    found (a backtracking search proposes; the check is certo's) -- with every
     declared property checked before and after.
     """
 

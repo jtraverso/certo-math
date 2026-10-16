@@ -201,7 +201,7 @@ completas, con lo que cada uno **no** establece, en
 | `range` | El intervalo admisible de una variable sobre el régimen, no un punto suyo | dual LP exacto | **una combinación de Farkas en cada extremo**, sin solver |
 | `cycle` | Un parámetro que depende de sí mismo: compone las clases de crecimiento y cierra el ciclo | escalera de crecimiento | **la cadena, sus clases y la única comparación**, sin solver |
 | `covering` | Una caja cortada en hojas: en cada una una obligación mantiene su signo o una condición la excluye | coeficientes de Bernstein, bisección | **las hojas, cada una con su razón, y que teselan la caja**, sin solver |
-| `roles` | Roles intercambiados en un grafo sin cambiar el grafo | VF2 propone | **el automorfismo, y cada propiedad antes y después**, sin solver |
+| `roles` | Roles intercambiados en un grafo sin cambiar el grafo | búsqueda por rol y grado | **el automorfismo, y cada propiedad antes y después**, sin solver |
 | `bind` | Ata un certificado a la declaración Lean que debe justificarlo, y comprueba que lo hace | implicación Z3 | **la hipótesis, el enunciado, y si uno cubre al otro** |
 | `lint` | Comprueba un spec antes de gastar el cómputo en él | — | — |
 | `status` | Dónde está una demostración: demostrado, debido, hueco, obsoleto | — | — |

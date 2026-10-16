@@ -201,7 +201,7 @@ with what each one does **not** establish, in
 | `range` | The admissible interval of one variable over the regime, not one point of it | exact LP dual | **a Farkas combination at each end**, solver-free |
 | `cycle` | A parameter that depends on itself: compose the growth classes and close the loop | growth ladder | **the chain, its classes and the one comparison**, solver-free |
 | `covering` | A box cut into leaves: on each one an obligation keeps its sign or a condition excludes it | Bernstein coefficients, halving | **the leaves, each with its reason, and that they tile the box**, solver-free |
-| `roles` | Roles exchanged on one graph without changing the graph | VF2 proposes | **the automorphism, and every property before and after**, solver-free |
+| `roles` | Roles exchanged on one graph without changing the graph | backtracking by role and degree | **the automorphism, and every property before and after**, solver-free |
 | `bind` | Tie a certificate to the Lean declaration meant to justify it, and check it does | Z3 entailment | **the hypothesis, the statement, and whether one covers the other** |
 | `lint` | Check a spec before spending the compute on it | — | — |
 | `status` | Where a proof stands: proved, owed, hollow, stale | — | — |

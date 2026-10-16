@@ -12288,7 +12288,8 @@ def test_a_row_named_like_an_edge_keeps_its_dual():
             prob, _x = engine._build(s, A, b, c, names)
             solver, name = engine._solver(LIM, integral=False)
             prob.solve(solver)
-            return engine._duals(prob, names, negate=engine._flips_duals(name))
+            return engine._oriented(prob, engine._duals(
+                prob, names, negate=engine._flips_duals(name)), b)
         duals = _with_lp_solver(prefer, run)
         assert all(d is not None for d in duals), (prefer, duals)
         assert abs(sum(duals) - 1.5) < 1e-6, duals

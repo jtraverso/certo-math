@@ -2056,7 +2056,7 @@ async def covering(spec_path: str | None = None, spec_source: str | None = None,
 @mcp.tool(description=(
     "ROLES: roles on the vertices of ONE graph, changed without changing the "
     "graph. The certificate is a permutation that maps the edge set onto "
-    "itself and each old role onto its new one (given, or proposed by VF2 and "
+    "itself and each old role onto its new one (given, or found by a search and "
     "checked), with every declared property -- independent, clique, "
     "complete_to, anticomplete_to, neighbourhood_within, disjoint -- checked "
     "before and after. A scalar identity like q' = q is not this."))

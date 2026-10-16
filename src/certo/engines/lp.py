@@ -272,6 +272,24 @@ def _row(i) -> str:
     return "r{}".format(i)
 
 
+def _oriented(prob, raw, b):
+    """The duals with the sign that makes `b.y` the optimum, MEASURED on this
+    solve: the convention moved again (PuLP 4 with highspy 1.15 reports
+    +1/2 where the version table above expects -1/2), and a table of
+    versions is a guess about the next one. Strong duality says which sign
+    is right; an LP's optimum is `b.y` and not `-b.y`."""
+    if not raw or any(v is None for v in raw):
+        return raw
+    try:
+        value = float(pulp.value(prob.objective))
+    except (TypeError, ValueError):
+        return raw
+    s = sum(float(bi) * yi for bi, yi in zip(b, raw))
+    if abs(s - value) > abs(s + value) + 1e-9:
+        return [-v for v in raw]
+    return raw
+
+
 def _duals(prob, cons_names, negate=False):
     """CBC's duals, with `None` where it gave none.
 
@@ -432,7 +450,7 @@ def _opt_vectors(spec, lim, t0):
                       detail=t("engine.opt.cbc", status=st, solver=name),
                       meta={"lp_solver": engine})
     x_float = [float(v.value() or 0.0) for v in xs]
-    raw = _duals(prob, names, negate=_flips_duals(name))
+    raw = _oriented(prob, _duals(prob, names, negate=_flips_duals(name)), b)
     have = all(v is not None for v in raw)
     y_float = [0.0 if v is None else v for v in raw]
     alts = ([[-v for v in y_float], [abs(v) for v in y_float]] if have else [])
@@ -852,7 +870,8 @@ def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
                    if relax_status == "Optimal" else sol_float)
     else:
         dual_src, relax_x, dual_name = prob, sol_float, main_name
-    dual_raw = (_duals(dual_src, cons_names, negate=_flips_duals(dual_name))
+    dual_raw = (_oriented(dual_src, _duals(dual_src, cons_names,
+                                           negate=_flips_duals(dual_name)), b)
                 if relax_status == "Optimal" else [None] * len(cons_names))
     have_duals = all(v is not None for v in dual_raw)
     dual_float = [0.0 if v is None else v for v in dual_raw]

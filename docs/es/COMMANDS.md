@@ -2354,14 +2354,14 @@ sobre sí mismo y cada rol antiguo sobre el nuevo, y cada propiedad declarada
 **Certificado** — `role_transport`, **sin solver**: se comparan conjuntos de
 aristas
 **No establece** — que los roles signifiquen lo que dicen sus nombres, ni nada
-sobre otro grafo. Cuando no se halla permutación, eso es una búsqueda VF2
+sobre otro grafo. Cuando no se halla permutación, eso es una búsqueda
 exhaustiva y no un certificado.
 
 `q' = q`, una identidad escalar, no dice si la configuración con los roles
 nuevos es la misma configuración renombrada; un automorfismo que lleva los
 roles dice exactamente eso, y cada propiedad se transporta con él. Da
-`roles_after` y certo busca la permutación (networkx propone, la comprobación
-es de certo), o da `mapping` y se comprueba.
+`roles_after` y certo busca la permutación (una búsqueda por rol y grado, y
+luego la comprobación), o da `mapping` y se comprueba.
 
 ### `certo bind`
 

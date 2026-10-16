@@ -2303,14 +2303,14 @@ itself and each old role onto its new one, and each declared property
 `neighbourhood_within`) before and after
 **Certificate** — `role_transport`, **solver-free**: edge sets compared
 **Not established** — that the roles mean what their names say, or anything
-about another graph. When no permutation is found, that is an exhaustive VF2
+about another graph. When no permutation is found, that is an exhaustive
 search and not a certificate.
 
 `q' = q`, a scalar identity, says nothing about whether the configuration
 with the new roles is the same configuration renamed; an automorphism that
 carries the roles says exactly that, and every property transports with it.
-Give `roles_after` and certo looks for the permutation (networkx proposes, the
-check is certo's), or give `mapping` and it is checked.
+Give `roles_after` and certo looks for the permutation (a backtracking search
+by role and degree, then the check), or give `mapping` and it is checked.
 
 ### `certo bind`
 

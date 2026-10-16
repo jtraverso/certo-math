@@ -367,7 +367,7 @@
   "roles": {
    "answers": "the permutation of the vertices that maps the edge set onto itself and each old role onto its new one, and each declared property (`independent`, `clique`, `disjoint`, `complete_to`, `anticomplete_to`, `neighbourhood_within`) before and after",
    "certificate": "`role_transport`, **solver-free**: edge sets compared",
-   "not_established": "that the roles mean what their names say, or anything about another graph. When no permutation is found, that is an exhaustive VF2 search and not a certificate.",
+   "not_established": "that the roles mean what their names say, or anything about another graph. When no permutation is found, that is an exhaustive search and not a certificate.",
    "question": "Can these roles be exchanged without changing the graph?",
    "spec": "`RoleSpec`"
   },
@@ -796,7 +796,7 @@
   "roles": {
    "answers": "la permutación de los vértices que lleva el conjunto de aristas sobre sí mismo y cada rol antiguo sobre el nuevo, y cada propiedad declarada (`independent`, `clique`, `disjoint`, `complete_to`, `anticomplete_to`, `neighbourhood_within`) antes y después",
    "certificate": "`role_transport`, **sin solver**: se comparan conjuntos de aristas",
-   "not_established": "que los roles signifiquen lo que dicen sus nombres, ni nada sobre otro grafo. Cuando no se halla permutación, eso es una búsqueda VF2 exhaustiva y no un certificado.",
+   "not_established": "que los roles signifiquen lo que dicen sus nombres, ni nada sobre otro grafo. Cuando no se halla permutación, eso es una búsqueda exhaustiva y no un certificado.",
    "question": "¿Se pueden intercambiar estos roles sin cambiar el grafo?",
    "spec": "`RoleSpec`"
   },
