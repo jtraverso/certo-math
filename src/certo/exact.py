@@ -649,19 +649,6 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
             dense[0] = P.dense() if isinstance(A, Prepared) else A
         return dense[0]
 
-    # 0. THE SOLVER'S OWN BASIS, when it gave one (HiGHS through highspy):
-    # the exact vertex is one elimination away, whatever its denominators.
-    if basis:
-        _late(deadline)
-        got = from_solver_basis(P, basis)
-        if got is not None:
-            rep = check_lp(P, b, c, got[0], got[1])
-            last = rep
-            if rep["ok"]:
-                denom = max((v.denominator for v in list(got[0]) + list(got[1])),
-                            default=1)
-                return got[0], got[1], rep, denom
-
     for denom in ladder:
         _late(deadline)
         x = reconstruct(x_float, denom)
@@ -672,6 +659,22 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
             last = rep
             if rep["ok"]:
                 return x, y, rep, denom
+
+    # 1a. THE SOLVER'S OWN BASIS, when it gave one (HiGHS through highspy):
+    # the exact vertex is one elimination away, whatever its denominators.
+    # AFTER the rounding pass, not before: on a 1048-column node rounding
+    # closes in milliseconds, and the elimination over every row (bounds
+    # included) took seven seconds a node when it ran first.
+    if basis:
+        _late(deadline)
+        got = from_solver_basis(P, basis)
+        if got is not None:
+            rep = check_lp(P, b, c, got[0], got[1])
+            last = rep
+            if rep["ok"]:
+                denom = max((v.denominator for v in list(got[0]) + list(got[1])),
+                            default=1)
+                return got[0], got[1], rep, denom
 
     # 1b. THE FLOAT DUAL'S BASIS, solved exactly. A simplex dual is a basic
     # solution: its non-zero entries and the columns it makes tight determine
