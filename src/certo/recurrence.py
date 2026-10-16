@@ -161,3 +161,108 @@ def check(n, masks, exact, table):
                     table.get(M & ~masks[j], (None,))[0] != v - 1:
                 problems.append(("recurrence.bad_choice", M))
     return problems
+
+
+# --- a PACKING: the most pairwise disjoint candidates ----------------------
+#
+#     g(0) = 0
+#     g(M) = max( g(M - {e}),                         e = lowest(M) unused
+#                 1 + g(M - C)  for C containing e, C inside M )
+#
+# The lowest element of what is left is either in no chosen candidate, or in
+# exactly one, which lies inside what is left: the two cases exhaust every
+# packing, so the maximum is the maximum of the branches. A choice of -1
+# records "e unused".
+
+SKIP = -1
+
+
+def packing_options(M, masks, lowest):
+    e = (M & -M).bit_length() - 1
+    out = [(SKIP, M & ~(1 << e))]
+    for j in lowest[e]:
+        c = masks[j]
+        if not c & ~M:
+            out.append((j, M & ~c))
+    return out
+
+
+def solve_packing(n, masks, max_states=MAX_STATES, deadline=None):
+    """`{mask: (value, choice)}` for the packing recurrence."""
+    lowest = by_lowest(n, masks)
+    table = {0: (0, None)}
+    stack = [(1 << n) - 1]
+    while stack:
+        M = stack[-1]
+        if M in table:
+            stack.pop()
+            continue
+        if deadline is not None and time.monotonic() > deadline:
+            raise TooLarge(_t("recurrence.clock"))
+        opts = packing_options(M, masks, lowest)
+        pending = [child for _j, child in opts if child not in table]
+        if pending:
+            stack.extend(pending)
+            if len(table) + len(stack) > max_states:
+                raise TooLarge(_t("recurrence.too_large", n=max_states))
+            continue
+        best, choice = None, None
+        for j, child in opts:
+            v = table[child][0] + (0 if j == SKIP else 1)
+            if best is None or v > best:
+                best, choice = v, j
+        table[M] = (best, choice)
+        stack.pop()
+    return table
+
+
+def reconstruct_packing(table, masks, n):
+    M, out = (1 << n) - 1, []
+    while M:
+        _v, j = table[M]
+        if j == SKIP:
+            M &= ~(M & -M)
+        else:
+            out.append(j)
+            M &= ~masks[j]
+    return out
+
+
+def check_packing(n, masks, table):
+    """Every entry against the packing recurrence."""
+    lowest = by_lowest(n, masks)
+    full = (1 << n) - 1
+    problems = []
+    if full not in table:
+        problems.append(("recurrence.no_target", full))
+    if table.get(0, (None,))[0] != 0:
+        problems.append(("recurrence.bad_base", 0))
+    for M, (v, j) in table.items():
+        if M == 0:
+            continue
+        if M & ~full:
+            problems.append(("recurrence.outside", M))
+            continue
+        best, missing = None, False
+        for jj, child in packing_options(M, masks, lowest):
+            if child not in table or table[child][0] is None:
+                missing = True
+                break
+            cv = table[child][0] + (0 if jj == SKIP else 1)
+            best = cv if best is None or cv > best else best
+        if missing:
+            problems.append(("recurrence.missing_child", M))
+            continue
+        if v != best:
+            problems.append(("recurrence.not_maximum", M))
+            continue
+        e = M & -M
+        if j == SKIP:
+            ok = table.get(M & ~e, (None,))[0] == v
+        else:
+            ok = (isinstance(j, int) and 0 <= j < len(masks) and not masks[j] & ~M
+                  and bool(masks[j] & e) and table.get(M & ~masks[j], (None,))[0] == v - 1)
+        if not ok:
+            problems.append(("recurrence.bad_choice", M))
+    return problems
+

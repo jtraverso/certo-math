@@ -1,4 +1,4 @@
-"""cover --maximum: nu(G) by SAT, with a proof that one more is impossible.
+"""cover --maximum --sat: nu(G) by SAT, with a proof that one more is impossible.
 
 The octahedron's triangles as a hypergraph on its edges: the most
 edge-disjoint triangles is a maximum PACKING of it. A SAT search finds four;
@@ -7,7 +7,7 @@ DRUP proof that `verify` re-encodes and checks by unit propagation
 (`sat_optimum`). The same route gives a minimum cover or partition past the
 62 elements the recurrence over masks can index:
 
-    certo cover examples/triangle_cover_sat.py --maximum
+    certo cover examples/triangle_cover_sat.py --maximum --sat
 """
 from itertools import combinations
 

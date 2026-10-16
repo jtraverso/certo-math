@@ -457,6 +457,62 @@ def _sparse(A, b, c):
     return Prepared(A, b if b is not None else [0] * len(A), c)
 
 
+def from_solver_basis(A, basis):
+    """`(x, y)` exact on a SOLVER's optimal basis, or None.
+
+    `basis = {"cols": [...], "rows": [...]}`: the basic structural columns
+    and the rows whose slack is basic, as HiGHS reports them. The primal is
+    the basic system `A_B x_B + s_B = b`, the dual `y_i = 0` on a basic slack
+    and `sum_i A_ij y_i = c_j` on a basic column -- two eliminations, with no
+    inference from a float support and no ladder of denominators. Nothing
+    is checked here: `check_lp` decides, as for every other route."""
+    P = _sparse(A, None, None) if not isinstance(A, Prepared) else A
+    m, n = len(P.rows), len(P.c)
+    bc = sorted(set(int(j) for j in basis.get("cols") or []))
+    br = sorted(set(int(i) for i in basis.get("rows") or []))
+    if len(bc) + len(br) != m or any(not 0 <= j < n for j in bc) \
+            or any(not 0 <= i < m for i in br):
+        return None
+    pos = {j: k for k, j in enumerate(bc)}
+    spos = {i: len(bc) + k for k, i in enumerate(br)}
+    M = []
+    for i, row in enumerate(P.rows):
+        r = [Fraction(0)] * (m + 1)
+        for j, a in row:
+            if j in pos:
+                r[pos[j]] = a
+        if i in spos:
+            r[spos[i]] = Fraction(1)
+        r[m] = P.b[i]
+        M.append(r)
+    sol = _eliminate(M, m)
+    if sol is None:
+        return None
+    x = [Fraction(0)] * n
+    for j, k in pos.items():
+        x[j] = sol[k]
+    free = [i for i in range(m) if i not in spos]
+    fpos = {i: k for k, i in enumerate(free)}
+    M2 = []
+    for j in bc:
+        r = [Fraction(0)] * (len(free) + 1)
+        for i, a in P.cols[j]:
+            if i in fpos:
+                r[fpos[i]] = a
+        r[-1] = P.c[j]
+        M2.append(r)
+    if free:
+        sol2 = _eliminate(M2, len(free))
+        if sol2 is None:
+            return None
+    else:
+        sol2 = []
+    y = [Fraction(0)] * m
+    for i, k in fpos.items():
+        y[i] = sol2[k]
+    return x, y
+
+
 def dual_from_basis(A, c, y_float, tol=1e-7):
     """The exact dual on the float dual's basis, or None.
 
@@ -544,7 +600,7 @@ def _late(deadline):
 
 
 def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
-            deadline=None):
+            deadline=None, basis=None):
     """Reconstruct and verify. Returns (x, y, report, denom) or (None, ...).
 
     Three passes, cheapest first, and every one of them ends at the same
@@ -592,6 +648,19 @@ def certify(A, b, c, x_float, y_float, ladder=DENOM_LADDER, y_alts=(),
         if dense[0] is None:
             dense[0] = P.dense() if isinstance(A, Prepared) else A
         return dense[0]
+
+    # 0. THE SOLVER'S OWN BASIS, when it gave one (HiGHS through highspy):
+    # the exact vertex is one elimination away, whatever its denominators.
+    if basis:
+        _late(deadline)
+        got = from_solver_basis(P, basis)
+        if got is not None:
+            rep = check_lp(P, b, c, got[0], got[1])
+            last = rep
+            if rep["ok"]:
+                denom = max((v.denominator for v in list(got[0]) + list(got[1])),
+                            default=1)
+                return got[0], got[1], rep, denom
 
     for denom in ladder:
         _late(deadline)

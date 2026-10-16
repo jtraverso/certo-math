@@ -1738,6 +1738,34 @@ class NonnegSpec:
 
 
 @dataclass
+class StepSpec:
+    """A step between bounds: from `D <= bound`, the substitutions `x <= u`,
+    does `D <= conclude` follow -- on this box, where the conditions hold?
+
+        StepSpec(box={"B": (0, 10), "y": (0, 1), "B1": (1, 10), "n": (1, 100)},
+                 bound=B / (1 + B / n),
+                 substitute=[("B", y * B1)],             # B <= y * B1
+                 conclude=y * B1 / (1 + B1 / n))         # refuted: y < 1
+
+    Each substitution needs the bound NONDECREASING in its variable on the
+    whole box, and `u` inside that variable's interval; the conclusion needs
+    `conclude - (the bound after the substitutions) >= 0` where the
+    conditions hold. All three are signs on the box, certified by Bernstein
+    coefficients with every denominator's sign proved. A wrong step comes
+    back with the point where it fails and the bound that DOES follow.
+    Upper bounds only: for `D >= ...` write it for `-D`.
+    """
+
+    box: dict                        # name -> (lo, hi), a closed rational box
+    bound: object                    # what you have: D <= bound
+    conclude: object                 # what you want: D <= conclude
+    substitute: list = field(default_factory=list)  # [(var, u)]: var <= u
+    conditions: list = field(default_factory=list)  # [(name, g)]: g >= 0
+    subdivide: int = 12
+    title: str = ""
+
+
+@dataclass
 class RoleSpec:
     """One graph, roles on its vertices, and the roles changed WITHOUT
     changing the graph.

@@ -1,4 +1,4 @@
-# The sixty-one commands
+# The sixty-two commands
 
 Grouped by the question they answer, in the same order and the same words as
 `certo commands` prints in your terminal. If the two ever disagree, the
@@ -692,6 +692,18 @@ objective, constraints, target and loads kept, numbers exact -- so a round trip
 cannot drop a bound. `certo.certificate.same_program(cert, spec)` says whether
 an LP certificate is about THIS program and names what differs: a right-hand
 side, a coefficient, the objective, the sense.
+
+**HiGHS directly (0.33).** With `highspy` installed, every continuous solve
+asks HiGHS itself, not through PuLP: the optimal BASIS goes to the exact
+route, which solves on it before rounding anything; the duals are oriented
+by strong duality on each solve; an infeasible program's Farkas ray is
+sought on an IIS's rows only, so it is zero elsewhere; and `mixed
+--prove-optimal` starts from HiGHS's own MIP incumbent -- re-certified as a
+design by `mixed` before it prunes anything -- and reports HiGHS's bound as
+`solver_bound`, the solver's, not certo's. `CERTO_HIGHS_DIRECT=0` goes back to
+PuLP for every solve. `certo.existence.estimate_cliques(n, edges, ...)` says
+how large a clique LP would be -- columns, non-zeros, the memory of a dense
+and a sparse expansion -- before anything is built.
 
 ### `certo mixed`
 
@@ -2102,6 +2114,13 @@ matching is a packing and a transversal a cover, under `exists` a transversal
 is a cover, elsewhere it is its 0-1 program. Until 0.31 the API turned every
 hypergraph into its program first, and `cover` refused it.
 
+**A packing by table (0.33).** `cover --maximum` up to 62 elements is the
+packing recurrence over masks -- `g(M) = max(g(M - e), 1 + g(M - C))`, the
+lowest element unused or in exactly one chosen candidate -- its whole table
+the certificate, solver-free (`recurrence_table` with `problem: packing`,
+`examples/packing_table.py`). `--sat`, or more than 62 elements, takes the SAT
+route with a DRUP proof, as before.
+
 ## Build it, assemble it, keep it
 
 ### `certo synth`
@@ -2292,6 +2311,36 @@ composition ... (`evidence` in the JSON and the MCP).
 
 `--spec` that matches by hash and sits elsewhere than the recorded path is a
 relocation, said as such, not a warning that the spec is gone.
+
+**Coherent forgeries (0.33).** `--tamper` adds a third battery: the claim
+changed AND its metadata fixed to match -- a part duplicated with `size`
+bumped, a claim moved with the cofactors kept, a clause dropped with the
+DIMACS header recounted, an objective raised with its declared value, an
+optimum raised with the chosen list extended. Each is caught; the battery
+keeps it so. `verify --obligation SPEC` also ties a standalone `farkas_ray`
+to your program: the system in its payload against your `A x <= b`.
+
+### `certo step`
+
+**Question** — From this bound and these substitutions, does that bound
+follow?
+**Spec** — `StepSpec`
+**Answers** — for each substitution `x <= u`, that the bound is nondecreasing
+in `x` on the box and that `u` stays in `x`'s interval; then that the
+conclusion is above the substituted bound where the conditions hold -- or the
+point where the step fails, with the bound that DOES follow
+**Certificate** — `bound_step`, **solver-free**: every rule a
+`polynomial_nonneg` certificate of the exact rational function it is about
+**Not established** — anything off the box, or a step of another shape than
+"substitute upper bounds where the bound is monotone, then compare". Upper
+bounds only; a lower bound is an upper bound on `-D`.
+
+Written for a step a user took and the auditor caught: from
+`D <= B / (1 + B/n)` and `B <= y B1` they concluded `D <= y B1 / (1 + B1/n)`.
+The bound is increasing in `B`, so what follows is `y B1 / (1 + y B1/n)`, and
+the two differ exactly when `y != 1`; `certo step` refutes the first at
+`y = 1/2` and proves the second (`examples/bound_step.py`). Certifying the
+coefficients that went into the step would not have caught it.
 
 ### `certo roles`
 

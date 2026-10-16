@@ -62,6 +62,7 @@ es entero.
 | `IdealSpec` | `ideal` |
 | `CoveringSpec` | `covering` |
 | `RoleSpec` | `roles` |
+| `StepSpec` | `step` |
 | `EliminateSpec` | `eliminate` |
 | `ParametricSpec` | `parametric` |
 | `PeakSpec` | `peak` |

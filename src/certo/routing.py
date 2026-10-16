@@ -41,11 +41,12 @@ SPEC_OF = {
     "columns": "CliqueLPSpec", "atlas": "AtlasSpec", "nonneg": "NonnegSpec", "pin": "PinSpec", "assign": "AssignmentSpec",
     "range": "Spec", "cycle": "CycleSpec",
     "bind": "BindSpec", "covering": "CoveringSpec", "roles": "RoleSpec",
+    "step": "StepSpec",
 }
 
 #: Which commands leave a certificate that re-checks with NO solver.
 SOLVER_FREE = {
-    "cone", "semigroup", "columns", "atlas", "nonneg", "pin", "assign", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists", "covering", "roles",
+    "cone", "semigroup", "columns", "atlas", "nonneg", "pin", "assign", "profile", "quotient", "range", "cycle", "solve", "matrix", "reduce", "farkas", "parametric", "peak", "entry", "moment", "ratio", "exists", "covering", "roles", "step",
     "cover", "ideal", "eliminate", "sos", "number", "order", "bounds",
     "cases",
 }
@@ -81,6 +82,7 @@ BY_QUESTION = (
         ("commands.q.atlas", "atlas"),
         ("commands.q.nonneg", "nonneg"),
         ("commands.q.covering", "covering"),
+        ("commands.q.step", "step"),
         ("commands.q.pin", "pin"),
         ("commands.q.assign", "assign"),
         ("commands.q.range", "range --var X"),
@@ -238,7 +240,7 @@ TIER = {
     "cases": YES, "number": YES, "sos": YES, "ideal": YES, "eliminate": YES,
     "matrix": YES, "solve": YES, "quotient": YES, "cone": YES, "semigroup": YES, "profile": YES, "columns": YES, "atlas": YES, "nonneg": YES, "pin": YES, "assign": YES, "reduce": YES,
     "order": YES, "bounds": YES, "check": YES, "enum": YES, "shrink": YES,
-    "range": YES, "cycle": YES, "covering": YES, "roles": YES,
+    "range": YES, "cycle": YES, "covering": YES, "roles": YES, "step": YES,
 
     # It depends on the answer, or on what you handed in.
     # `opt` alone gives `lp_dual`, which re-checks by rational arithmetic.
@@ -294,7 +296,7 @@ KIND_OF = {
     "nonneg": "polynomial_nonneg", "pin": "pinned_value", "assign": "assignment",
     "range": "variable_range",
     "cycle": "dependency_cycle", "bind": "lean_binding",
-    "covering": "conditioned_cover", "roles": "role_transport",
+    "covering": "conditioned_cover", "roles": "role_transport", "step": "bound_step",
     "family": "family_extremum", "ratio": "ratio_bound",
     "moment": "first_moment", "entry": "first_entry", "exists": ("drat", "cnf_model", "exact_cover"),
     "cover": ("exact_cover", "repair_refusal", "recurrence_table", "sat_optimum"), "sos": "sos", "number": "number",
@@ -348,6 +350,7 @@ RUNNERS = {
     "bind": ("certo.engines.algebra", "lean_binding"),
     "covering": ("certo.engines.algebra", "covering"),
     "roles": ("certo.engines.algebra", "roles"),
+    "step": ("certo.engines.algebra", "step"),
     "family": ("certo.engines.algebra", "family_max"),
     # `CoverSpec` answers two questions: `cover` checks one you have, and
     # `exists` asks whether any does. `ask` takes the first as the default,

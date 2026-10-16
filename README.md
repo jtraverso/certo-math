@@ -6,7 +6,7 @@ the claims that are false, measure what survives, reduce it to what it really
 is, and assemble the rest — and every step comes back with a **certificate
 anyone can re-check without trusting certo.**
 
-CLI and MCP. Sixty-one commands. Runs in milliseconds where a formalisation
+CLI and MCP. Sixty-two commands. Runs in milliseconds where a formalisation
 costs hours.
 
 *Español: [README.es.md](README.es.md) · run any command with `--lang es`.*
@@ -14,9 +14,9 @@ costs hours.
 | | |
 |---|---|
 | **[Project page →](https://jtraverso.github.io/certo-math/)** | the didactic introduction: what certo is for, in one page, in both languages |
-| **[Commands](docs/COMMANDS.md)** | all sixty-one, one entry each: the question, the spec, the certificate, and what it does not establish |
+| **[Commands](docs/COMMANDS.md)** | all sixty-two, one entry each: the question, the spec, the certificate, and what it does not establish |
 | **[Specs](docs/SPECS.md)** | the DSL: every spec type with a minimal working example, shared options, exit codes |
-| **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the sixty-four kinds, which re-check without a solver |
+| **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the sixty-five kinds, which re-check without a solver |
 | **[Worked cases](docs/CASES.md)** | real problems end to end: symmetry, sweeps, parametric bounds, packings, toric data |
 | **[What a result means](docs/VERDICTS.md)** | status against verdict, the four optimisation claims that look alike, `false` against `null`, exit codes |
 | **[Limits](docs/LIMITS.md)** | what it does not do, and the FAQ |
@@ -149,7 +149,7 @@ your terminal, in your language.
    dominates, and a fallback written to avoid it is a fallback in floating
    point.
 
-## The sixty-one commands
+## The sixty-two commands
 
 Grouped as [`certo commands`](docs/COMMANDS.md) groups them. Full entries,
 with what each one does **not** establish, in
@@ -201,6 +201,7 @@ with what each one does **not** establish, in
 | `range` | The admissible interval of one variable over the regime, not one point of it | exact LP dual | **a Farkas combination at each end**, solver-free |
 | `cycle` | A parameter that depends on itself: compose the growth classes and close the loop | growth ladder | **the chain, its classes and the one comparison**, solver-free |
 | `covering` | A box cut into leaves: on each one an obligation keeps its sign or a condition excludes it | Bernstein coefficients, halving | **the leaves, each with its reason, and that they tile the box**, solver-free |
+| `step` | A step between bounds: from `D <= f` and `x <= u`, does `D <= g` follow? | Bernstein signs | **monotonicity, ranges and the comparison, each a sign on the box**, solver-free; a wrong step with its point and what does follow |
 | `roles` | Roles exchanged on one graph without changing the graph | backtracking by role and degree | **the automorphism, and every property before and after**, solver-free |
 | `bind` | Tie a certificate to the Lean declaration meant to justify it, and check it does | Z3 entailment | **the hypothesis, the statement, and whether one covers the other** |
 | `lint` | Check a spec before spending the compute on it | — | — |

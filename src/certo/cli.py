@@ -942,6 +942,18 @@ def cmd_covering(args):
     return rc
 
 
+def cmd_step(args):
+    from .engines import algebra
+    from .spec import StepSpec, load_spec
+
+    spec = load_spec(args.spec, StepSpec)
+    res = algebra.step(spec, limits_from(args), spec_path=args.spec)
+    rc = emit(res, args)
+    if not args.json and res.meta.get("follows"):
+        print("  " + t("cli.step.follows", bound=res.meta["follows"][:200]))
+    return rc
+
+
 def cmd_roles(args):
     from .engines import algebra
     from .spec import RoleSpec, load_spec
@@ -1471,8 +1483,9 @@ def cmd_cover(args):
               "returned " + type(spec).__name__, file=sys.stderr)
         return 1
     if getattr(args, "maximum", False):
-        return emit(algebra.cover_sat(spec, limits_from(args), spec_path=args.spec,
-                                      maximum=True), args)
+        return emit(algebra.cover(spec, limits_from(args), spec_path=args.spec,
+                                  maximum=True, sat=getattr(args, "sat", False),
+                                  max_states=getattr(args, "max_states", None)), args)
     if getattr(args, "minimum", False) and getattr(args, "sat", False):
         return emit(algebra.cover_sat(spec, limits_from(args), spec_path=args.spec),
                     args)
@@ -2348,6 +2361,10 @@ def _tamper(cert, args) -> int:
           if out["original_ok"] else {"caught": [], "survived": []})
     out["structural"] = {"caught": len(st["caught"]),
                          "survived": st["survived"]}
+    # And the COHERENT ones: the lie with its metadata fixed to match.
+    co = (tamper.probe_coherent(cert, limits_from(args))
+          if out["original_ok"] else {"caught": [], "survived": []})
+    out["coherent"] = co
     if args.json:
         print(json.dumps(out, indent=2, ensure_ascii=False))
         return 0 if out["original_ok"] else 1
@@ -2377,6 +2394,11 @@ def _tamper(cert, args) -> int:
         print("    !!  " + lab)
     if st["survived"]:
         print("  " + t("cli.tamper.structural_means"))
+    if co["caught"] or co["survived"]:
+        print("  " + t("cli.tamper.coherent", caught=len(co["caught"]),
+                       n=len(co["caught"]) + len(co["survived"])))
+        for lab in co["survived"]:
+            print("    !!  " + lab)
     return 0
 
 
@@ -3198,6 +3220,12 @@ def build_parser():
     sp.add_argument("spec", help=".py file returning a CoveringSpec")
     sp.set_defaults(func=cmd_covering)
 
+    sp = add("step", "a step between bounds: from D <= f and x <= u, does "
+                     "D <= g follow? Monotonicity, ranges and the comparison, "
+                     "each a certified sign on the box")
+    sp.add_argument("spec", help=".py file returning a StepSpec")
+    sp.set_defaults(func=cmd_step)
+
     sp = add("roles", "roles changed on one graph without changing the graph: "
                       "the automorphism that carries them, and each property "
                       "before and after")
@@ -3483,14 +3511,17 @@ def build_parser():
                          "a recurrence over masks whose whole table is the "
                          "certificate -- solver-free. Up to 62 elements")
     sp.add_argument("--sat", action="store_true",
-                    help="with --minimum: the optimum by SAT with a DRUP proof of "
-                         "the bound below it (sat_optimum) instead of the "
-                         "recurrence -- the route past 62 elements, taken "
-                         "there by itself")
+                    help="with --minimum or --maximum: the optimum by SAT with a "
+                         "DRUP proof of the bound beyond it (sat_optimum) "
+                         "instead of the recurrence -- the route past 62 "
+                         "elements, taken there by itself")
     sp.add_argument("--maximum", action="store_true",
                     help="the MAXIMUM number of pairwise disjoint candidates "
-                         "(a packing; a hypergraph matching), by SAT with a "
-                         "DRUP proof that one more is impossible")
+                         "(a packing; a hypergraph matching): by the packing "
+                         "recurrence over masks, its whole table the "
+                         "certificate, solver-free; with --sat, or past 62 "
+                         "elements, by SAT with a DRUP proof that one more is "
+                         "impossible")
     sp.add_argument("--max-states", type=int, default=None, dest="max_states",
                     help="with --minimum: how many states the table may hold "
                          "(default 2,000,000)")

@@ -973,15 +973,19 @@ def propositional_refutation_certificate(core_smt2, names, dropped, proof,
 
 
 def recurrence_table_certificate(universe, candidates, exact, table, minimum,
-                                 chosen) -> Certificate:
+                                 chosen, problem=None) -> Certificate:
     """The minimum number of candidates covering (or partitioning) the
     universe, with the whole recurrence table over masks as its proof."""
     return Certificate(
         kind="recurrence_table",
         solver_free=True,
-        payload={"universe": universe, "candidates": candidates,
-                 "exact": bool(exact), "minimum": minimum, "chosen": chosen,
-                 "table": [[format(M, "x"), v, j] for M, (v, j) in sorted(table.items())]},
+        payload=dict({"universe": universe, "candidates": candidates,
+                      "exact": bool(exact), "chosen": chosen,
+                      "table": [[format(M, "x"), v, j] for M, (v, j) in sorted(table.items())]},
+                     # A PACKING keeps its maximum under its own name; the
+                     # field is optional, and a table without it is a cover's.
+                     **({"problem": "packing", "maximum": minimum}
+                        if problem == "packing" else {"minimum": minimum})),
         note_key="cert.note.recurrence_table",
     )
 
@@ -1312,6 +1316,14 @@ def polynomial_nonneg_certificate(payload) -> Certificate:
     with any multipliers -- or, refuted, the point and its exact value."""
     return Certificate(kind="polynomial_nonneg", solver_free=True,
                        payload=payload, note_key="cert.note.polynomial_nonneg")
+
+
+def bound_step_certificate(payload) -> Certificate:
+    """A step between bounds: each substitution's monotonicity and range, and
+    the final comparison, as `polynomial_nonneg` certificates of the exact
+    rational functions the step implies -- recomputed and re-verified."""
+    return Certificate(kind="bound_step", solver_free=True, payload=payload,
+                       note_key="cert.note.bound_step")
 
 
 def role_transport_certificate(payload) -> Certificate:
@@ -3555,6 +3567,64 @@ def _verify_pinned_value(cert, limits) -> VerifyReport:
                  value=b.get("upper"), lower=b.get("lower"), upper=b.get("upper"),
                  n=len(p.get("edges") or []),
                  r="" if p.get("max_size") is None else "_{}".format(p["max_size"])))
+
+
+def _verify_bound_step(cert, limits) -> VerifyReport:
+    """The chain recomputed from the bound and the substitutions; every sign
+    re-verified and tied to the rational function it must be about."""
+    from fractions import Fraction
+
+    from . import boundstep as BS
+    from .polynomials import Poly
+
+    p = cert.payload
+    checks = []
+    try:
+        ring = tuple(p["parameters"])
+        box = {n: [str(Fraction(lo)), str(Fraction(hi))] for n, (lo, hi) in p["box"].items()}
+        one = Poly.const(ring, 1)
+        cur = BS.normal(BS.parse(ring, p["bound"]))
+        region = {n: Poly.parse(ring, g) for n, g in (p.get("conditions") or {}).items()}
+
+        def tied(sub_cert, want, with_region):
+            d = sub_cert if isinstance(sub_cert, dict) else {}
+            sp = d.get("payload") or {}
+            rep = verify(Certificate.from_dict(d), limits)
+            same_box = {n: [str(Fraction(lo)), None if hi is None else str(Fraction(hi))]
+                        for n, (lo, hi) in (sp.get("box") or {}).items()} == box
+            want_region = region if with_region else {}
+            same_region = {n: Poly.parse(ring, g) for n, g in
+                           (sp.get("region") or {}).items()} == want_region
+            return (d.get("kind") == "polynomial_nonneg" and rep.ok and same_box
+                    and same_region and BS.same_rat(BS.rat_of_nonneg(sp), BS.normal(want)),
+                    sp.get("holds"))
+
+        for st in p["steps"]:
+            var = st["var"]
+            if var not in ring:
+                raise ValueError(var)
+            u = BS.normal(BS.parse(ring, st["upper"]))
+            ok_m, holds_m = tied(st["monotone"], BS.diff(cur, var), False)
+            lo, hi = (Fraction(x) for x in p["box"][var])
+            if len(st["within"]) != 2:
+                raise ValueError("within")
+            ok_lo, h_lo = tied(st["within"][0], BS.sub(u, (Poly.const(ring, lo), one)), False)
+            ok_hi, h_hi = tied(st["within"][1], BS.sub((Poly.const(ring, hi), one), u), False)
+            checks.append((t("verify.step.substitution", var=var),
+                           ok_m and ok_lo and ok_hi and holds_m is True
+                           and h_lo is True and h_hi is True, var))
+            cur = BS.normal(BS.subst(cur, var, u))
+        checks.append((t("verify.step.follows"),
+                       BS.same_rat(cur, BS.normal(BS.parse(ring, p["follows"]))), ""))
+        concl = BS.normal(BS.parse(ring, p["conclude"]))
+        ok_c, holds_c = tied(p["comparison"], BS.sub(concl, cur), True)
+        checks.append((t("verify.step.comparison"), ok_c and holds_c is p.get("holds")
+                       and isinstance(p.get("holds"), bool), str(p.get("holds"))))
+    except (KeyError, TypeError, ValueError, IndexError, ZeroDivisionError) as e:
+        checks.append((t("verify.step.shape"), False, "{}: {}".format(type(e).__name__, e)))
+    return VerifyReport(all(c[1] for c in checks), "bound_step", True, checks=checks,
+                        detail=t("verify.step.detail", n=len(p.get("steps") or []),
+                                 holds=str(p.get("holds"))))
 
 
 def _verify_role_transport(cert, limits) -> VerifyReport:
@@ -6942,8 +7012,30 @@ def _verify_recurrence_table(cert, limits) -> VerifyReport:
         M = int(h, 16)
         dup = dup or M in table
         table[M] = (v, j)
-    problems = R.check(n, masks, bool(p.get("exact", True)), table)
     full = (1 << n) - 1
+    if p.get("problem") == "packing":
+        problems = R.check_packing(n, masks, table)
+        value = table.get(full, (None,))[0]
+        chosen = R.reconstruct_packing(table, masks, n) if not problems else None
+        seen, disjoint = 0, True
+        for j in chosen or []:
+            disjoint = disjoint and not (seen & masks[j])
+            seen |= masks[j]
+        checks = [
+            (t("verify.recurrence.entries"), not problems and not dup,
+             ", ".join(sorted({k for k, _M in problems}))[:160]
+             or t("verify.recurrence.n", n=len(table))),
+            (t("verify.recurrence.maximum"), value == p.get("maximum")
+             and "minimum" not in p, str(p.get("maximum"))),
+            (t("verify.recurrence.chosen"),
+             chosen == p.get("chosen") and disjoint and len(chosen or []) == value,
+             str(len(p.get("chosen") or []))),
+        ]
+        return VerifyReport(all(c[1] for c in checks), "recurrence_table", True,
+                            checks=checks,
+                            detail=t("verify.recurrence.packing", k=value, n=n,
+                                     c=len(masks)))
+    problems = R.check(n, masks, bool(p.get("exact", True)), table)
     value = table.get(full, (None,))[0]
     chosen = R.reconstruct(table, masks, n) if not problems else None
     union = 0
@@ -7862,6 +7954,7 @@ VERIFIERS = {
     "synth_optimum": _verify_synth_optimum,
     "conditioned_cover": _verify_conditioned_cover,
     "role_transport": _verify_role_transport,
+    "bound_step": _verify_bound_step,
     "graph_set": _verify_graph_set,
     "cnf_model": _verify_cnf_model,
     "drat": _verify_drat,

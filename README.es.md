@@ -6,7 +6,7 @@ romper las afirmaciones falsas, medir lo que sobrevive, reducirlo a lo que
 realmente es, y ensamblar el resto— y cada paso vuelve con un **certificado
 que cualquiera puede re-comprobar sin fiarse de certo.**
 
-CLI y MCP. Sesenta y un comandos. Corre en milisegundos donde una
+CLI y MCP. Sesenta y dos comandos. Corre en milisegundos donde una
 formalización cuesta horas.
 
 *English: [README.md](README.md) · cualquier comando acepta `--lang en`.*
@@ -14,9 +14,9 @@ formalización cuesta horas.
 | | |
 |---|---|
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
-| **[Comandos](docs/es/COMMANDS.md)** | los sesenta y uno, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
+| **[Comandos](docs/es/COMMANDS.md)** | los sesenta y dos, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
-| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los sesenta y cuatro tipos, cuáles se re-comprueban sin solver |
+| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los sesenta y cinco tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
 | **[Qué significa un resultado](docs/es/VERDICTS.md)** | estado frente a veredicto, las cuatro afirmaciones de optimización que se parecen, `false` frente a `null`, códigos de salida |
 | **[Límites](docs/es/LIMITS.md)** | qué no hace, y las preguntas frecuentes |
@@ -149,7 +149,7 @@ en tu idioma.
    un bucle sobre la CLI: manda el arranque, y un apaño escrito para evitarlo
    es un apaño en punto flotante.
 
-## Los sesenta y un comandos
+## Los sesenta y dos comandos
 
 Agrupados como los agrupa [`certo commands`](docs/es/COMMANDS.md). Las entradas
 completas, con lo que cada uno **no** establece, en
@@ -201,6 +201,7 @@ completas, con lo que cada uno **no** establece, en
 | `range` | El intervalo admisible de una variable sobre el régimen, no un punto suyo | dual LP exacto | **una combinación de Farkas en cada extremo**, sin solver |
 | `cycle` | Un parámetro que depende de sí mismo: compone las clases de crecimiento y cierra el ciclo | escalera de crecimiento | **la cadena, sus clases y la única comparación**, sin solver |
 | `covering` | Una caja cortada en hojas: en cada una una obligación mantiene su signo o una condición la excluye | coeficientes de Bernstein, bisección | **las hojas, cada una con su razón, y que teselan la caja**, sin solver |
+| `step` | Un paso entre cotas: de `D <= f` y `x <= u`, ¿se sigue `D <= g`? | signos de Bernstein | **monotonía, rangos y la comparación, cada uno un signo en la caja**, sin solver; un paso equivocado con su punto y lo que sí se sigue |
 | `roles` | Roles intercambiados en un grafo sin cambiar el grafo | búsqueda por rol y grado | **el automorfismo, y cada propiedad antes y después**, sin solver |
 | `bind` | Ata un certificado a la declaración Lean que debe justificarlo, y comprueba que lo hace | implicación Z3 | **la hipótesis, el enunciado, y si uno cubre al otro** |
 | `lint` | Comprueba un spec antes de gastar el cómputo en él | — | — |

@@ -24,13 +24,13 @@ from .limits import Limits
 from .polynomials import Poly
 from .spec import (BisectSpec, BoundSpec, DomainSpec, IdealSpec,
                    InductSpec, Lemma, LPSpec, NumberSpec, OrderSpec,
-                   AssignmentSpec, AtlasSpec, BindSpec, CoveringSpec, RoleSpec, CliqueLPSpec, NonnegSpec, PinSpec, ConeSpec, CoverSpec, SemigroupSpec, ProfileSpec, CycleSpec, EliminateSpec, EquitableQuotientSpec, LinearSystemSpec, MatrixSpec, ParametricSymmetrySpec, EntrySpec, FamilySpec, MomentSpec, ParametricSpec, SymmetrySpec, PeakSpec, RatioSpec,
+                   AssignmentSpec, AtlasSpec, BindSpec, CoveringSpec, RoleSpec, StepSpec, CliqueLPSpec, NonnegSpec, PinSpec, ConeSpec, CoverSpec, SemigroupSpec, ProfileSpec, CycleSpec, EliminateSpec, EquitableQuotientSpec, LinearSystemSpec, MatrixSpec, ParametricSymmetrySpec, EntrySpec, FamilySpec, MomentSpec, ParametricSpec, SymmetrySpec, PeakSpec, RatioSpec,
                    SOSSpec,
                    MultiSpec, Outcome, ProofSpec, Spec, SweepSpec,
                    SynthSpec, load_spec)
 from .status import Result, Status, Verdict
 
-__version__ = "0.32.0"
+__version__ = "0.33.0"
 
 # `spec.role(...)`, `.link(...)`, `.pending(...)` on every spec type: the
 # card a certificate carries (`certo.card`).
@@ -42,7 +42,7 @@ _card.install(*[v for k, v in dict(globals()).items()
 __all__ = [
     "Spec", "SynthSpec", "LPSpec", "SweepSpec", "CNF", "CNFSpec",
     "BisectSpec", "BoundSpec", "DomainSpec", "IdealSpec", "InductSpec",
-    "AssignmentSpec", "CoveringSpec", "RoleSpec", "NumberSpec", "OrderSpec", "SOSSpec", "EliminateSpec", "ParametricSpec", "PeakSpec", "FamilySpec", "RatioSpec", "MomentSpec", "EntrySpec", "SymmetrySpec", "CoverSpec", "ConeSpec", "SemigroupSpec", "CliqueLPSpec", "AtlasSpec", "NonnegSpec", "PinSpec", "ProfileSpec", "CycleSpec", "BindSpec", "EquitableQuotientSpec", "MatrixSpec", "LinearSystemSpec", "ParametricSymmetrySpec", "Poly", "MultiSpec",
+    "AssignmentSpec", "CoveringSpec", "RoleSpec", "StepSpec", "NumberSpec", "OrderSpec", "SOSSpec", "EliminateSpec", "ParametricSpec", "PeakSpec", "FamilySpec", "RatioSpec", "MomentSpec", "EntrySpec", "SymmetrySpec", "CoverSpec", "ConeSpec", "SemigroupSpec", "CliqueLPSpec", "AtlasSpec", "NonnegSpec", "PinSpec", "ProfileSpec", "CycleSpec", "BindSpec", "EquitableQuotientSpec", "MatrixSpec", "LinearSystemSpec", "ParametricSymmetrySpec", "Poly", "MultiSpec",
     "ProofSpec", "Lemma",
     "Outcome", "load_spec",
     "Limits", "Status", "Verdict", "Result",

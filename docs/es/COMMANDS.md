@@ -1,4 +1,4 @@
-# Los sesenta y un comandos
+# Los sesenta y dos comandos
 
 Agrupados por la pregunta que responden, en el mismo orden y con las mismas
 palabras que `certo commands` imprime en tu terminal. Si alguna vez discrepan,
@@ -707,6 +707,19 @@ números exactos -- así una ida y vuelta no puede perder una cota.
 `certo.certificate.same_program(cert, spec)` dice si un certificado LP es de
 ESTE programa y nombra lo que difiere: un lado derecho, un coeficiente, el
 objetivo, el sentido.
+
+**HiGHS directamente (0.33).** Con `highspy` instalado, cada resolución
+continua le pregunta a HiGHS mismo, no a través de PuLP: la BASE óptima va a
+la ruta exacta, que resuelve sobre ella antes de redondear nada; los duales
+se orientan por dualidad fuerte en cada resolución; el rayo de Farkas de un
+programa infactible se busca solo en las filas de un IIS, así que es cero en
+el resto; y `mixed --prove-optimal` parte del incumbente MIP de HiGHS --
+re-certificado como diseño por `mixed` antes de podar nada -- e informa la
+cota de HiGHS como `solver_bound`, la del solver, no la de certo.
+`CERTO_HIGHS_DIRECT=0` vuelve a PuLP para todo. `certo.existence.estimate_cliques
+(n, edges, ...)` dice qué tan grande sería un LP de cliques -- columnas, no
+ceros, la memoria de una expansión densa y una dispersa -- antes de construir
+nada.
 
 ### `certo mixed`
 
@@ -2150,6 +2163,13 @@ matching es un empaquetado y un transversal una cubierta, bajo `exists` un
 transversal es una cubierta, y en otro caso es su programa 0-1. Hasta 0.31 la
 API convertía todo hipergrafo en su programa antes, y `cover` lo rechazaba.
 
+**Un empaquetado por tabla (0.33).** `cover --maximum` hasta 62 elementos es
+la recurrencia de empaquetado sobre máscaras -- `g(M) = max(g(M - e), 1 +
+g(M - C))`, el menor elemento sin usar o en exactamente un candidato elegido
+-- con su tabla entera como certificado, sin solver (`recurrence_table` con
+`problem: packing`, `examples/packing_table.py`). `--sat`, o más de 62
+elementos, toma la ruta SAT con prueba DRUP, como antes.
+
 ## Construir, ensamblar, conservar
 
 ### `certo synth`
@@ -2342,6 +2362,36 @@ finita, una síntesis, una composición ... (`evidence` en el JSON y el MCP).
 
 Un `--spec` que coincide por hash y está en otra ruta que la registrada es
 una reubicación, dicha como tal, no una advertencia de que la spec ya no está.
+
+**Falsificaciones coherentes (0.33).** `--tamper` agrega una tercera batería:
+la afirmación cambiada Y sus metadatos ajustados para que cuadren -- una parte
+duplicada con `size` aumentado, una afirmación movida con los cofactores
+intactos, una cláusula quitada con la cabecera DIMACS recontada, un objetivo
+subido junto con su valor declarado, un óptimo subido con la lista elegida
+extendida. Cada una se detecta; la batería lo mantiene así. `verify
+--obligation SPEC` además ata un `farkas_ray` suelto a tu programa: el sistema
+de su carga contra tu `A x <= b`.
+
+### `certo step`
+
+**Pregunta** — De esta cota y estas sustituciones, ¿se sigue aquella cota?
+**Spec** — `StepSpec`
+**Responde** — para cada sustitución `x <= u`, que la cota es no decreciente
+en `x` en la caja y que `u` se queda en el intervalo de `x`; luego, que la
+conclusión está por encima de la cota sustituida donde se cumplen las
+condiciones -- o el punto donde el paso falla, con la cota que SÍ se sigue
+**Certificado** — `bound_step`, **sin solver**: cada regla un certificado
+`polynomial_nonneg` de la función racional exacta de la que habla
+**No establece** — nada fuera de la caja, ni un paso de otra forma que
+"sustituir cotas superiores donde la cota es monótona, y comparar". Solo cotas
+superiores; una cota inferior es una superior de `-D`.
+
+Escrito por un paso que un usuario dio y su auditor detectó: de
+`D <= B / (1 + B/n)` y `B <= y B1` concluyó `D <= y B1 / (1 + B1/n)`. La cota
+es creciente en `B`, así que lo que se sigue es `y B1 / (1 + y B1/n)`, y las
+dos difieren exactamente cuando `y != 1`; `certo step` refuta la primera en
+`y = 1/2` y prueba la segunda (`examples/bound_step.py`). Certificar los
+coeficientes que entraron al paso no lo habría detectado.
 
 ### `certo roles`
 

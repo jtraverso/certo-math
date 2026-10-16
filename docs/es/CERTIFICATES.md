@@ -25,7 +25,7 @@ certificado en concreto: *"verificado sin solver"*, *"comprobado contando, sin
 solver"*, *"reejecutando el spec, no confiando en sus respuestas"*. La tabla de
 abajo es el mapa; la cabecera es el territorio.
 
-## Los sesenta y cuatro tipos
+## Los sesenta y cinco tipos
 
 | Tipo | Qué atestigua | ¿Sin solver? |
 |---|---|---|
@@ -85,6 +85,7 @@ abajo es el mapa; la cabecera es el territorio.
 | `cegis_none` | NO existe implementación: sus restricciones y el contrato en los contraejemplos son insatisfacibles; los contraejemplos asignan solo entradas | no, vuelve a resolver |
 | `propositional_refutation` | un núcleo booleano es contradictorio: cada nombre con su fórmula, recodificado por certo, y una prueba DRUP | **sí**, propagación unitaria |
 | `sat_optimum` | el óptimo de una cubierta, partición o empaquetado: las partes elegidas lo alcanzan, y una prueba DRUP refuta la propia codificación de certo de una parte menos (o más) | **sí**, contando y por propagación unitaria |
+| `bound_step` | un paso entre cotas: cada sustitución monótona y en rango, y la conclusión por encima de la cota sustituida, como signos en una caja | **sí**, coeficientes de Bernstein |
 | `conditioned_cover` | una caja teselada por hojas, cada una con una obligación que mantiene su signo ahí o una condición negativa ahí | **sí**, coeficientes de Bernstein y la teselación |
 | `role_transport` | un automorfismo de un grafo que lleva cada rol sobre el nuevo, con las propiedades declaradas antes y después | **sí**, se comparan conjuntos de aristas |
 | `synth_optimum` | el mejor candidato dentro de una plantilla: una síntesis alcanza el valor, una búsqueda refutada muestra que nada mejor cumple el contrato | no, ambas mitades preguntan a un solver |

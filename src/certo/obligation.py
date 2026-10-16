@@ -46,11 +46,12 @@ FAMILIES = {
     "lp_dual": "lp", "gap": "lp",
     "unsat_core": "smt", "model": "smt", "propositional_refutation": "smt",
     "parametric_atlas": "atlas", "conditioned_cover": "covering",
-    "role_transport": "roles",
+    "role_transport": "roles", "farkas_ray": "system",
 }
 
 #: families whose certificate carries the whole obligation
-WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp", "atlas", "covering", "roles")
+WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp", "atlas", "covering", "roles",
+         "system")
 
 
 # --- canonical pieces ---------------------------------------------------------
@@ -117,6 +118,12 @@ def _of_cert(cert) -> dict:
                 "claim": [cl.get("relation"),
                           _poly_key(Poly.parse(vs, cl["target"]))
                           if cl.get("target") is not None else None]}
+    if fam == "system":
+        # A standalone Farkas ray is about the system in its payload; this
+        # says whether that system is YOUR program's `A x <= b, x >= 0`.
+        return {"A": [[_fraction(v) for v in row] for row in p["A"]],
+                "b": [_fraction(v) for v in p["b"]],
+                "names": list(p.get("names") or [])}
     if fam == "roles":
         return {"edges": [list(e) for e in p["edges"]], "roles": p["roles"],
                 "roles_after": p["roles_after"], "properties": p["properties"]}
@@ -204,6 +211,11 @@ def _of_spec(spec, family, cert=None) -> dict:
                 "equations": [_poly_key(g) for g in gs],
                 "claim": None if claim is None else _poly_key(claim),
                 "nonzero": sorted((_poly_key(z) for z in nonzero), key=json.dumps)}
+    if family == "system":
+        lp = _as_lp(spec)
+        A, b, _c, names = lp.as_leq_system()
+        return {"A": [[str(v) for v in row] for row in A],
+                "b": [str(v) for v in b], "names": list(names)}
     if family == "roles":
         from . import roles as R
 

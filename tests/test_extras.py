@@ -15340,6 +15340,10 @@ FIND_GOLDEN = [
     ("reconstruccion relativa con propietarios retirados", "CoverSpec.repair"),
     ("prerrequisitos de un constructor", "ProofSpec.pending"),
     ("divisor con signo en una caja", "NonnegSpec.clear_denominators"),
+    # 0.33
+    ("paso entre cotas con sustitucion monotona", "step"),
+    ("estimar memoria antes de expandir el LP de cliques", "certo.existence.estimate_cliques"),
+    ("empaquetado maximo por tabla sin solver", "cover --maximum"),
 ]
 
 
@@ -17843,6 +17847,187 @@ def test_0_32_obligation_covers_atlas_covering_and_cleared_nonneg():
     assert same_obligation(c, other)["same"] is False
     n = NonnegSpec(poly=(x * x + 1) / (2 - x), box={"x": (0, 1)}, clear_denominators=True)
     assert same_obligation(algebra.nonneg(n).certificate, n)["same"]
+
+
+# --- 0.33: HiGHS directly, steps between bounds, packings by table ---------
+
+
+def test_0_33_highs_directly_basis_duals_and_iis():
+    from certo import LPSpec, exact, highs_direct
+    from certo.engines import lp
+
+    if not highs_direct.available():
+        return
+    rows, b, c = [{0: 1, 1: 1}, {1: 1, 2: 1}, {0: 1, 2: 1}], [1, 1, 1], [1, 1, 1]
+    r = highs_direct.solve_lp(rows, b, c)
+    assert r["status"] == "optimal"
+    assert abs(sum(bi * yi for bi, yi in zip(b, r["y"])) - r["objective"]) < 1e-9
+    P = exact.Prepared.from_sparse(rows, b, c)
+    x, y = exact.from_solver_basis(P, r["basis"])
+    assert exact.check_lp(P, b, c, x, y)["ok"] and sum(x) == Fraction(3, 2)
+    s = LPSpec(sense="max")
+    s.variable("a")
+    s.variable("b")
+    s.objective({"a": 1})
+    s.constraint({"a": 1, "b": 1}, "<=", 1, name="r1")
+    s.constraint({"a": -1}, "<=", -2, name="r2")
+    s.constraint({"b": 1}, "<=", 5, name="r3")
+    ray = lp.infeasible_ray(s)
+    assert ray is not None and ray[2] == "0"          # r3 is outside the IIS
+    import os
+
+    os.environ["CERTO_HIGHS_DIRECT"] = "0"
+    try:
+        assert lp.infeasible_ray(s) is not None
+        assert not highs_direct.available()
+    finally:
+        os.environ.pop("CERTO_HIGHS_DIRECT", None)
+
+
+def test_0_33_branch_and_bound_reports_the_solvers_bound_as_the_solvers():
+    from certo import highs_direct
+    from certo.engines import bb
+    from certo.spec import load_spec
+
+    if not highs_direct.available():
+        return
+    root = pathlib.Path(__file__).resolve().parent.parent
+    r = bb.prove_optimal(load_spec(str(root / "examples" / "mixed_design.py")), LIM)
+    assert r.verdict is Verdict.PROVED and "solver_bound" in r.meta
+
+
+def test_0_33_a_step_between_bounds_is_checked_not_assumed():
+    import copy
+
+    import z3
+
+    from certo import StepSpec
+    from certo.certificate import verify
+    from certo.engines import algebra
+
+    B, y, B1, n = z3.Reals("B y B1 n")
+    box = {"B": (0, 10), "y": (0, 1), "B1": (1, 10), "n": (1, 100)}
+    wrong = algebra.step(StepSpec(box=box, bound=B / (1 + B / n),
+                                  substitute=[("B", y * B1)],
+                                  conclude=y * B1 / (1 + B1 / n)))
+    assert wrong.verdict is Verdict.REFUTED and wrong.meta["point"]
+    assert verify(wrong.certificate).ok
+    right = algebra.step(StepSpec(box=box, bound=B / (1 + B / n),
+                                  substitute=[("B", y * B1)],
+                                  conclude=y * B1 / (1 + y * B1 / n)))
+    assert right.verdict is Verdict.PROVED and verify(right.certificate).ok
+    for field in ("conclude", "follows"):
+        d = copy.deepcopy(right.certificate.to_dict())
+        d["payload"][field] = d["payload"]["bound"]
+        assert not verify(Certificate.from_dict(d)).ok, field
+    # decreasing in B: the substitution is refused, with the reason
+    down = algebra.step(StepSpec(box=box, bound=10 - B, substitute=[("B", y * B1)],
+                                 conclude=10 - y * B1))
+    assert down.verdict is not Verdict.PROVED and down.meta["failed"] == "monotone"
+    # the substitute leaves B's interval
+    out = algebra.step(StepSpec(box={"B": (0, 1), "y": (0, 1), "B1": (1, 10)},
+                                bound=B, substitute=[("B", y * B1)], conclude=y * B1))
+    assert out.verdict is Verdict.REFUTED and out.meta["failed"] == "within"
+
+
+def test_0_33_a_packing_by_table_agrees_with_sat():
+    import copy
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.hypergraph import HypergraphSpec, triangle_packing
+    from itertools import combinations
+
+    edges = [(a, b) for a, b in combinations(range(6), 2)
+             if (a, b) not in {(0, 1), (2, 3), (4, 5)}]
+    h = triangle_packing(6, edges)
+    table = algebra.cover(h.to_packing(), maximum=True)
+    sat = algebra.cover(h.to_packing(), maximum=True, sat=True)
+    assert table.certificate.kind == "recurrence_table"
+    assert sat.certificate.kind == "sat_optimum"
+    assert table.meta["optimum"] == sat.meta["optimum"] == 4
+    assert verify(table.certificate).ok
+    d = copy.deepcopy(table.certificate.to_dict())
+    d["payload"]["maximum"] += 1
+    assert not verify(Certificate.from_dict(d)).ok
+    small = algebra.cover(HypergraphSpec(edges=[[1, 2], [2, 3], [3, 4]]).to_packing(),
+                          maximum=True)
+    assert small.meta["optimum"] == 2
+
+
+def test_0_33_coherent_forgeries_are_all_caught():
+    """A part duplicated with its size bumped, a claim moved with its
+    cofactors kept, a clause dropped with the header recounted: asked for as
+    a packaged battery, each one caught."""
+    import contextlib
+    import io
+
+    from certo import cli, tamper
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    runs = [("cover", "clique_partition_minimum.py", ["--minimum"]),
+            ("ideal", "ideal_supplied.py", []), ("cases", "pigeonhole.py", []),
+            ("opt", "packing_with_loads.py", []), ("cover", "cover_optimize.py", []),
+            ("nonneg", "nonneg_box.py", [])]
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        for cmd, ex, flags in runs:
+            out = pathlib.Path(d) / (ex + ".json")
+            with contextlib.redirect_stdout(io.StringIO()):
+                cli.main([cmd, str(root / "examples" / ex), *flags, "--cert", str(out)])
+            cert = Certificate.from_dict(json.loads(out.read_text(encoding="utf-8")))
+            got = tamper.probe_coherent(cert, LIM)
+            assert got["caught"] and not got["survived"], (ex, got)
+
+
+def test_0_33_the_size_of_a_clique_lp_before_building_it():
+    from itertools import combinations
+
+    from certo.existence import cliques_of, estimate_cliques
+
+    e = [(a, b) for a, b in combinations(range(8), 2)]
+    est = estimate_cliques(8, e)
+    assert est["columns"] == len(cliques_of(8, e)) and est["rows"] == 28
+    big = estimate_cliques(40, [(a, b) for a, b in combinations(range(40), 2)],
+                           max_size=6, stop_at=200_000)
+    assert big["at_least"] and big["advice"]
+
+
+def test_0_33_a_farkas_ray_is_tied_to_your_program():
+    from certo import LPSpec
+    from certo.engines import lp
+    from certo.evidence import evidence_class
+    from certo.obligation import same_obligation
+
+    def program(rhs):
+        s = LPSpec(sense="max")
+        s.variable("a")
+        s.variable("b")
+        s.objective({"a": 1})
+        s.constraint({"a": 1, "b": 1}, "<=", 1, name="r1")
+        s.constraint({"a": -1}, "<=", rhs, name="r2")
+        return s
+
+    c = lp.opt(program(-2)).certificate
+    assert c.kind == "farkas_ray" and same_obligation(c, program(-2))["same"]
+    assert same_obligation(c, program(-3))["same"] is False
+    # and a Farkas proof of a claim is a proof, not a refutation of the hypotheses
+    import z3
+
+    from certo import Spec
+    from certo.engines import smt
+
+    x, y = z3.Reals("x y")
+    s = Spec()
+    s.assume("a", x >= 1)
+    s.assume("b", y >= 1)
+    s.claim(x + y >= 2)
+    from certo.engines.farkas import farkas as _farkas
+
+    f = _farkas(s, LIM)
+    if f.certificate is not None and f.certificate.kind == "farkas":
+        assert evidence_class(f.certificate) == "universal"
 
 
 if __name__ == "__main__":

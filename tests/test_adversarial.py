@@ -128,6 +128,14 @@ STRUCTURAL_BENIGN = {
     # the loop's history (as `cegis`'s), the refuted search's instances are
     # each a consequence of the contract in any order or number, and a nested
     # provenance is a record, not a claim.
+    # A number rewritten everywhere is another box, consistently, and the step
+    # on it; a nested certificate's provenance is a record, not a claim.
+    'bound_step': {'=100:coherent', '=10:coherent', '=5:coherent', '=1:coherent',
+                   'comparison.provenance:dropkey', 'comparison.provenance:empty',
+                   'steps.*.monotone.provenance:dropkey',
+                   'steps.*.monotone.provenance:empty',
+                   'steps.*.within.*.provenance:dropkey',
+                   'steps.*.within.*.provenance:empty'},
     'synth_optimum': {'=0:coherent', '=2:coherent', '=5:coherent',
                       'below.payload.counterexamples.*:dropkey',
                       'below.payload.counterexamples.*:empty',
@@ -165,7 +173,9 @@ STRUCTURAL_BENIGN = {
     # chooses, emptied or shortened, leaves a table that proves the minimum
     # over the changed set -- re-derived by the verifier, and then what the
     # certificate says
-    'recurrence_table': {'candidates.*.*:reversed', 'candidates.*:dup',
+    # (a packing's table, too: its entries are read into a dict, so their
+    # order is not part of the claim)
+    'recurrence_table': {'table:reversed', 'candidates.*.*:reversed', 'candidates.*:dup',
                          'candidates.*:empty', 'candidates.*:short',
                          'candidates.*:reversed', 'candidates.*.*:beyond',
                          'candidates:dup'},
@@ -1523,8 +1533,10 @@ EXAMPLE_FIXTURES = [
     ("clique_partition_minimum.py", "cover", ("--minimum",)),
     ("repair_refused.py", "cover", ()),
     ("hall_drat.py", "prove", ("--drat",)),
-    ("triangle_cover_sat.py", "cover", ("--maximum",)),
+    ("triangle_cover_sat.py", "cover", ("--maximum", "--sat")),
     ("covering_physical.py", "covering", ()),
+    ("bound_step.py", "step", ()),
+    ("packing_table.py", "cover", ("--maximum",)),
     ("roles_square.py", "roles", ()),
     ("synth_minimum.py", "synth", ()),
     ("semigroup_profile.py", "semigroup", ()),

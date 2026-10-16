@@ -202,6 +202,17 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
     incumbent = exact.to_fraction(start.meta["achieved"])
     incumbent_cert = start.certificate.to_dict()
 
+    # HIGHS'S OWN MIP, briefly: its incumbent, RE-CERTIFIED here as a design
+    # by `mixed` before it may prune anything, and its dual bound -- said as
+    # the solver's, never as certo's. A better start prunes more of the tree.
+    solver_info = _highs_start(spec, lim, incumbent)
+    if solver_info.get("cert") is not None:
+        incumbent = solver_info["value"]
+        incumbent_cert = solver_info["cert"]
+    hint = {k: v for k, v in solver_info.items() if k in ("solver_bound", "incumbent_from")}
+    if minimising and "solver_bound" in hint:
+        hint["solver_bound"] = -hint["solver_bound"]
+
     order = list(spec.discrete)
     nodes, stack = [], [({}, 0, None, None)]
     seen = 0
@@ -238,7 +249,7 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
                                    bound=part.get("best_bound", "?"),
                                    gap=part.get("gap", "?"),
                                    nodes=part["nodes_opened"]),
-                          meta=dict(part, stopped=True,
+                          meta=dict(part, stopped=True, **hint,
                                     frontier=len(frontier),
                                     stopped_by=("deadline" if over_run else
                                                 "time" if over_clock else
@@ -325,11 +336,45 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
         detail=t("engine.bb.optimal_min" if minimising else "engine.bb.optimal",
                  value=shown, nodes=len(nodes), leaves=closed),
         meta={"optimum": shown, "minimising": minimising, "nodes": len(nodes),
-              "closed": closed,
+              "closed": closed, **hint,
               "by_bound": sum(1 for n in nodes if n["why"] == "bound"),
               "infeasible": sum(1 for n in nodes if n["why"] == "infeasible"),
               "leaves": sum(1 for n in nodes if n["why"] == "leaf")},
     )
+
+
+def _highs_start(spec, lim, incumbent) -> dict:
+    """`{"solver_bound", "incumbent_from", "value", "cert"}` from a short
+    HiGHS MIP solve on the whole program (a quarter of the budget, at most
+    30 s): the solver's bound always, and a better incumbent only when
+    `mixed` certifies the design it implies."""
+    from .. import highs_direct
+
+    if not highs_direct.available():
+        return {}
+    rows, b, c, _names = spec.as_leq_sparse()
+    integer = [spec.var_names.index(v) for v in spec.discrete]
+    seconds = max(1.0, min(30.0, lim.timeout_ms / 4000))
+    got = highs_direct.solve_mip(rows, b, c, integer, seconds=seconds)
+    if got is None:
+        return {}
+    out = {"solver_bound": got["dual_bound"]}
+    x = got["x"]
+    if x is None:
+        return out
+    fixed = {}
+    for v in spec.discrete:
+        val = x[spec.var_names.index(v)]
+        if abs(val - round(val)) > 1e-6:
+            return out
+        fixed[v] = int(round(val))
+    cert = _design(spec, fixed, lim)
+    if cert is None:
+        return out
+    achieved = exact.to_fraction((cert.get("payload") or {}).get("achieved", "0"))
+    if achieved > incumbent:
+        out.update(value=achieved, cert=cert, incumbent_from="highs")
+    return out
 
 
 def _design(spec, fixed, lim):

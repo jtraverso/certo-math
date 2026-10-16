@@ -102,6 +102,13 @@ SYNONYMS = {
     "hojas": "leaf", "hoja": "leaf", "leaves": "leaf",
     "isabelle": "coq", "agda": "coq", "hol": "coq", "rocq": "coq",
     "obligacion": "obligation", "obligaciones": "obligation",
+    # 0.33
+    "paso": "step", "pasos": "step", "sustitucion": "substitution",
+    "sustituciones": "substitution", "sustituir": "substitution",
+    "monotona": "monotonicity", "monotono": "monotonicity",
+    "monotonia": "monotonicity", "monotone": "monotonicity",
+    "estimar": "estimate", "estimacion": "estimate", "memoria": "memory",
+    "expandir": "expansion", "expansion": "expansion", "tabla": "table",
 }
 
 STOP = {"a", "an", "the", "of", "on", "in", "is", "it", "to", "for", "and",
@@ -383,10 +390,6 @@ NOT_AVAILABLE = [
      "what": "a certified integer upper bound for large packings beyond branch and bound",
      "why": "open: needs cuts or another certificate of the integer value",
      "instead": "certo opt --gap, certo cover --maximum (SAT with DRUP), certo mixed --prove-optimal"},
-    {"id": "bound_shapes", "backlog": "Contracts between bound shapes",
-     "what": "a typed contract for passing between absolute, linear and rational bounds",
-     "why": "planned",
-     "instead": "write the inference step as a Spec (hypotheses, new bound as claim) and certo prove it"},
     {"id": "other_provers", "backlog": "The boundary, stated",
      "what": "exporting to Coq (Rocq), Isabelle, Agda or HOL",
      "why": "the one formal target is Lean 4 with Mathlib",
@@ -409,7 +412,8 @@ CONVERTED = {"HypergraphSpec": {"opt": "to_lp", "mixed": "to_lp",
 
 #: The modules whose public functions are indexed as the Python API.
 API_MODULES = ("api", "explain", "batch", "tamper", "status_report",
-               "discovery", "nosite", "closedform", "scope")
+               "discovery", "nosite", "closedform", "scope", "existence",
+               "obligation", "evidence", "hardness")
 
 
 def _default_text(f):

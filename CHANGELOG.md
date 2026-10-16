@@ -6,6 +6,38 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.33.0] — 2026-10-16
+
+**HiGHS spoken to directly, a step between bounds checked, a packing by
+table.** One new command (62): `step`; one new kind (65): `bound_step`. The
+schema stays 5; new optional fields: `problem` and `maximum`
+(`recurrence_table`).
+
+### New
+
+- **HiGHS through `highspy`, not PuLP**, for every continuous solve: the
+  optimal basis feeds the exact route (one elimination on it, before any
+  rounding), duals oriented by strong duality, Farkas rays sought on an IIS's
+  rows, and branch and bound started from HiGHS's MIP incumbent (re-certified
+  by `mixed`) with HiGHS's bound reported as `solver_bound`.
+  `CERTO_HIGHS_DIRECT=0` restores the PuLP route.
+- **`certo step`** (`StepSpec`): from `D <= f` and substitutions `x <= u`,
+  does `D <= g` follow on a box? Monotonicity, ranges and the comparison, each
+  a certified sign (`bound_step`, solver-free); a wrong step with its point
+  and the bound that does follow.
+- **`cover --maximum` by the packing recurrence** up to 62 elements,
+  solver-free; `--sat` keeps the SAT route.
+- **Coherent forgeries in `verify --tamper`**: the claim changed with its
+  metadata fixed to match, all caught.
+- **`certo.existence.estimate_cliques`**: the size of a clique LP before it is
+  built -- columns, non-zeros, dense and sparse memory.
+- `verify --obligation` ties a standalone `farkas_ray` to your program.
+
+### Fixed
+
+- A Farkas proof of a claim was labelled a refutation of the hypotheses; it is
+  a proof.
+
 ## [0.32.0] — 2026-10-16
 
 **Every engine within its budget, a search that says what is not there,

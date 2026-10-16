@@ -431,33 +431,59 @@ def _opt_vectors(spec, lim, t0):
     reaches its last pass, the exact simplex."""
     rows, b, c, names = spec.as_leq_sparse()
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
-    solver, name = _solver(lim, integral=False)
-    engine = "pulp/" + name
-    if not c and not rows:
-        return Result("opt", Status.SAT, Verdict.SATISFIABLE, engine, ms(),
-                      Vectors([], [], "0"), "",
-                      meta={"objective": "0", "exact": True,
-                            "lp_solver": engine})
-    prob, xs = _build_sparse(spec, rows, b, c)
-    st = _solve(prob, solver)
-    if st == "Infeasible":
-        return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine, ms(),
-                      None, detail=t("engine.opt.infeasible"),
-                      meta={"lp_solver": engine})
-    if st != "Optimal":
-        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
-                      engine, ms(), None,
-                      detail=t("engine.opt.cbc", status=st, solver=name),
-                      meta={"lp_solver": engine})
-    x_float = [float(v.value() or 0.0) for v in xs]
-    raw = _oriented(prob, _duals(prob, names, negate=_flips_duals(name)), b)
-    have = all(v is not None for v in raw)
-    y_float = [0.0 if v is None else v for v in raw]
+    from .. import highs_direct
+
+    # No columns (every variable fixed and substituted out) is not a model
+    # HiGHS solves -- it answers "empty" -- and the PuLP route handles it.
+    direct = (highs_direct.solve_lp(rows, b, c, seconds=max(1, lim.timeout_ms // 1000))
+              if c and PREFER_HIGHS and _highs_available() else None)
+    if direct is not None and direct["status"] not in ("optimal", "infeasible"):
+        direct = None
+    basis = None
+    if direct is not None:
+        # HiGHS asked directly: its basis, and the duals oriented by strong
+        # duality -- no PuLP in between.
+        engine = "highs"
+        if direct["status"] == "infeasible":
+            return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine, ms(),
+                          None, detail=t("engine.opt.infeasible"),
+                          meta={"lp_solver": engine})
+        if direct["status"] != "optimal":
+            return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                          engine, ms(), None,
+                          detail=t("engine.opt.cbc", status=direct["status"],
+                                   solver="HiGHS"),
+                          meta={"lp_solver": engine})
+        x_float, y_float, basis = direct["x"], direct["y"], direct["basis"]
+        have = True
+    else:
+        solver, name = _solver(lim, integral=False)
+        engine = "pulp/" + name
+        if not c and not rows:
+            return Result("opt", Status.SAT, Verdict.SATISFIABLE, engine, ms(),
+                          Vectors([], [], "0"), "",
+                          meta={"objective": "0", "exact": True,
+                                "lp_solver": engine})
+        prob, xs = _build_sparse(spec, rows, b, c)
+        st = _solve(prob, solver)
+        if st == "Infeasible":
+            return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine, ms(),
+                          None, detail=t("engine.opt.infeasible"),
+                          meta={"lp_solver": engine})
+        if st != "Optimal":
+            return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                          engine, ms(), None,
+                          detail=t("engine.opt.cbc", status=st, solver=name),
+                          meta={"lp_solver": engine})
+        x_float = [float(v.value() or 0.0) for v in xs]
+        raw = _oriented(prob, _duals(prob, names, negate=_flips_duals(name)), b)
+        have = all(v is not None for v in raw)
+        y_float = [0.0 if v is None else v for v in raw]
     alts = ([[-v for v in y_float], [abs(v) for v in y_float]] if have else [])
     P = exact.Prepared.from_sparse(rows, b, c)
     try:
         x_ex, y_ex, rep, denom = exact.certify(
-            P, b, c, x_float, y_float, y_alts=alts,
+            P, b, c, x_float, y_float, y_alts=alts, basis=basis,
             deadline=_clock_cap(time.monotonic() + lim.timeout_ms / 1000
                                 if lim and lim.timeout_ms else None))
     except exact.Deadline:
@@ -876,6 +902,21 @@ def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
     have_duals = all(v is not None for v in dual_raw)
     dual_float = [0.0 if v is None else v for v in dual_raw]
 
+    # THE RELAXATION'S VERTEX FROM HIGHS DIRECTLY, with its basis: the exact
+    # pass solves on that basis before anything is rounded. The PuLP solve
+    # above still decides feasibility and the integral point; this only
+    # hands the exact route a better starting place.
+    basis = None
+    if use_exact and c and PREFER_HIGHS and _highs_available():
+        from .. import highs_direct
+
+        direct = highs_direct.solve_lp(
+            [{j: v for j, v in enumerate(row) if v} for row in A], b, c,
+            seconds=max(1, lim.timeout_ms // 1000))
+        if direct is not None and direct["status"] == "optimal":
+            relax_x, dual_float, basis = direct["x"], direct["y"], direct["basis"]
+            have_duals = True
+
     # ---- certificacion exacta ------------------------------------------
     exact_ok, x_ex, y_ex, rep, denom = False, None, None, None, None
     exact_stopped = False
@@ -889,7 +930,8 @@ def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
         _progress(loud, t0, "engine.opt.progress.exact")
         try:
             x_ex, y_ex, rep, denom = exact.certify(A, b, c, relax_x, dual_float,
-                                                   y_alts=alts, deadline=deadline)
+                                                   y_alts=alts, deadline=deadline,
+                                                   basis=basis)
         except exact.Deadline:
             x_ex, y_ex, rep, denom = None, None, None, None
             exact_stopped = True
@@ -1167,26 +1209,37 @@ def infeasible_ray(spec, limits=None):
     rows, b, c, _names = spec.as_leq_sparse()
     if not rows:
         return None
+    # AN IIS FIRST, when HiGHS can say which rows conflict: the ray is sought
+    # on those rows only, so it is zero everywhere else -- smaller to store
+    # and to read. Checked against every row below, like any other ray.
+    from .. import highs_direct
+
+    keep = highs_direct.iis_rows(rows, b, c) or list(range(len(rows)))
     aux = LPSpec(sense="min", title="farkas ray")
-    ys = ["y{}".format(i) for i in range(len(rows))]
-    for v in ys:
+    ys = {i: "y{}".format(i) for i in keep}
+    for v in ys.values():
         aux.variable(v)
-    aux.objective({v: b[i] for i, v in enumerate(ys)})
+    aux.objective({v: b[i] for i, v in ys.items()})
     cols = {}
-    for i, r in enumerate(rows):
-        for j, a in r.items():
+    for i in keep:
+        for j, a in rows[i].items():
             cols.setdefault(j, {})[ys[i]] = a
     for j in range(len(c)):
         aux.constraint(cols.get(j, {}), ">=", 0, name="col{}".format(j))
-    aux.constraint({v: 1 for v in ys}, "==", 1, name="norm")
+    aux.constraint({v: 1 for v in ys.values()}, "==", 1, name="norm")
     res = opt(aux, limits, _ray=False, _vectors_only=True)
     vec = res.certificate
     if res.verdict is not Verdict.SATISFIABLE or vec is None or \
             not res.meta.get("exact"):
+        if len(keep) < len(rows):          # the IIS did not hold: all rows
+            return _ray_all_rows(spec, limits)
         return None
-    y = [exact.to_fraction(v) for v in vec.payload["primal"]]
-    if len(y) != len(rows) or any(v < 0 for v in y):
+    sub = [exact.to_fraction(v) for v in vec.payload["primal"]]
+    if len(sub) != len(keep) or any(v < 0 for v in sub):
         return None
+    y = [exact.to_fraction(0)] * len(rows)
+    for k, i in enumerate(keep):
+        y[i] = sub[k]
     col = [exact.to_fraction(0)] * len(c)
     for i, r in enumerate(rows):
         if y[i]:
@@ -1197,6 +1250,20 @@ def infeasible_ray(spec, limits=None):
     if sum((b[i] * y[i] for i in range(len(rows))), exact.to_fraction(0)) >= 0:
         return None
     return exact.serialize_all(y)
+
+
+def _ray_all_rows(spec, limits):
+    import os
+
+    old = os.environ.get("CERTO_HIGHS_DIRECT")
+    os.environ["CERTO_HIGHS_DIRECT"] = "0"
+    try:
+        return infeasible_ray(spec, limits)
+    finally:
+        if old is None:
+            os.environ.pop("CERTO_HIGHS_DIRECT", None)
+        else:
+            os.environ["CERTO_HIGHS_DIRECT"] = old
 
 
 def infeasible_certificate(spec, limits=None):

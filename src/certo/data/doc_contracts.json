@@ -406,6 +406,13 @@
    "question": "Where does my whole project stand?",
    "spec": "none; it reads a directory of certificates"
   },
+  "step": {
+   "answers": "for each substitution `x <= u`, that the bound is nondecreasing in `x` on the box and that `u` stays in `x`'s interval; then that the conclusion is above the substituted bound where the conditions hold -- or the point where the step fails, with the bound that DOES follow",
+   "certificate": "`bound_step`, **solver-free**: every rule a `polynomial_nonneg` certificate of the exact rational function it is about",
+   "not_established": "anything off the box, or a step of another shape than \"substitute upper bounds where the bound is monotone, then compare\". Upper bounds only; a lower bound is an upper bound on `-D`.",
+   "question": "From this bound and these substitutions, does that bound follow?",
+   "spec": "`StepSpec`"
+  },
   "sweep": {
    "answers": "the verdict over the family, **and which of three levels was established about the predicate**",
    "certificate": "`sweep` / `domain_sweep`; solver-freedom depends on the predicate",
@@ -835,6 +842,13 @@
    "question": "¿Dónde está todo mi proyecto?",
    "spec": "ninguno; lee un directorio de certificados"
   },
+  "step": {
+   "answers": "para cada sustitución `x <= u`, que la cota es no decreciente en `x` en la caja y que `u` se queda en el intervalo de `x`; luego, que la conclusión está por encima de la cota sustituida donde se cumplen las condiciones -- o el punto donde el paso falla, con la cota que SÍ se sigue",
+   "certificate": "`bound_step`, **sin solver**: cada regla un certificado `polynomial_nonneg` de la función racional exacta de la que habla",
+   "not_established": "nada fuera de la caja, ni un paso de otra forma que \"sustituir cotas superiores donde la cota es monótona, y comparar\". Solo cotas superiores; una cota inferior es una superior de `-D`.",
+   "question": "De esta cota y estas sustituciones, ¿se sigue aquella cota?",
+   "spec": "`StepSpec`"
+  },
   "sweep": {
    "answers": "el veredicto sobre la familia, **y cuál de tres niveles se estableció sobre el predicado**",
    "certificate": "`sweep` / `domain_sweep`; la libertad de solver depende del predicado",
@@ -874,6 +888,7 @@
   "cover": "clique_partition.py",
   "cover --maximum": "triangle_cover_sat.py",
   "cover --minimum": "clique_partition_minimum.py",
+  "cover --sat": "triangle_cover_sat.py",
   "covering": "covering_physical.py",
   "cycle": "dependency_cycle.py",
   "eliminate": "eliminate_parameter.py",
@@ -915,6 +930,7 @@
   "shrink": "mus_ramsey.py",
   "solve": "linear_system.py",
   "sos": "sos_quartic.py",
+  "step": "bound_step.py",
   "sweep": "calibrate_density.py",
   "sweep --n-range": "sweep_range_nested.py",
   "sweep --witnesses": "setfamily_sweep.py",

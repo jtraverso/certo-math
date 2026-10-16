@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-10-16, at **0.32.0**.
+Last updated: 2026-10-16, at **0.33.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -110,19 +110,12 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
-| **P2** | HiGHS directly (`highspy`): the optimal BASIS from the solver (no inference from the float support), an IIS for an infeasible LP (smaller Farkas rays), the MIP's dual bound and incumbent to start branch and bound | **M** | med | med | `highspy` is installed and only reached through PuLP |
+| **P3** | HiGHS directly, the rest: warm starts across branch-and-bound nodes (a child from its parent's basis), and HiGHS's MIP cuts read back as certificates | **M** | low | med | `highspy` is installed and only reached through PuLP |
 | **P2** | Rigorous numerics from FLINT (Arb/Acb): root isolation with error balls plus Sturm counts (comparing algebraic numbers), certified eigenvalue enclosures (spectral bounds of graphs), rigorous integrals in `bounds` | **M** | med | med | `complex_roots`, `acb_mat.eig`, `acb.integral` checked available in python-flint 0.9 |
 | **P3** | Proposers from scipy and networkx: weighted assignment by the Hungarian method (its dual potentials ARE the certificate), graph isomorphism maps by VF2 (checked edge by edge), Bron-Kerbosch for `cliques_of` | **S each** | high | low | installed, unused |
-| **P2** | The recurrence over masks for a PACKING (most disjoint candidates), beside partition and cover | **S-M** | high | low | `cover --maximum` answers it by SAT since 0.30; a solver-free table for small universes is the other route |
-| **P2** | Labels that keep apart a FEASIBLE bound, an LP optimum, a relaxation bound and a written universal proof, on every summary; a cover is an upper bound unless proved minimum | **S-M** | med | low | user feedback, T328-T345 (seven sections); the card covers role and pending, not this |
-| **P2** | The scope of a synthesis said with it: a scalar model is not the physical object, over-approximated domains recorded, a counterexample marked realisable or not | **S-M** | med | low | user feedback, T330-T348 (six sections); regimes cover part of it |
-| **P2** | `same_program` beyond LPs: a certificate of an ideal, a cover or a CNF compared with the consumer's model in memory | **S-M** | med | low | user feedback, T329-T349; LPs since 0.30 |
-| **P3** | Estimate columns and memory before expanding local clique LPs, and route large blocks to parametric templates | **S** | med | low | user feedback, T331, T334: a user's own expansion passed 2 GiB |
-| **P2** | Contracts between bound shapes: an absolute bound `D <= C`, a linear one `D <= C y`, a rational one `D <= B y / (1 + B y / n)`, and the transformations allowed between them (concavity, the chord's direction) | **M** | med | low | user feedback (a concavity step taken the wrong way); today: each step as a `Spec`, proved |
 | **P3** | Integer-parameter model families: derive each instance's demands and kernels from one schema in `j`, and check the specialisation | **M-L** | low | med | user feedback (coefficients of j = 9 left inside a proof for j = 8) |
 | **P2** | CEGIS witnesses tied to physical resources: parameters linked to pages, capacities and original edges, the relaxation's scope kept until a matching or flow witness arrives | **L** | low | med | user feedback; joins composition with ports. `SynthSpec.scope` says what is relaxed today |
 | **P3** | Certificates of a dynamic programme over a block tree (messages, the cycle-closing bit); oriented multigraphs with multiplicity and exact decoding | **M-L** | low | med | user feedback, T340, T346, T347 |
-| **P3** | Coherent-metadata mutations in `verify --tamper` (a duplicated part with `size` adjusted, claim+1 with cofactors kept, an UNSAT claim on a SAT CNF with the header fixed) | **S** | high | low | user feedback, T335, T343, T344: all of them caught today, asked for as a packaged battery |
 | **P3** | Certificate transformations for a promoted leaf (loss of exactly 1, resources and virtuals kept), and promotion tracking by leaf identity | **M** | low | med | user feedback (110); belongs with the construction-contracts row |
 | **P2** | Composition with PORTS: gadgets, projection contracts (each global partition induces a valid local state), refusing to add minima of incompatible states; an owner change certified relative to a previous packing; a Kempe trace with lists; integer balances derived from the trace, not re-entered | **L** | med | high | two reports, thirteen sections; acceptance tests in the feedback (two IN2 give 4/5, not 9/10 + 9/10). Joins the Tuza contracts row |
 | **P3** | Localisation and quotient maps as typed obligations (base ring, inverted elements, images of generators, both compositions, a cancelled factor's unit condition), and component transport across charts with the four presence cases | **L** | **low** | med | user feedback; joins the isomorphism-of-localised-quotients row |
@@ -137,7 +130,6 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | Bernstein data with a small Lean checker against a pinned Mathlib, before any automatic export of `polynomial_nonneg` | **L** | **low** | med | user feedback: no `sorry`, no heuristic tactic -- the kernel checks the identities and signs of the data |
 | **P3** | A weighted combinatorial transport as a parametric certificate, with the bridge from single classes to the reduced model | **L** | **low** | med | user feedback, still loosely specified: a replacement rule preserving every edge demand, legality, non-negativity and cost for any number of classes |
 | **P3** | `divisibility`: the incidence matrix pieces x edges built for you, and "Q yes / Z no" with the obstruction -- a thin entry point over `solve` | **S-M** | med | low | user feedback: the Smith-normal-form step is what divisibility arguments need, and `solve` already does it once the matrix is written |
-| **P3** | `farkas_ray` tied to the program it is about when it travels alone (a spec digest, or the LP's own rows by name) | **S** | med | low | a standalone ray is about the system in its payload, which is true and checked; nothing says which user program that system is |
 | **P2** | Piecewise programs in `atlas`: a DECLARED piecewise definition (region k -> program k), each piece checked against the program declared for its region, the statement about that declared function | **M** | med | med | user feedback (a piecewise phi): one program for the whole domain forced a reformulation as a max of lines, which is not always possible. Declared, not inferred from the pieces -- otherwise the atlas would define the function it claims to bound |
 | **P2** | A declarative spec notation that is not code: typed variables, named hypotheses, infix formulas, parsed without `eval`; certo DERIVES the structure (the induction step from P(k), the family of a bisect), echoes a canonical reading back, and hashes it. SMT-LIB accepted as an alternative | **M-L** | med | high | specs other than the 12 JSON types are Python that certo executes. This makes third-party specs safe for `prove`, `induct`, `parametric`, `bisect`, gives a model less to get wrong than Python + z3, and removes by construction the class of CM-08 (a step that is not the one the chain needs). First stage `Spec` and `induct`, then `parametric` and `bisect`; `sweep` predicates stay in Python. Natural language stays OUTSIDE certo: a model writes the notation, certo parses it, reads it back and lints it, a person confirms |
 | **P3** | SageMath as an optional PROPOSER, through `sage -python`: automorphism groups (for orbital branching), large Groebner bases, exact real-root isolation, Normaliz/PPL | **M-L** | **low** | med | gigabytes, not pip-installable, no native Windows -- so never a dependency, an optional backend like `geng` or `cadical`. Every answer checked by certo: generators are automorphisms, cofactors multiply out, Sturm sequences, `check_hilbert`. CAD proposes only; it produces no certificate |
@@ -378,6 +370,7 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| HiGHS directly (basis, IIS, MIP incumbent and bound), `certo step` (bound shapes), the packing recurrence, coherent forgeries, `estimate_cliques`, `farkas_ray` against its program; the evidence labels, the scope of a synthesis and `same_program` beyond LPs (shipped in 0.31, removed here) | **0.33.0** |
 | Every engine within its budget, semigroup points, profiles and counts, conditioned coverings (`covering`), role transport (`roles`), optimal synthesis and named obligations, prerequisite chains, cleared denominators with their sign in `nonneg`, the hardness reading of a timeout, `find` with verdicts, confidence, calls and `--spec` | **0.32.0** |
 | Binary bounds kept, hypergraph labels refused when they print alike, the empty hypergraph, the API reading a hypergraph by its command, `--clear-denominators`, `verify --obligation` and fingerprints, evidence classes, `SynthSpec.scope`, the accepted CEGIS round | **0.31.0** |
 | Optima by SAT with a proof (`sat_optimum`), `exists` on transversals, `LPSpec.to_data` and `same_program`, gmpy2 in the simplex, FLINT for exact systems and integer products, sparse rays in branch and bound | **0.30.0** |
@@ -1100,7 +1093,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.32.0**, with **64 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.33.0**, with **65 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional
@@ -1110,7 +1103,7 @@ lemma's `cited`, and in 0.19.0 `max_size`, `farkas`, `at_most`, `not_cliques`
 and `not_edges`; in 0.20.1 `bounds`, `k`, `good_instance` and
 `bad_instance`; in 0.22.0 `rounded`, `cuts` and an atlas piece's `claim_by`; in 0.24.0
 `ray` (`polynomial_nonneg`) and `farkas` (`variable_range`); in 0.25.0 `repair` (`exact_cover`); in 0.26.0 `cases` (`proof`) and a list in `repair`; in 0.26.1 `helpers`
-(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.30.0 the kind `sat_optimum`; in 0.31.0 `cleared` (`ideal`) and `scope` (`cegis`, `cegis_none`); in 0.32.0 the kinds `conditioned_cover`, `role_transport`, `synth_optimum`, and `profiles` (`affine_semigroup`), `cleared` (`polynomial_nonneg`), `pending`, `needs`, `not_closed` (`proof`); in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
+(`cegis`); in 0.26.2 `citations` (`unsat_core`); in 0.26.3 the new kind `cegis_none`; in 0.27.0 `card` (every kind); in 0.30.0 the kind `sat_optimum`; in 0.31.0 `cleared` (`ideal`) and `scope` (`cegis`, `cegis_none`); in 0.32.0 the kinds `conditioned_cover`, `role_transport`, `synth_optimum`, and `profiles` (`affine_semigroup`), `cleared` (`polynomial_nonneg`), `pending`, `needs`, `not_closed` (`proof`); in 0.33.0 the kind `bound_step`, and `problem`, `maximum` (`recurrence_table`); in 0.28.0 the kinds `propositional_refutation`, `recurrence_table`, `repair_refusal`, and `eliminated`, `nonzero` (`ideal`), `lean`, `mode` (`lean_binding`).
 
 Frozen means an existing payload's fields do not move: no renames, no
 removals, no changes of meaning. What stays allowed, permanently:

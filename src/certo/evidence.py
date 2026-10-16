@@ -48,7 +48,7 @@ CLASS = {
     "repair_refusal": "refusal",
     "hypothesis_audit": "audit",
     "conditioned_cover": "sign", "role_transport": "computation",
-    "synth_optimum": "optimum",
+    "synth_optimum": "optimum", "bound_step": "sign",
 }
 
 CLASSES = ("universal", "inconsistency", "identity", "sign", "counterexample",
@@ -68,10 +68,17 @@ def evidence_class(cert) -> str:
     kind = cert.kind
     if kind == "ideal" and p.get("inconsistent"):
         return "inconsistency"
-    if kind in ("polynomial_nonneg", "conditioned_cover") and p.get("holds") is False:
+    if kind in ("polynomial_nonneg", "conditioned_cover", "bound_step") \
+            and p.get("holds") is False:
         return "counterexample"
     if kind == "unsat_core" and p.get("vacuous"):
         return "inconsistency"
+    if kind == "farkas" and not p.get("vacuous") and any(
+            isinstance(r, dict) and r.get("name") == "__goal__"
+            for r in p.get("rows") or []):
+        # the negated claim is one of the rows: a PROOF of the claim, not a
+        # contradiction among the hypotheses
+        return "universal"
     if kind == "lp_dual" and p.get("integral_objective") is not None \
             and str(p.get("integral_objective")) == str(p.get("objective")):
         # an integral point attains the dual bound: the INTEGER optimum

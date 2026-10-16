@@ -83,8 +83,10 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "",
     SAT with `sat` or past 62 elements); `maximum` the most pairwise
     disjoint ones, a packing. The same choices as `cover --minimum`,
     `--sat` and `--maximum`, so the API reaches what the CLI does."""
-    if maximum:
+    if maximum and sat:
         return cover_sat(spec, limits, spec_path, maximum=True)
+    if maximum:
+        return cover_packing(spec, limits, spec_path, max_states=max_states)
     if minimum and sat:
         return cover_sat(spec, limits, spec_path)
     if minimum:
@@ -174,6 +176,52 @@ def cover(spec, limits: Limits | None = None, spec_path: str = "",
             detail += " " + t("engine.cover.repair_steps", n=len(steps))
     return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms,
                   cert, detail=detail, meta=meta)
+
+
+def cover_packing(spec, limits: Limits | None = None, spec_path: str = "",
+                  max_states=None) -> Result:
+    """The MAXIMUM number of pairwise disjoint candidates, by the packing
+    recurrence over masks -- solver-free, the whole table its certificate.
+    Past 62 elements, the same optimum by SAT."""
+    from .. import clock
+    from .. import recurrence as R
+    from ..certificate import recurrence_table_certificate
+    from ..cover import edges_of
+
+    t0 = time.perf_counter()
+    lim = limits or Limits()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    universe = [list(u) if isinstance(u, (tuple, list)) else u for u in spec.universe]
+    cands = list(spec.candidates or spec.parts or [])
+    if spec.cliques:
+        cands = [edges_of(c) for c in cands]
+    cands = [[list(e) if isinstance(e, (tuple, list)) else e for e in c] for c in cands]
+    if len(universe) > 62:
+        return cover_sat(spec, lim, spec_path, maximum=True)
+    try:
+        _index, masks = R.masks_of(universe, cands)
+    except ValueError as e:
+        return Result("cover", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None, detail=str(e))
+    deadline = clock.cap(time.monotonic() + lim.timeout_ms / 1000
+                         if lim.timeout_ms else None)
+    try:
+        table = R.solve_packing(len(universe), masks,
+                                max_states=max_states or R.MAX_STATES, deadline=deadline)
+    except R.TooLarge as e:
+        return Result("cover", Status.RESOURCE_EXHAUSTED, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, ms(), None, detail=str(e),
+                      meta={"stopped_by": "time" if "clock" in str(e).lower() else "states"})
+    full = (1 << len(universe)) - 1
+    value = table[full][0]
+    chosen = R.reconstruct_packing(table, masks, len(universe))
+    cert = recurrence_table_certificate(universe, cands, spec.exact, table, value,
+                                        chosen, problem="packing").stamp(spec_path or None)
+    return Result("cover", Status.UNSAT, Verdict.PROVED, ENGINE_COVER, ms(), cert,
+                  detail=t("recurrence.packing", k=value, n=len(universe),
+                           c=len(cands), states=len(table)),
+                  meta={"optimum": value, "parts": [cands[j] for j in chosen],
+                        "states": len(table), "problem": "packing"})
 
 
 def cover_minimum(spec, limits: Limits | None = None, spec_path: str = "",
@@ -2419,6 +2467,109 @@ def sos(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
 
 
 # ---------------------------------------------------------------------------
+
+
+ENGINE_STEP = "certo/bound-step"
+
+
+@honours_timeout("step", ENGINE_STEP)
+def step(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
+    """From a bound and substitutions, does the conclusion follow? Each rule
+    a sign on the box, certified; a wrong step with its point and with what
+    does follow."""
+    from fractions import Fraction
+
+    from .. import boundstep as BS
+    from ..certificate import bound_step_certificate
+    from ..linarith import NotPolynomial
+    from ..polynomials import rational_function
+    from ..spec import NonnegSpec
+
+    t0 = time.perf_counter()
+    ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+
+    def refuse(msg):
+        return Result("step", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_STEP, ms(), None, detail=str(msg))
+
+    ring = tuple(spec.box)
+    if not ring or any(spec.box[v][1] is None or spec.box[v][0] is None for v in ring):
+        return refuse(t("step.closed_box"))
+    one = Poly.const(ring, 1)
+
+    def R(x):
+        if isinstance(x, Poly):
+            return x, one
+        if isinstance(x, (int, Fraction)):
+            return Poly.const(ring, x), one
+        return BS.normal(rational_function(x, ring))
+
+    try:
+        cur = R(spec.bound)
+        concl = R(spec.conclude)
+        subs = [(str(v), R(u)) for v, u in (spec.substitute or [])]
+    except NotPolynomial as e:
+        return refuse(e)
+    if any(v not in ring for v, _u in subs):
+        return refuse(t("step.unknown_var", names=", ".join(v for v, _u in subs if v not in ring)))
+    region = [(str(n), g) for n, g in (spec.conditions or [])]
+
+    def sign(rat, with_region):
+        res = nonneg(NonnegSpec(poly=BS.rat_to_z3(rat), box=dict(spec.box),
+                                region=region if with_region else [],
+                                subdivide=spec.subdivide, clear_denominators=True),
+                     limits)
+        return res
+
+    steps = []
+    for var, u in subs:
+        mono = sign(BS.diff(cur, var), False)
+        if mono.verdict is not Verdict.PROVED:
+            return Result("step", mono.status, Verdict.REFUTED if mono.verdict is
+                          Verdict.REFUTED else Verdict.INCONCLUSIVE, ENGINE_STEP, ms(),
+                          None, detail=t("step.not_monotone", var=var, why=mono.detail),
+                          meta={"failed": "monotone", "var": var,
+                                "point": mono.meta.get("point")})
+        lo, hi = (Fraction(x) for x in spec.box[var])
+        w_lo = sign(BS.sub(u, (Poly.const(ring, lo), one)), False)
+        w_hi = sign(BS.sub((Poly.const(ring, hi), one), u), False)
+        if w_lo.verdict is not Verdict.PROVED or w_hi.verdict is not Verdict.PROVED:
+            return Result("step", Status.SAT, Verdict.REFUTED, ENGINE_STEP, ms(), None,
+                          detail=t("step.leaves_interval", var=var,
+                                   lo=str(lo), hi=str(hi)),
+                          meta={"failed": "within", "var": var})
+        steps.append({"var": var, "upper": BS.ser(u),
+                      "monotone": mono.certificate.to_dict(),
+                      "within": [w_lo.certificate.to_dict(), w_hi.certificate.to_dict()]})
+        cur = BS.normal(BS.subst(cur, var, u))
+    cmp_ = sign(BS.sub(concl, cur), True)
+    import z3
+
+    follows = " ".join(str(z3.simplify(BS.rat_to_z3(cur))).split())
+    if cmp_.certificate is None:
+        return Result("step", cmp_.status, Verdict.INCONCLUSIVE, ENGINE_STEP, ms(), None,
+                      detail=t("step.undecided", why=cmp_.detail, follows=follows[:200]),
+                      meta={"follows": follows})
+    holds = cmp_.verdict is Verdict.PROVED
+    payload = {"parameters": list(ring),
+               "box": {n: [str(Fraction(lo)), str(Fraction(hi))]
+                       for n, (lo, hi) in spec.box.items()},
+               # as the comparison's certificate read them: one reading only
+               "conditions": dict(cmp_.certificate.payload.get("region") or {}),
+               "bound": BS.ser(R(spec.bound)), "steps": steps,
+               "follows": BS.ser(cur), "conclude": BS.ser(concl),
+               "comparison": cmp_.certificate.to_dict(), "holds": holds,
+               "title": spec.title}
+    cert = bound_step_certificate(payload).stamp(spec_path or None)
+    meta = {"follows": follows, "steps": len(steps)}
+    if holds:
+        return Result("step", Status.UNSAT, Verdict.PROVED, ENGINE_STEP, ms(), cert,
+                      detail=t("step.proved", n=len(steps)), meta=meta)
+    meta["point"] = cmp_.meta.get("point")
+    return Result("step", Status.SAT, Verdict.REFUTED, ENGINE_STEP, ms(), cert,
+                  detail=t("step.refuted", point=", ".join(
+                      "{} = {}".format(k, v) for k, v in (cmp_.meta.get("point") or {}).items()),
+                      follows=follows[:200]), meta=meta)
 
 
 ENGINE_ROLES = "certo/role-transport"

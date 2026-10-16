@@ -1108,8 +1108,8 @@ async def cover(spec_path: str | None = None, spec_source: str | None = None,
         raise TypeError("cover needs a CoverSpec or a transversal "
                         "HypergraphSpec; spec() returned " + type(spec).__name__)
     if maximum:
-        return _emit(await _off(algebra.cover_sat, spec, _limits(timeout_ms), str(f),
-                                True), spec_file=f)
+        return _emit(await _off(algebra.cover, spec, _limits(timeout_ms), str(f),
+                                False, True, sat, max_states), spec_file=f)
     if minimum and sat:
         return _emit(await _off(algebra.cover_sat, spec, _limits(timeout_ms), str(f)),
                      spec_file=f)
@@ -2051,6 +2051,28 @@ async def covering(spec_path: str | None = None, spec_source: str | None = None,
     spec = load_spec(str(f), CoveringSpec)
     res = await _off(algebra.covering, spec, _limits(timeout_ms), str(f))
     return _emit(res, spec_file=f)
+
+
+@mcp.tool(description=(
+    "STEP: a step between bounds, checked. From `D <= bound` and substitutions "
+    "`x <= u`, does `D <= conclude` follow on a box, where the conditions hold? "
+    "Each substitution needs the bound nondecreasing in x on the box and u "
+    "inside x's interval; the conclusion needs conclude - bound >= 0 -- every "
+    "one a sign certified by Bernstein coefficients, denominators' signs "
+    "proved. A wrong step comes back with its point and the bound that DOES "
+    "follow."))
+@_guard
+async def step(spec_path: str | None = None, spec_source: str | None = None,
+               timeout_ms: int = 60_000) -> dict:
+    from .engines import algebra
+    from .spec import StepSpec, load_spec
+
+    f = _spec_file(spec_path, spec_source)
+    spec = load_spec(str(f), StepSpec)
+    res = await _off(algebra.step, spec, _limits(timeout_ms), str(f))
+    out = _emit(res, spec_file=f)
+    out["follows"] = res.meta.get("follows")
+    return out
 
 
 @mcp.tool(description=(

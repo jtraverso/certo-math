@@ -378,3 +378,100 @@ def probe_structural(cert, limits=None, excuse=(), limit=MAX_FORGERIES) -> dict:
             caught = True
         (out["caught"] if caught else out["survived"]).append(label)
     return out
+
+
+# --- COHERENT forgeries: the metadata kept consistent with the lie --------
+#
+# A forger who changes a claim also fixes what would give it away: a part
+# duplicated AND the size bumped, a claim moved AND the cofactors left as
+# they were, a clause dropped AND the DIMACS header recounted. Each one below
+# is caught today; this is the packaged battery a user asked for, so it
+# stays caught.
+
+
+def _shift_const(poly_ser, by):
+    """A serialised polynomial with `by` added to its constant term."""
+    from fractions import Fraction
+
+    out = dict(poly_ser or {})
+    if not out:
+        raise ValueError("no ring to read the constant in")
+    key = next((k for k in out if not any(int(x) for x in str(k).split())), None)
+    if key is None:
+        key = " ".join(["0"] * len(str(next(iter(out))).split()))
+    out[key] = str(Fraction(out.get(key, "0")) + by)
+    return out
+
+
+def coherent_forgeries(payload, kind):
+    """`[(label, forged payload)]` for this kind."""
+    base = json.loads(json.dumps(payload))
+    out = []
+
+    def add(label, fn):
+        d = json.loads(json.dumps(base))
+        try:
+            fn(d)
+        except (KeyError, IndexError, TypeError, ValueError, StopIteration):
+            return
+        if d != base:
+            out.append(("coherent:" + label, d))
+
+    if kind == "exact_cover":
+        def dup_part(d):
+            d["parts"].append(list(d["parts"][0]))
+            d["size"] = len(d["parts"])
+        add("duplicated_part_size_adjusted", dup_part)
+    if kind == "ideal" and not base.get("inconsistent"):
+        add("claim_plus_one_cofactors_kept",
+            lambda d: d.__setitem__("claim", _shift_const(d["claim"], 1)))
+    if kind in ("drat", "cnf_model"):
+        def drop_clause(d):
+            lines = d["dimacs"].strip().split("\n")
+            body = [l for l in lines if l.strip() and not l.startswith(("c", "p"))]
+            head = [l for l in lines if l.startswith("c")]
+            hdr = next(l for l in lines if l.startswith("p"))
+            nv = hdr.split()[2]
+            body = body[:-1]
+            d["dimacs"] = "\n".join(head + ["p cnf {} {}".format(nv, len(body))] + body) + "\n"
+            if "nclauses" in d:
+                d["nclauses"] = len(body)
+        add("clause_dropped_header_recounted", drop_clause)
+    if kind == "lp_dual":
+        from fractions import Fraction
+
+        def objective_up(d):
+            d["objective"] = str(Fraction(d["objective"]) + 1)
+            if isinstance(d.get("declared"), dict) and "objective" in d["declared"]:
+                flip = -1 if d.get("sense") == "min" else 1
+                d["declared"]["objective"] = str(Fraction(d["objective"]) * flip)
+        add("objective_plus_one_declared_too", objective_up)
+    if kind in ("sat_optimum", "recurrence_table"):
+        key = "maximum" if base.get("problem") == "packing" else (
+            "optimum" if "optimum" in base else "minimum")
+
+        def value_and_chosen(d):
+            d[key] = int(d[key]) + 1
+            d["chosen"] = list(d["chosen"]) + [d["chosen"][0]]
+        add("value_plus_one_chosen_extended", value_and_chosen)
+    if kind == "polynomial_nonneg" and base.get("holds") is True:
+        add("poly_lowered_tree_kept",
+            lambda d: d.__setitem__("poly", _shift_const(d["poly"], -1000)))
+    return out
+
+
+def probe_coherent(cert, limits=None) -> dict:
+    """`{"caught", "survived"}`: the coherent forgeries for this kind."""
+    from .certificate import Certificate, verify
+
+    base = json.loads(json.dumps(cert.to_dict() if hasattr(cert, "to_dict") else cert))
+    out = {"caught": [], "survived": []}
+    for label, forged in coherent_forgeries(base.get("payload") or {}, base.get("kind")):
+        d = dict(base, payload=forged)
+        try:
+            caught = not verify(Certificate.from_dict(d), limits).ok
+        except Exception:  # noqa: BLE001 -- a refusal by raising is a refusal
+            caught = True
+        (out["caught"] if caught else out["survived"]).append(label)
+    return out
+
