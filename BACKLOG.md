@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-10-16, at **0.33.0**.
+Last updated: 2026-10-17, at **0.33.1**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -1093,7 +1093,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.33.0**, with **65 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.33.1**, with **65 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

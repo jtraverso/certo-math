@@ -6,6 +6,16 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.33.1] — 2026-10-17
+
+### Fixed
+
+- **`synth --prove-candidate` after an optimised synthesis** (`minimize` /
+  `maximize`) ended with `KeyError: 'implementation'`: the `synth_optimum`
+  certificate keeps the candidate in the half that found it. The CLI, the
+  MCP tool and the verifier of the combined `synth_proved` certificate now
+  read the candidate from either shape (`cegis.implementation_of`).
+
 ## [0.33.0] — 2026-10-16
 
 **HiGHS spoken to directly, a step between bounds checked, a packing by

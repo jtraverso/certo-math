@@ -288,6 +288,18 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
                   t("engine.synth.max_iter", n=lim.max_iterations))
 
 
+def implementation_of(cert) -> dict:
+    """The candidate a synthesis certificate is about, `{name: [sort,
+    value]}`: a `cegis` keeps it in its payload, a `synth_optimum` in the
+    half that FOUND it. `synth --prove-candidate` read the first shape only
+    and died with KeyError on every optimised synthesis."""
+    d = cert.to_dict() if hasattr(cert, "to_dict") else (cert or {})
+    p = d.get("payload") or {}
+    if d.get("kind") == "synth_optimum":
+        p = (p.get("found") or {}).get("payload") or {}
+    return dict(p.get("implementation") or {})
+
+
 def z3util_const(name, sort):
     from ..certificate import _const
 

@@ -1857,7 +1857,7 @@ def cmd_synth(args):
     rc = emit(res, args)
     print()
     try:
-        uni = cegis.prove_candidate(spec, synth_cert.payload["implementation"], lim)
+        uni = cegis.prove_candidate(spec, cegis.implementation_of(synth_cert), lim)
     except ValueError as e:
         print(t("cli.universal.unavailable"))
         print("  " + str(e))

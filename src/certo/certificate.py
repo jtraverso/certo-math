@@ -7469,7 +7469,9 @@ def _verify_synth_proved(cert, limits) -> VerifyReport:
     # about the other: the universal proof could be of any true statement.
     # The candidate is the one the search found, and the universal proof
     # closes the universal statement rebuilt for it from the spec.
-    impl = ((p.get("synth") or {}).get("payload") or {}).get("implementation") or {}
+    from .engines.cegis import implementation_of
+
+    impl = implementation_of(p.get("synth") or {})
     found = {n: v[1] for n, v in impl.items()}
     checks.append((t("verify.synth.candidate"),
                    bool(found) and p.get("candidate") == found,

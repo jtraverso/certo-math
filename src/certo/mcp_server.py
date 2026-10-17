@@ -1399,7 +1399,7 @@ async def synth(spec_path: str | None = None, spec_source: str | None = None,
         return out
 
     uni = await _off(cegis.prove_candidate, sp,
-                     res.certificate.payload["implementation"], lim)
+                     cegis.implementation_of(res.certificate), lim)
     combo = synth_proved_certificate(
         candidate=res.meta.get("implementation"),
         synth_cert=res.certificate.to_dict(),

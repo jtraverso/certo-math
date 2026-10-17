@@ -18030,6 +18030,46 @@ def test_0_33_a_farkas_ray_is_tied_to_your_program():
         assert evidence_class(f.certificate) == "universal"
 
 
+def test_0_33_1_prove_candidate_after_an_optimised_synthesis():
+    """`synth --prove-candidate` died with KeyError: 'implementation' when the
+    synthesis minimised: the optimum's certificate keeps the candidate in
+    the half that found it. Reported with the optimum certified and the
+    universal proof passing once the candidate was fixed by hand."""
+    import contextlib
+    import io
+    import tempfile
+
+    from certo import cli
+    from certo.certificate import verify
+
+    src = """import z3
+from certo import Spec, SynthSpec
+
+
+def spec():
+    a, x = z3.Ints("a x")
+    xr = z3.Real("xr")
+    return SynthSpec(
+        impl_vars=[a], input_vars=[x],
+        impl_constraints=z3.And(a >= 0, a <= 20),
+        behavior=z3.And(x >= 0, x <= 3),
+        correctness=a >= 2 * x, minimize=a,
+        universal=lambda vals: Spec().assume("dom", z3.And(xr >= 0, xr <= 3))
+                                     .claim(vals["a"] >= 2 * xr))
+"""
+    with tempfile.TemporaryDirectory() as d:
+        spec = pathlib.Path(d) / "s.py"
+        spec.write_text(src, encoding="utf-8")
+        out = pathlib.Path(d) / "c.json"
+        with contextlib.redirect_stdout(io.StringIO()):
+            rc = cli.main(["synth", str(spec), "--prove-candidate", "--cert", str(out)])
+        cert = Certificate.from_dict(json.loads(out.read_text(encoding="utf-8")))
+    assert rc == 0 and cert.kind == "synth_proved"
+    assert cert.payload["synth"]["kind"] == "synth_optimum"
+    assert cert.payload["candidate"] == {"a": 6}
+    assert verify(cert, LIM).ok
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

@@ -30,7 +30,7 @@ from .spec import (BisectSpec, BoundSpec, DomainSpec, IdealSpec,
                    SynthSpec, load_spec)
 from .status import Result, Status, Verdict
 
-__version__ = "0.33.0"
+__version__ = "0.33.1"
 
 # `spec.role(...)`, `.link(...)`, `.pending(...)` on every spec type: the
 # card a certificate carries (`certo.card`).
