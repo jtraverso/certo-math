@@ -462,6 +462,10 @@ and sizes only, never what was asked.
 its own self-check, a report is written to the data directory on the spot and
 its path printed. Locally, and still never sent.
 
+**Where (0.34).** Without `--out` the folder goes to the user's data
+directory (`%LOCALAPPDATA%\certo\reports`, `~/.local/share/certo/reports`),
+not the working directory -- which is often somebody else's workspace.
+
 ### `certo doctor`
 
 **Question** — Can this install do what I need?
@@ -734,6 +738,15 @@ from elsewhere is recorded. Requiring certo's own CBC to reproduce a
 construction that already exists would put certo's limits in front of it.
 
 Full treatment in [Worked cases](CASES.md#mixed-designs).
+
+**Your incumbent, and progress (0.34).** `--prove-optimal --incumbent FILE`
+starts from a design you already have -- `{var: value}`, `{"assignment":
+{...}}` or a `mixed_design` certificate -- re-certified by `mixed` before it
+prunes anything; `--progress` prints nodes, open nodes, incumbent and bound
+at most once a second. Both are `prove_optimal`, `incumbent` and `progress`
+in `certo.api.run("mixed", spec, ...)`. A node now costs half what it did on
+the 1048-column packing (0.45 s): a residual LP rebuilt a set per
+coefficient, and the exact check tried two needless dual variants.
 
 ### `certo bisect`
 
@@ -1351,6 +1364,14 @@ disappears from a write-up.
 different answer from "no solution". The edge-by-triangle incidence matrix of
 `K₄` with `y` all ones gives `(½,½,½,½)` over ℚ and *nothing* over ℤ, blocked
 by the last invariant factor.
+
+**Divisibility (0.34).** A `DivisibilitySpec(pieces={name: [elements]},
+target=[elements] or {element: k})` builds the incidence matrix for you and
+runs `solve` over Q and over Z. "Q yes, Z no" comes with its OBSTRUCTION:
+weights on the elements under which every piece totals an integer and the
+target does not (`examples/divisibility_triangles.py`: K4's edges by
+triangles, 1/2). Negative multiplicities are allowed -- this is the lattice
+question; a non-negative decomposition is `cover` or `exists`.
 
 ### `certo parametric`
 
@@ -2176,6 +2197,18 @@ candidate until none exists: `synth_optimum` carries the candidate that
 attains the value and the refuted search for a better one, both verified and
 tied to the same contract -- optimal within the template and its bounded
 domain, which the scope repeats.
+
+**Functions, and the counterexamples that decide (0.34).** A template
+(`certo.templates.polynomial(name, vars, degree, lo, hi)` or
+`combination(name, terms, ...)`) passed as `SynthSpec(templates=[...])` makes
+the found object a FUNCTION: its coefficients are implementation variables,
+and the result names it (`meta["functions"]`), optimised with `minimize` and
+proved unbounded with `--prove-candidate` (`examples/synth_template.py`).
+When no candidate exists -- or nothing better than the optimum -- the
+certificate names a MINIMAL set of decisive counterexamples ("these inputs
+force it"), and `verify` checks that it alone leaves no candidate and that
+none of it can be dropped. `--prove-candidate` now works after `minimize` and
+`maximize` too.
 
 ### `certo compose`
 

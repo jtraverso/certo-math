@@ -350,14 +350,29 @@ def _workspace() -> Path:
     return p
 
 
+def _extra_roots() -> list:
+    """`CERTO_WORKSPACE_EXTRA`: more directories a client may READ specs and
+    certificates from, separated by `os.pathsep`, each an existing absolute
+    path. Explicit on purpose -- the confinement is a security boundary, and
+    a user whose specs lived in another tree was copying them in."""
+    out = []
+    for raw in os.environ.get("CERTO_WORKSPACE_EXTRA", "").split(os.pathsep):
+        raw = raw.strip()
+        if raw and Path(raw).is_absolute() and Path(raw).is_dir():
+            out.append(Path(raw).resolve())
+    return out
+
+
 def _resolve(path: str) -> Path:
-    """Confine the path inside the workspace."""
+    """Confine the path inside the workspace -- or one of the extra roots
+    named in `CERTO_WORKSPACE_EXTRA`."""
     ws = _workspace()
     p = (ws / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
-    if ws not in p.parents and p != ws:
-        raise ValueError(
-            "path outside the workspace ({}): {}".format(ws, path))
-    return p
+    for root in [ws] + _extra_roots():
+        if root in p.parents or p == root:
+            return p
+    raise ValueError(
+        "path outside the workspace ({}): {}".format(ws, path))
 
 
 def _spec_file(spec_path: str | None, spec_source: str | None) -> Path:
@@ -999,8 +1014,9 @@ async def mixed(spec_path: str | None = None, spec_source: str | None = None,
                 target: str | None = None, timeout_ms: int = 120_000,
                 explore: bool = False, prove_optimal: bool = False,
                 max_nodes: int = 5000, wall_timeout_ms: int | None = None,
-                freeze: dict | None = None) -> dict:
-    """`prove_optimal` is branch and bound to a certified integer optimum
+                freeze: dict | None = None, incumbent: str | None = None) -> dict:
+    """`incumbent`: a JSON file in the workspace with a design to start from.
+    `prove_optimal` is branch and bound to a certified integer optimum
     (`max_nodes`, `wall_timeout_ms`); `freeze` is a discrete assignment found
     elsewhere, {variable: value}, whose continuous part is certified."""
     import dataclasses
@@ -1023,9 +1039,12 @@ async def mixed(spec_path: str | None = None, spec_source: str | None = None,
     if prove_optimal:
         from .engines import bb
 
+        given = None
+        if incumbent:
+            given = json.loads(_spec_file(incumbent, None).read_text(encoding="utf-8"))
         res = await _off(bb.prove_optimal, sp, _limits(timeout_ms),
                          spec_path=str(f), max_nodes=max_nodes,
-                         wall_ms=wall_timeout_ms)
+                         wall_ms=wall_timeout_ms, incumbent=given)
         out = _emit(res, spec_file=f)
         for k in ("optimum", "nodes", "by_bound", "infeasible", "leaves", "gap"):
             if k in res.meta:
@@ -1969,9 +1988,16 @@ async def solve(spec_path: str | None = None, spec_source: str | None = None,
     from .spec import LinearSystemSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    spec = load_spec(str(f), LinearSystemSpec)
+    spec = load_spec(str(f))
+    if type(spec).__name__ not in ("LinearSystemSpec", "DivisibilitySpec"):
+        raise TypeError("solve needs a LinearSystemSpec or a DivisibilitySpec; "
+                        "spec() returned " + type(spec).__name__)
     res = await _off(algebra.linear_system, spec, _limits(timeout_ms), str(f))
-    return _emit(res, spec_file=f)
+    out = _emit(res, spec_file=f)
+    for k in ("rational", "integer", "obstruction", "obstruction_target"):
+        if k in res.meta:
+            out[k] = res.meta[k]
+    return out
 
 
 @mcp.tool(description=(

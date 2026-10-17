@@ -63,6 +63,7 @@ es entero.
 | `CoveringSpec` | `covering` |
 | `RoleSpec` | `roles` |
 | `StepSpec` | `step` |
+| `DivisibilitySpec` | `solve` |
 | `EliminateSpec` | `eliminate` |
 | `ParametricSpec` | `parametric` |
 | `PeakSpec` | `peak` |

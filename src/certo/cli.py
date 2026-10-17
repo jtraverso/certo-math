@@ -444,9 +444,16 @@ def cmd_solve(args):
     from .engines import algebra
     from .spec import LinearSystemSpec, load_spec
 
-    spec = load_spec(args.spec, LinearSystemSpec)
+    spec = load_spec(args.spec)
+    if type(spec).__name__ not in ("LinearSystemSpec", "DivisibilitySpec"):
+        print(t("spec.wrong_type", got=type(spec).__name__,
+                want="LinearSystemSpec / DivisibilitySpec"), file=sys.stderr)
+        return 1
     res = algebra.linear_system(spec, limits_from(args), spec_path=args.spec)
     rc = emit(res, args)
+    if not args.json and res.meta.get("obstruction"):
+        print("  " + t("cli.solve.obstruction", weights=", ".join(
+            "{}:{}".format(e, w) for e, w in list(res.meta["obstruction"].items())[:10])))
     if not args.json and res.certificate is not None:
         p = res.certificate.payload
         if p["solution"]:
@@ -1784,9 +1791,18 @@ def cmd_mixed(args):
     if args.prove_optimal:
         from .engines import bb
 
+        given = None
+        if getattr(args, "incumbent", None):
+            given = json.loads(Path(args.incumbent).read_text(encoding="utf-8"))
+
+        def progress(ev):
+            print(t("cli.bb.progress", **ev), file=sys.stderr, flush=True)
+
         res = bb.prove_optimal(spec, limits_from(args), spec_path=args.spec,
                                max_nodes=args.max_nodes,
-                               wall_ms=args.wall_timeout_ms)
+                               wall_ms=args.wall_timeout_ms, incumbent=given,
+                               progress=progress if getattr(args, "progress", False)
+                               else None)
     else:
         res = mixed.mixed(spec, limits_from(args), spec_path=args.spec,
                           target=target, freeze=freeze)
@@ -3158,6 +3174,14 @@ def build_parser():
     sp = add("mixed", "a discrete skeleton found by search, with the "
                       "continuous part certified exactly against a target")
     sp.add_argument("spec", help=".py file returning an LPSpec with kinds")
+    sp.add_argument("--incumbent", metavar="FILE",
+                    help="with --prove-optimal: a design you already have -- "
+                         "{var: value}, {\"assignment\": {...}} or a "
+                         "mixed_design certificate -- re-certified, then used "
+                         "to prune when it beats the one found")
+    sp.add_argument("--progress", action="store_true",
+                    help="with --prove-optimal: one line on stderr at most each "
+                         "second -- nodes, open, incumbent, bound")
     sp.add_argument("--target", metavar="VALUE",
                     help="the value to reach, as an exact rational like 602/9")
     sp.add_argument("--prove-optimal", action="store_true",

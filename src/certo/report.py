@@ -466,7 +466,12 @@ def build(argv=None, cert_path=None, wrong=False, with_coverage=False,
                  lint_report=lint_report, trace=trace)
     command = (argv[0] if argv else "")
 
-    folder = Path(out) if out else Path.cwd() / "certo-report-{}-{}".format(
+    # In the user's DATA directory, not where the command ran: that is often
+    # a shared workspace, and a report folder there is somebody else's mess.
+    # The self-check already wrote there; `--out` still puts it anywhere.
+    from .coverage import data_dir
+
+    folder = Path(out) if out else data_dir() / "reports" / "certo-report-{}-{}".format(
         _stamp(), tri["category"].rstrip("?"))
     folder.mkdir(parents=True, exist_ok=True)
 

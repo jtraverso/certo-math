@@ -455,7 +455,9 @@ def _opt_vectors(spec, lim, t0):
                                    solver="HiGHS"),
                           meta={"lp_solver": engine})
         x_float, y_float, basis = direct["x"], direct["y"], direct["basis"]
-        have = True
+        # Oriented by strong duality already: the negated and absolute
+        # variants only tripled the exact checks of a node that fails a rung.
+        have = False
     else:
         solver, name = _solver(lim, integral=False)
         engine = "pulp/" + name

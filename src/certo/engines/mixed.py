@@ -91,7 +91,19 @@ def _violations(spec, values):
 
 
 def mixed(spec, limits: Limits | None = None, spec_path: str = "",
-          target=None, freeze=None) -> Result:
+          target=None, freeze=None, prove_optimal: bool = False,
+          max_nodes: int = 5_000, wall_ms=None, incumbent=None,
+          progress=None) -> Result:
+    """A discrete skeleton, the continuous part certified. `prove_optimal`
+    runs branch and bound to the integer optimum -- with `incumbent` (a
+    design you have) and `progress` (a callable) as in `bb.prove_optimal` --
+    so the API reaches what `mixed --prove-optimal` does."""
+    if prove_optimal:
+        from . import bb
+
+        return bb.prove_optimal(spec, limits, spec_path=spec_path,
+                                max_nodes=max_nodes, wall_ms=wall_ms,
+                                incumbent=incumbent, progress=progress)
     from . import lp
 
     lim = limits or Limits()

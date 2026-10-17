@@ -529,6 +529,8 @@ def linear_system(spec, limits: Limits | None = None,
     from ..linsolve import MANY, NONE, NotSolvable, UNIQUE, certify
 
     t0 = time.perf_counter()
+    if type(spec).__name__ == "DivisibilitySpec":
+        return _divisibility(spec, limits, spec_path, t0)
     try:
         out = certify(spec)
     except NotSolvable as e:
@@ -559,6 +561,66 @@ def linear_system(spec, limits: Limits | None = None,
                         "kernel_dimension": len(out["kernel"]),
                         "domain": out["domain"],
                         "solution": out["solution"]})
+
+
+def _divisibility(spec, limits, spec_path, t0) -> Result:
+    """The incidence matrix built, solved over Q and over Z; the integer
+    answer is the certificate, the rational one and the obstruction are
+    said beside it."""
+    from fractions import Fraction
+
+    from .. import lattice
+    from ..certificate import linear_system_certificate
+    from ..cover import _key
+    from ..linsolve import NONE, NotSolvable, certify
+    from ..spec import LinearSystemSpec
+
+    names = list(spec.pieces)
+    counts = {}
+    for j, n in enumerate(names):
+        for e in spec.pieces[n]:
+            k = _key(e)
+            counts.setdefault(k, [0] * len(names))[j] += 1
+    target = spec.target if isinstance(spec.target, dict) else {}
+    if not isinstance(spec.target, dict):
+        for e in spec.target:
+            target[_key(e)] = target.get(_key(e), 0) + 1
+    else:
+        target = {_key(e): v for e, v in spec.target.items()}
+    elems = sorted(set(counts) | set(target), key=str)
+    A = [counts.get(e, [0] * len(names)) for e in elems]
+    b = [target.get(e, 0) for e in elems]
+    try:
+        rat = certify(LinearSystemSpec(matrix=A, rhs=b, domain="rational"))
+        out = certify(LinearSystemSpec(matrix=A, rhs=b, domain="integer"))
+    except NotSolvable as e:
+        return Result("solve", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_EXACT, 0.0, None, detail=str(e))
+    q_ok, z_ok = rat["status"] != NONE, out["status"] != NONE
+    meta = {"rational": "yes" if q_ok else "no", "integer": "yes" if z_ok else "no",
+            "elements": [str(e) for e in elems], "pieces": names,
+            "status": out["status"], "solution": out["solution"]}
+    detail = t("engine.solve.divisibility", q=meta["rational"], z=meta["integer"],
+               rows=len(elems), cols=len(names))
+    if q_ok and not z_ok:
+        # THE OBSTRUCTION: row i of U over its invariant d -- every piece
+        # totals an integer under it, the target does not.
+        sm = lattice.smith([[int(v) for v in row] for row in A])
+        U, S = sm["u"], sm["s"]
+        c = [sum(u * int(v) for u, v in zip(row, b)) for row in U]
+        for i in out.get("blocked_rows") or []:
+            d = S[i][i] if i < min(len(S), len(S[0]) if S else 0) else 0
+            if d:
+                y = [Fraction(u, d) for u in U[i]]
+                meta["obstruction"] = {str(e): str(w) for e, w in zip(elems, y) if w}
+                meta["obstruction_target"] = str(Fraction(c[i], d))
+                detail += " " + t("engine.solve.obstruction",
+                                  total=meta["obstruction_target"])
+                break
+    cert = linear_system_certificate(out, title=spec.title).stamp(spec_path or None)
+    return Result("solve", Status.SAT if z_ok else Status.UNSAT,
+                  Verdict.PROVED if z_ok else Verdict.REFUTED, ENGINE_EXACT,
+                  (time.perf_counter() - t0) * 1000, cert, detail=detail, meta=meta)
 
 
 @honours_timeout("quotient", ENGINE_ORBIT)

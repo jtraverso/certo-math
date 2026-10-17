@@ -160,7 +160,7 @@ ALSO = {"PackingSpec": "opt", "DomainSpec": "sweep",
 
 #: Spec types a command takes BESIDES its own. `farkas` reads a linear
 #: program as hypotheses with the claim False: is it infeasible, and why?
-ALSO_TAKES = {"farkas": ("LPSpec", "PackingSpec")}
+ALSO_TAKES = {"farkas": ("LPSpec", "PackingSpec"), "solve": ("DivisibilitySpec",)}
 
 
 def command_for(spec) -> str | None:

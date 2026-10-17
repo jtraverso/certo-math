@@ -2369,5 +2369,11 @@
   "verify.step.detail": "{n} sustitución(es); el paso vale: {holds}",
   "verify.step.follows": "la cota registrada tras las sustituciones es la recalculada",
   "verify.step.shape": "el paso se puede leer",
-  "verify.step.substitution": "sustituyendo {var}: monótona en la caja, y el sustituto dentro del intervalo"
+  "verify.step.substitution": "sustituyendo {var}: monótona en la caja, y el sustituto dentro del intervalo",
+  "engine.solve.divisibility": "divisibilidad de los {rows} elementos por las {cols} piezas: sobre Q {q}, sobre Z {z}",
+  "engine.solve.obstruction": "-- la obstrucción: pesos en los elementos bajo los cuales cada pieza suma un entero y el objetivo suma {total}",
+  "cli.solve.obstruction": "pesos de la obstrucción: {weights}",
+  "engine.synth.decisive": "{k} de los {n} contraejemplos ya lo fuerzan: un conjunto mínimo, nombrado en el certificado",
+  "verify.cegis_none.decisive": "los contraejemplos decisivos solos no dejan candidato, y ninguno se puede quitar",
+  "cli.bb.progress": "  ... {nodes} nodos, {open} abiertos, incumbente {incumbent}, cota {bound}, {elapsed_s} s"
 }

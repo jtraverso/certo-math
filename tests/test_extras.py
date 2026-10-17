@@ -18070,6 +18070,221 @@ def spec():
     assert verify(cert, LIM).ok
 
 
+# --- 0.34: options in COMBINATION, and the rest -----------------------------
+#
+# `synth --prove-candidate` worked, `minimize` worked, and together they died
+# with KeyError: each option was tested alone. Below, every combination a
+# command accepts must end in a certificate that verifies, or in a refusal --
+# never an exception.
+
+
+def _settles(run, label):
+    from certo.certificate import verify
+
+    try:
+        res = run()
+    except (ValueError, TypeError) as e:          # a refusal by name is fine
+        return ("refused", str(e)[:80])
+    if res.certificate is not None:
+        rep = verify(res.certificate, LIM)
+        assert rep.ok, (label, res.certificate.kind, rep.detail)
+    return (res.verdict.value, res.certificate.kind if res.certificate else None)
+
+
+def test_0_34_synth_options_in_combination():
+    import itertools
+    import tempfile
+
+    import z3
+
+    from certo import Limits, Spec, SynthSpec
+    from certo import templates as T
+    from certo.engines import cegis
+
+    a, x = z3.Ints("a x")
+    lim = Limits(timeout_ms=10_000, max_iterations=60)
+    outcomes = {}
+    for objective, named, scoped, failing in itertools.product(
+            (None, "min", "max"), (False, True), (False, True), (False, True)):
+        corr = ({"access": a >= x + 2, "payment": a >= 2 * x} if named
+                else z3.And(a >= x + 2, a >= 2 * x))
+        if failing:                       # no candidate in [0, 3]
+            corr = ({"access": a >= x + 9} if named else a >= x + 9)
+        kw = dict(impl_vars=[a], input_vars=[x],
+                  impl_constraints=z3.And(a >= 0, a <= (20 if not failing else 3)),
+                  behavior=z3.And(x >= 0, x <= 3), correctness=corr)
+        if objective == "min":
+            kw["minimize"] = a
+        if objective == "max":
+            kw["maximize"] = a
+        if scoped:
+            kw["scope"] = {"model": "a scalar", "counterexamples": "relaxation"}
+        label = (objective, named, scoped, failing)
+        rounds = []
+        outcomes[label] = _settles(lambda: cegis.synth(SynthSpec(**kw), lim,
+                                                       on_round=rounds.append), label)
+        if not failing:
+            assert outcomes[label][0] == "proved", (label, outcomes[label])
+            r = cegis.synth(SynthSpec(**kw), lim)
+            impl = cegis.implementation_of(r.certificate)
+            assert impl and "a" in impl, label
+    # a template, optimised, then proved for every real n >= 0
+    n = z3.Int("n")
+    nr = z3.Real("nr")
+    f = T.polynomial("f", [n], degree=1, lo=0, hi=9)
+    sp = SynthSpec(impl_vars=[], input_vars=[n], templates=[f],
+                   behavior=z3.And(n >= 0, n <= 10), correctness=f.expr >= 2 * n + 1,
+                   minimize=z3.Sum(f.vars),
+                   universal=lambda vals: Spec().assume("dom", nr >= 0).claim(
+                       vals["f_c0"] + vals["f_c1"] * nr >= 2 * nr + 1))
+    r = cegis.synth(sp, lim)
+    assert r.meta["functions"]["f"] in ("1 + 2*n", "1 + n*2", "2*n + 1")
+    uni = cegis.prove_candidate(sp, cegis.implementation_of(r.certificate), lim)
+    assert uni.verdict is Verdict.PROVED
+
+
+def test_0_34_cover_options_in_combination():
+    import itertools
+
+    from certo import api
+    from certo.hypergraph import HypergraphSpec
+    from certo.spec import CoverSpec
+
+    specs = {
+        "cover": CoverSpec(universe=[1, 2, 3, 4], parts=[[1, 2], [3, 4]],
+                           candidates=[[1, 2], [3, 4], [2, 3], [1], [4]]),
+        "matching": HypergraphSpec(edges=[[1, 2], [2, 3], [3, 4]]),
+        "transversal": HypergraphSpec(edges=[[1, 2], [2, 3], [3, 4]], problem="transversal"),
+        "empty_matching": HypergraphSpec(edges=[]),
+        "empty_transversal": HypergraphSpec(edges=[], problem="transversal"),
+    }
+    flags = [{}, {"minimum": True}, {"minimum": True, "sat": True},
+             {"maximum": True}, {"maximum": True, "sat": True}]
+    for (name, spec), kw in itertools.product(specs.items(), flags):
+        _settles(lambda: api.run("cover", spec, **kw), (name, kw))
+
+
+def test_0_34_nonneg_step_covering_options_in_combination():
+    import itertools
+
+    import z3
+
+    from certo.engines import algebra
+    from certo.spec import CoveringSpec, NonnegSpec, StepSpec
+
+    x, y = z3.Reals("x y")
+    for clear, region, ray in itertools.product((False, True), (False, True), (False, True)):
+        poly = (x * x + 1) / (x + 2) if clear else x * x - x + 1
+        box = {"x": (0, None if ray else 1)}
+        reg = [("cap", 2 - x)] if region else []
+        _settles(lambda: algebra.nonneg(NonnegSpec(poly=poly, box=box, region=reg,
+                                                   clear_denominators=clear)),
+                 ("nonneg", clear, region, ray))
+    for conds, leaves in itertools.product((False, True), (False, True)):
+        _settles(lambda: algebra.covering(CoveringSpec(
+            domain={"x": (0, 1), "y": (0, 1)},
+            conditions=[("c", 1 - x * y)] if conds else [],
+            obligations=[("F", x + y + 1)],
+            leaves=[{"x": (0, 1), "y": (0, 1)}] if leaves else None)), ("covering", conds, leaves))
+    for conds in (False, True):
+        _settles(lambda: algebra.step(StepSpec(
+            box={"B": (0, 4), "u": (0, 2)}, bound=B_(), substitute=[("B", 2 * z3.Real("u"))],
+            conclude=4 * z3.Real("u"), conditions=[("c", 2 - z3.Real("u"))] if conds else [])),
+            ("step", conds))
+
+
+def B_():
+    import z3
+
+    return z3.Real("B")
+
+
+def test_0_34_compose_options_in_combination():
+    import itertools
+
+    import z3
+
+    from certo.engines.compose import compose
+    from certo.spec import ProofSpec
+
+    p, q = z3.Bools("p q")
+    for pending, cited, cases in itertools.product((False, True), repeat=3):
+        ps = ProofSpec(title="combo")
+        if pending:
+            ps.pending("access", states=p, why="later")
+        if cited:
+            ps.lemmas.append(__import__("certo.spec", fromlist=["Lemma"]).Lemma(
+                name="paper", states=q, cited="Lemma 3 of a paper"))
+        if cases:
+            ps.assume("either", z3.Or(p, z3.Not(p)))
+        ps.conclude(z3.Or(p, q, z3.Not(p)))
+        _settles(lambda: compose(ps, LIM), (pending, cited, cases))
+
+
+def test_0_34_branch_and_bound_takes_your_incumbent_and_reports_progress():
+    from certo import api
+    from certo.engines import bb
+
+    spec = _branching_ilp()
+    first = bb.prove_optimal(spec, LIM, max_nodes=20_000)
+    design = first.certificate.payload["incumbent_cert"]
+    again = bb.prove_optimal(spec, LIM, max_nodes=20_000, incumbent=design)
+    assert again.verdict is Verdict.PROVED and again.meta["given_incumbent"] == "certified"
+    bad = bb.prove_optimal(spec, LIM, max_nodes=20_000, incumbent={"x0": 1})
+    assert bad.meta["given_incumbent"].startswith("missing")
+    via_api = api.run("mixed", spec, prove_optimal=True, max_nodes=20_000)
+    assert via_api.meta["optimum"] == first.meta["optimum"]
+
+
+def test_0_34_divisibility_over_q_and_over_z():
+    from itertools import combinations
+
+    from certo import DivisibilitySpec, api
+
+    def triangles(n):
+        E = ["%d%d" % e for e in combinations(range(n), 2)]
+        T = {"t%d%d%d" % t: ["%d%d" % (t[0], t[1]), "%d%d" % (t[0], t[2]),
+                             "%d%d" % (t[1], t[2])] for t in combinations(range(n), 3)}
+        return T, E
+
+    T, E = triangles(4)
+    r = api.run("solve", DivisibilitySpec(pieces=T, target=E))
+    assert r.meta["rational"] == "yes" and r.meta["integer"] == "no"
+    from fractions import Fraction
+
+    w = {e: Fraction(v) for e, v in r.meta["obstruction"].items()}
+    for piece in T.values():
+        assert sum(w.get(e, 0) for e in piece).denominator == 1
+    assert sum(w.get(e, 0) for e in E) == Fraction(r.meta["obstruction_target"])
+    T, E = triangles(7)
+    assert api.run("solve", DivisibilitySpec(pieces=T, target=E)).meta["integer"] == "yes"
+
+
+def test_0_34_reports_go_to_the_data_directory_and_extra_roots_are_explicit():
+    import os
+    import tempfile
+
+    from certo import mcp_server
+
+    with tempfile.TemporaryDirectory() as ws, tempfile.TemporaryDirectory() as other:
+        (pathlib.Path(other) / "s.py").write_text("x = 1\n", encoding="utf-8")
+        old = dict(os.environ)
+        os.environ["CERTO_WORKSPACE"] = ws
+        try:
+            os.environ.pop("CERTO_WORKSPACE_EXTRA", None)
+            try:
+                mcp_server._resolve(str(pathlib.Path(other) / "s.py"))
+            except ValueError:
+                pass
+            else:
+                raise AssertionError("a path outside the workspace was allowed")
+            os.environ["CERTO_WORKSPACE_EXTRA"] = other
+            assert mcp_server._resolve(str(pathlib.Path(other) / "s.py")).exists()
+        finally:
+            os.environ.clear()
+            os.environ.update(old)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

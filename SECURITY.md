@@ -77,6 +77,13 @@ privileges. Set `CERTO_NO_EXEC=1` in `.mcp.json` if the specs are not yours:
   "env": {"CERTO_WORKSPACE": ".", "CERTO_NO_EXEC": "1"}}}}
 ```
 
+**Extra roots for the MCP workspace (0.34).** `CERTO_WORKSPACE_EXTRA`, a
+list of existing absolute directories separated by the OS path separator,
+lets the MCP server READ specs and certificates there too. Nothing outside
+the workspace and those roots is reachable, and certificates are still
+written to the workspace only. Set it deliberately: a spec it reaches is a
+spec that runs.
+
 ## Supported versions
 
 The latest release on PyPI. The certificate schema is frozen at 5 (since
@@ -165,6 +172,13 @@ como «este spec es correcto».
 un agente apuntado a specs de terceros está corriendo código de terceros con
 tus privilegios. Pon `CERTO_NO_EXEC=1` en `.mcp.json` si los specs no son
 tuyos.
+
+**Raíces adicionales para el workspace del MCP (0.34).**
+`CERTO_WORKSPACE_EXTRA`, una lista de directorios absolutos existentes
+separados por el separador de rutas del sistema, deja que el servidor MCP LEA
+specs y certificados también ahí. Nada fuera del workspace y de esas raíces es
+alcanzable, y los certificados se siguen escribiendo solo en el workspace.
+Configúralo a propósito: un spec al que llega es un spec que se ejecuta.
 
 ## Versiones soportadas
 

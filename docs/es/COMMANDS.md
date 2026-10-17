@@ -470,6 +470,10 @@ cuentas y tamaños, nunca qué se preguntó.
 falla su propia autocomprobación, se escribe un reporte en el directorio de
 datos en el acto y se imprime su ruta. En local, y sin enviarse nunca.
 
+**Dónde (0.34).** Sin `--out` la carpeta va al directorio de datos del
+usuario (`%LOCALAPPDATA%\certo\reports`, `~/.local/share/certo/reports`), no
+al directorio de trabajo -- que a menudo es un workspace de otros.
+
 ### `certo doctor`
 
 **Pregunta** — ¿Puede esta instalación hacer lo que necesito?
@@ -752,6 +756,16 @@ queda registrado. Exigir que el CBC de certo reprodujera una construcción que
 ya existe pondría los límites de certo por delante de ella.
 
 Tratamiento completo en [Casos trabajados](CASES.md#diseños-mixtos).
+
+**Tu incumbente, y progreso (0.34).** `--prove-optimal --incumbent FILE`
+parte de un diseño que ya tienes -- `{var: valor}`, `{"assignment": {...}}` o
+un certificado `mixed_design` -- re-certificado por `mixed` antes de podar
+nada; `--progress` imprime nodos, nodos abiertos, incumbente y cota a lo más
+una vez por segundo. Ambos son `prove_optimal`, `incumbent` y `progress` en
+`certo.api.run("mixed", spec, ...)`. Un nodo cuesta ahora la mitad que antes
+en el empaquetado de 1048 columnas (0.45 s): un LP residual reconstruía un
+conjunto por coeficiente, y la comprobación exacta probaba dos variantes del
+dual innecesarias.
 
 ### `certo bisect`
 
@@ -1372,6 +1386,14 @@ parámetro libre de un texto.
 respuesta distinta de "no hay solución". La matriz de incidencia
 arista-triángulo de `K₄` con `y` todo unos da `(½,½,½,½)` sobre ℚ y *nada*
 sobre ℤ, bloqueada por el último factor invariante.
+
+**Divisibilidad (0.34).** Un `DivisibilitySpec(pieces={nombre: [elementos]},
+target=[elementos] o {elemento: k})` arma la matriz de incidencia por ti y
+corre `solve` sobre Q y sobre Z. "Q sí, Z no" viene con su OBSTRUCCIÓN: pesos
+en los elementos bajo los cuales cada pieza suma un entero y el objetivo no
+(`examples/divisibility_triangles.py`: las aristas de K4 por triángulos, 1/2).
+Se admiten multiplicidades negativas -- es la pregunta del retículo; una
+descomposición no negativa es `cover` o `exists`.
 
 ### `certo parametric`
 
@@ -2226,6 +2248,18 @@ mejor hasta que no existe: `synth_optimum` lleva el candidato que alcanza el
 valor y la búsqueda refutada de uno mejor, ambos verificados y atados al mismo
 contrato -- óptimo dentro de la plantilla y su dominio acotado, como repite el
 alcance.
+
+**Funciones, y los contraejemplos que deciden (0.34).** Una plantilla
+(`certo.templates.polynomial(nombre, vars, grado, lo, hi)` o
+`combination(nombre, términos, ...)`) pasada como `SynthSpec(templates=[...])`
+hace que el objeto hallado sea una FUNCIÓN: sus coeficientes son variables de
+implementación, y el resultado la nombra (`meta["functions"]`), optimizada con
+`minimize` y probada sin cotas con `--prove-candidate`
+(`examples/synth_template.py`). Cuando no existe candidato -- o nada mejor que
+el óptimo -- el certificado nombra un conjunto MÍNIMO de contraejemplos
+decisivos ("estas entradas lo fuerzan"), y `verify` comprueba que solo ellos
+ya no dejan candidato y que ninguno se puede quitar. `--prove-candidate` ahora
+funciona también tras `minimize` y `maximize`.
 
 ### `certo compose`
 

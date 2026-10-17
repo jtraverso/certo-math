@@ -99,6 +99,8 @@ CASES = [
     ("packing_table.py", "cover", ["--maximum"]),
     ("covering_physical.py", "covering", []),
     ("bound_step.py", "step", []),
+    ("synth_template.py", "synth", ["--prove-candidate"]),
+    ("divisibility_triangles.py", "solve", []),
     ("roles_square.py", "roles", []),
     ("synth_minimum.py", "synth", []),
     ("semigroup_profile.py", "semigroup", []),

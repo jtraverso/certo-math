@@ -110,6 +110,10 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             # El objeto encontrado es el resultado, no un detalle del
             # certificado: tiene que verse sin abrir un JSON.
             meta["implementation"] = {n: v for n, (_, v) in impl.items()}
+            if getattr(spec, "templates", None):
+                # the FUNCTIONS found, written out
+                meta["functions"] = {tp.name: tp.instantiate(impl)
+                                     for tp in spec.templates}
         return Result(
             "synth", status, verdict, ENGINE,
             (time.perf_counter() - t0) * 1000, cert, detail, meta=meta,
@@ -134,9 +138,20 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
                 [[str(v), z3util.sort_name(v)] for v in input_vars],
                 [[str(h), z3util.sort_name(h)] for h in helper_vars],
                 counterexamples)
-            return done(Status.UNSAT, Verdict.UNSATISFIABLE,
-                        t("engine.synth.none", ces=len(counterexamples)),
-                        cert, k=k)
+            # THE DECISIVE ONES: a minimal subset of the counterexamples that
+            # still leaves no candidate -- "these three inputs force it", the
+            # sentence a write-up wants. Checked again by `verify`.
+            decisive = _decisive(impl_cons, behav, corr, input_vars, helper_vars,
+                                 counterexamples, lim)
+            detail = t("engine.synth.none", ces=len(counterexamples))
+            if decisive is not None:
+                cert.payload["decisive"] = decisive
+                detail = detail.rstrip(". ") + ". " + t(
+                    "engine.synth.decisive", k=len(decisive), n=len(counterexamples))
+            res = done(Status.UNSAT, Verdict.UNSATISFIABLE, detail, cert, k=k)
+            if decisive is not None:
+                res.meta["decisive"] = [counterexamples[i] for i in decisive]
+            return res
         if r != z3.sat:
             st = classify_unknown(impl_solver.reason_unknown())
             return done(st, Verdict.INCONCLUSIVE,
@@ -207,6 +222,43 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     return done(Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                 t("engine.synth.max_iter", n=lim.max_iterations),
                 k=lim.max_iterations)
+
+
+def _instance(behav, corr, input_vars, helper_vars, ce, i):
+    """The contract at counterexample `ce` (index `i` names its helpers)."""
+    from ..certificate import _const, _value
+
+    subs = [(_const(z3, n, s), _value(z3, s, v)) for n, (s, v) in ce.items()]
+    subs += [(h, z3.Const("{}__ce{}".format(h, i), h.sort())) for h in helper_vars]
+    f = z3.Implies(behav, corr)
+    return z3.substitute(f, *subs) if subs else f
+
+
+def _decisive(impl_cons, behav, corr, input_vars, helper_vars, counterexamples, lim):
+    """Indices of a MINIMAL subset of the counterexamples that, with the
+    implementation's constraints, is still unsatisfiable -- deletion-based,
+    one solver call per counterexample. None when a check is not decided."""
+    inst = [_instance(behav, corr, input_vars, helper_vars, ce, i)
+            for i, ce in enumerate(counterexamples)]
+
+    def unsat(keep):
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.add(impl_cons, *[inst[i] for i in keep])
+        r = s.check()
+        return None if r == z3.unknown else r == z3.unsat
+
+    keep = list(range(len(inst)))
+    if unsat(keep) is not True:
+        return None
+    for i in list(keep):
+        trial = [j for j in keep if j != i]
+        got = unsat(trial)
+        if got is None:
+            return None
+        if got:
+            keep = trial
+    return keep
 
 
 def _which_fail(spec, behav, fixed, ce_concrete, helper_vars, lim):

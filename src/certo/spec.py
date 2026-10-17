@@ -135,8 +135,24 @@ class SynthSpec:
     # template and its bounded domain -- the scope still says which.
     minimize: object = None
     maximize: object = None
+    # FUNCTIONS to find (`certo.templates`): each template's coefficients join
+    # the implementation variables and their bounds the implementation's
+    # constraints; the result names the function found.
+    templates: list = field(default_factory=list)
 
     SCOPE_KEYS = ("model", "relaxed", "counterexamples")
+
+    def __post_init__(self):
+        import z3
+
+        if self.templates:
+            names = {str(v) for v in self.impl_vars}
+            extra = [v for tp in self.templates for v in tp.vars if str(v) not in names]
+            self.impl_vars = list(self.impl_vars) + extra
+            cons = [c for tp in self.templates for c in tp.constraints]
+            if cons:
+                base = self.impl_constraints
+                self.impl_constraints = z3.And(*(([base] if base is not None else []) + cons))
 
     def obligation_names(self):
         """`correctness` given as `{name: formula}`: the names, in order --
@@ -340,19 +356,23 @@ class LPSpec:
         from .exact import to_fraction
 
         out = LPSpec(sense=self.sense, title=self.title)
-        for v in self.continuous:
+        # The two sets ONCE. `v in set(self.discrete)` inside the loops below
+        # rebuilt the set -- and walked every variable -- per coefficient:
+        # 47 000 calls and half a minute on a 1048-column program.
+        cont_list = self.continuous
+        cont, disc_list = set(cont_list), self.discrete
+        disc = set(disc_list)
+        for v in cont_list:
             lo, hi = self.bounds[v]
             out.variable(v, lo, hi)
-        out.objective({v: c for v, c in self.obj.items()
-                       if v in set(self.continuous)})
+        out.objective({v: c for v, c in self.obj.items() if v in cont})
         const = sum((to_fraction(self.obj.get(v, 0)) * to_fraction(assignment[v])
-                     for v in self.discrete), to_fraction(0))
+                     for v in disc_list), to_fraction(0))
         for name, coeffs, sense, rhs in self.cons:
             moved = sum((to_fraction(c) * to_fraction(assignment[v])
-                         for v, c in coeffs.items() if v in set(self.discrete)),
+                         for v, c in coeffs.items() if v in disc),
                         to_fraction(0))
-            rest = {v: c for v, c in coeffs.items()
-                    if v not in set(self.discrete)}
+            rest = {v: c for v, c in coeffs.items() if v not in disc}
             out.constraint(rest, sense, to_fraction(rhs) - moved, name=name)
 
         # WHICH ROWS ARE LOADS survives a substitution: shifting a right-hand
@@ -1528,6 +1548,31 @@ class LinearSystemSpec:
     matrix: object                   # list of lists of int or Fraction
     rhs: object                      # list of int or Fraction
     domain: str = "rational"         # rational | integer
+    title: str = ""
+
+
+@dataclass
+class DivisibilitySpec:
+    """Can the target be written as a combination of the pieces -- with
+    RATIONAL multiplicities, and with INTEGER ones?
+
+        DivisibilitySpec(
+            pieces={"T1": ["01", "12", "02"], "T2": ["23", "34", "24"], ...},
+            target=["01", "12", "02", "23", ...],      # each once; or {elem: k}
+        )
+
+    certo builds the incidence matrix -- elements by pieces, how often each
+    piece uses each element -- and runs `solve` over Q and over Z. "Q yes, Z
+    no" comes with its OBSTRUCTION: weights on the elements under which every
+    piece totals an integer and the target does not. The divisibility step
+    a decomposition argument needs, without writing the matrix by hand.
+
+    Multiplicities may be negative: this is the lattice question, not a
+    packing. A non-negative decomposition is `cover` or `exists`.
+    """
+
+    pieces: dict                     # name -> elements (repeats count)
+    target: object                   # elements, each once, or {element: k}
     title: str = ""
 
 

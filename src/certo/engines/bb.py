@@ -161,8 +161,20 @@ def _frontier_cert(spec, nodes, frontier, incumbent, incumbent_cert, order,
 
 
 def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
-                  max_nodes: int = 5_000, wall_ms=None) -> Result:
+                  max_nodes: int = 5_000, wall_ms=None, incumbent=None,
+                  progress=None) -> Result:
+    """The integer optimum by branch and bound, every node closed by a
+    certificate.
+
+    `incumbent`: a design you already have -- `{variable: value}` for the
+    discrete variables, `{"assignment": {...}}`, or a `mixed_design`
+    certificate -- re-certified by `mixed` before it may prune anything, and
+    used only when it beats the one found. `progress`, a callable, receives
+    `{"nodes", "open", "incumbent", "bound", "elapsed_s"}` at most once a
+    second, in the sign you wrote."""
     from . import lp, mixed
+
+    given_design = incumbent        # the name is reused for the value below
 
     lim = limits or Limits()
     t0 = time.perf_counter()
@@ -213,6 +225,30 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
     if minimising and "solver_bound" in hint:
         hint["solver_bound"] = -hint["solver_bound"]
 
+    # YOUR incumbent, re-certified: a partition verified elsewhere, a design
+    # from another solver. It prunes only once `mixed` has certified it.
+    if given_design is not None:
+        given = _given_incumbent(spec, given_design, lim)
+        hint["given_incumbent"] = given["status"]
+        if given.get("cert") is not None and given["value"] > incumbent:
+            incumbent = given["value"]
+            incumbent_cert = given["cert"]
+            hint["incumbent_from"] = "given"
+    last_tick = [time.perf_counter()]
+
+    def tick(stack, best):
+        if progress is None or time.perf_counter() - last_tick[0] < 1.0:
+            return
+        last_tick[0] = time.perf_counter()
+        sign = -1 if minimising else 1
+        try:
+            progress({"nodes": seen, "open": len(stack),
+                      "incumbent": exact.serialize(sign * incumbent),
+                      "bound": None if best is None else exact.serialize(sign * best),
+                      "elapsed_s": round(ms() / 1000, 1)})
+        except Exception:  # noqa: BLE001 -- a caller's callback never stops the search
+            pass
+
     order = list(spec.discrete)
     nodes, stack = [], [({}, 0, None, None)]
     seen = 0
@@ -221,6 +257,7 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
     while stack:
         fixed, depth, parent_cert, parent_bound = stack.pop()
         seen += 1
+        tick(stack, best_bound)
         over_nodes = seen > max_nodes
         over_clock = wall_ms is not None and ms() > wall_ms
         # The RUN's deadline (`certo.clock`): stopped like the node budget,
@@ -343,6 +380,35 @@ def prove_optimal(spec, limits: Limits | None = None, spec_path: str = "",
     )
 
 
+def incumbent_value(cert_dict):
+    """The achieved value a `mixed_design` certificate records."""
+    return exact.to_fraction(((cert_dict or {}).get("payload") or {}).get("achieved", "0"))
+
+
+def _given_incumbent(spec, given, lim) -> dict:
+    """`{"status", "value", "cert"}` for a design the caller supplied."""
+    if isinstance(given, dict) and given.get("kind") == "mixed_design":
+        given = (given.get("payload") or {}).get("assignment") or {}
+    elif isinstance(given, dict) and isinstance(given.get("assignment"), dict):
+        given = given["assignment"]
+    if not isinstance(given, dict):
+        return {"status": "unreadable"}
+    missing = [v for v in spec.discrete if v not in given]
+    if missing:
+        return {"status": "missing " + ", ".join(missing[:4])}
+    try:
+        fixed = {v: exact.to_fraction(given[v]) for v in spec.discrete}
+    except (TypeError, ValueError, ZeroDivisionError):
+        return {"status": "unreadable"}
+    if any(x.denominator != 1 for x in fixed.values()):
+        return {"status": "not integral"}
+    fixed = {v: int(x) for v, x in fixed.items()}
+    cert = _design(spec, fixed, lim)
+    if cert is None:
+        return {"status": "not a feasible design"}
+    return {"status": "certified", "value": incumbent_value(cert), "cert": cert}
+
+
 def _highs_start(spec, lim, incumbent) -> dict:
     """`{"solver_bound", "incumbent_from", "value", "cert"}` from a short
     HiGHS MIP solve on the whole program (a quarter of the budget, at most
@@ -353,7 +419,8 @@ def _highs_start(spec, lim, incumbent) -> dict:
     if not highs_direct.available():
         return {}
     rows, b, c, _names = spec.as_leq_sparse()
-    integer = [spec.var_names.index(v) for v in spec.discrete]
+    pos = {v: j for j, v in enumerate(spec.var_names)}
+    integer = [pos[v] for v in spec.discrete]
     seconds = max(1.0, min(30.0, lim.timeout_ms / 4000))
     got = highs_direct.solve_mip(rows, b, c, integer, seconds=seconds)
     if got is None:
@@ -364,7 +431,7 @@ def _highs_start(spec, lim, incumbent) -> dict:
         return out
     fixed = {}
     for v in spec.discrete:
-        val = x[spec.var_names.index(v)]
+        val = x[pos[v]]
         if abs(val - round(val)) > 1e-6:
             return out
         fixed[v] = int(round(val))

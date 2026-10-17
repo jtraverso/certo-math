@@ -6,9 +6,37 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
-## [0.33.1] — 2026-10-17
+## [0.34.0] — 2026-10-17
 
-### Fixed
+**CEGIS finds functions and says which counterexamples decide; branch and
+bound takes your incumbent and runs twice as fast; options tested in
+combination.** No new commands (62) and no new kinds (65); the schema stays
+5. New optional field: `decisive` (`cegis_none`).
+
+### New
+
+- **Templates in `synth`** (`certo.templates`: `polynomial`, `combination`):
+  the found object is a function, named in the result, optimised and proved
+  unbounded with `--prove-candidate`.
+- **Decisive counterexamples**: a minimal set that forces "none" (or "nothing
+  better"), checked by `verify` -- alone sufficient, none removable.
+- **`mixed --prove-optimal --incumbent FILE` and `--progress`**, and the same
+  through `certo.api.run("mixed", spec, prove_optimal=True, ...)`.
+- **`DivisibilitySpec` for `solve`**: the incidence matrix built for you, Q and
+  Z, and the obstruction when Q says yes and Z says no.
+- **`CERTO_WORKSPACE_EXTRA`**: extra directories the MCP server may read.
+- **Every option in combination** is now tested: `synth`, `cover`, `nonneg`,
+  `step`, `covering`, `compose`.
+
+### Faster
+
+- A branch-and-bound node on the 1048-column packing: 0.92 s to 0.45 s.
+
+### Changed
+
+- `certo report` writes to the user's data directory by default.
+
+### Fixed (0.33.1, never published on its own)
 
 - **`synth --prove-candidate` after an optimised synthesis** (`minimize` /
   `maximize`) ended with `KeyError: 'implementation'`: the `synth_optimum`

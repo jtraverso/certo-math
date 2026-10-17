@@ -6906,8 +6906,27 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
     r = s.check()
     unsat = r == z3.unsat
     checks.append((t("verify.cegis_none.unsat"), unsat, str(r)))
+
+    # THE DECISIVE SUBSET, when the certificate names one: it alone leaves no
+    # candidate, and dropping any one of it leaves one -- minimal, checked.
+    dec = p.get("decisive")
+    ok_dec = True
+    if dec is not None:
+        ok_dec = (isinstance(dec, list) and all(isinstance(i, int) and
+                  0 <= i < len(formulas) - 1 for i in dec)
+                  and len(set(dec)) == len(dec))
+        if ok_dec:
+            def _unsat(keep):
+                s2 = z3.Solver()
+                lim.apply_to(s2)
+                s2.add(formulas[0], *[formulas[1 + i] for i in keep])
+                return s2.check()
+            ok_dec = _unsat(dec) == z3.unsat and all(
+                _unsat([j for j in dec if j != i]) == z3.sat for i in dec)
+        checks.append((t("verify.cegis_none.decisive"), ok_dec,
+                       str(len(dec) if isinstance(dec, list) else dec)))
     rep = VerifyReport(
-        disjoint and covered and ok_ces and unsat, "cegis_none", False,
+        disjoint and covered and ok_ces and unsat and ok_dec, "cegis_none", False,
         checks=checks, warnings=_synth_scope_notes(p, found=False),
         detail=t("verify.cegis_none.detail", ces=len(p["counterexamples"]),
                  vars=", ".join(impl)))

@@ -2369,5 +2369,11 @@
   "verify.step.detail": "{n} substitution(s); the step holds: {holds}",
   "verify.step.follows": "the recorded bound after the substitutions is the recomputed one",
   "verify.step.shape": "the step can be read",
-  "verify.step.substitution": "substituting {var}: monotone on the box, and the substitute within the interval"
+  "verify.step.substitution": "substituting {var}: monotone on the box, and the substitute within the interval",
+  "engine.solve.divisibility": "divisibility over the {rows} elements by the {cols} pieces: over Q {q}, over Z {z}",
+  "engine.solve.obstruction": "-- the obstruction: weights on the elements under which every piece totals an integer and the target totals {total}",
+  "cli.solve.obstruction": "obstruction weights: {weights}",
+  "engine.synth.decisive": "{k} of the {n} counterexamples already force it: a minimal set, named in the certificate",
+  "verify.cegis_none.decisive": "the decisive counterexamples alone leave no candidate, and none of them can be dropped",
+  "cli.bb.progress": "  ... {nodes} nodes, {open} open, incumbent {incumbent}, bound {bound}, {elapsed_s} s"
 }

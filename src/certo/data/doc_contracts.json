@@ -935,6 +935,6 @@
   "sweep --n-range": "sweep_range_nested.py",
   "sweep --witnesses": "setfamily_sweep.py",
   "synth": "synth_constant.py",
-  "synth --prove-candidate": "synth_prove_identity.py"
+  "synth --prove-candidate": "synth_template.py"
  }
 }
