@@ -2511,5 +2511,6 @@
   "construction.credit.same_bases": "the bases are the ones the hosting step placed, owned by its hosts",
   "construction.credit.same_bases_detail": "the bases of step {step}",
   "construction.box_reversed": "a box with lo > hi: {names}",
-  "construction.names_repeat": "{what}: a name appears twice"
+  "construction.names_repeat": "{what}: a name appears twice",
+  "engine.opt.infeasible_despite": "INFEASIBLE: {solver} said {status}, and an exact Farkas ray, checked, shows the constraints cannot hold together"
 }

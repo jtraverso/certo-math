@@ -62,6 +62,11 @@ kind (66): `construction`. The schema stays 5; new optional fields:
   result, the one the file holds.
 - A constant polynomial needed a box in `nonneg`; its sign is now read.
 - `same_obligation` answered `None` for `sos` certificates.
+- **A clean install on Python 3.12+ could not `import pulp`**: PuLP 4.1.0
+  (like 4.0.1) imports numpy without declaring it. certo now declares
+  `numpy` there.
+- With CBC through PuLP 4, an infeasible LP came back "Undefined" and
+  inconclusive; an exact Farkas ray is now sought and, checked, settles it.
 
 ## [0.34.0] — 2026-10-17
 

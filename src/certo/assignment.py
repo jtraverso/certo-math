@@ -213,8 +213,12 @@ def solve_physical(items, allow, caps, resources, seconds=30):
     says whether they meet. Returns `{item: receiver}` or None."""
     import pulp
 
+    from .engines.lp import _cbc, _new_var
+
     prob = pulp.LpProblem("physical", pulp.LpMaximize)
-    x = {(i, r): pulp.LpVariable("x_{}_{}".format(k, j), cat="Binary")
+    # through `lp`'s adapter: PuLP 4 makes variables on the problem, and
+    # refuses `LpVariable(..., cat=...)` -- what CI's newest PuLP said here
+    x = {(i, r): _new_var(prob, "x_{}_{}".format(k, j), 0, 1, pulp.LpBinary)
          for k, i in enumerate(items) for j, r in enumerate(sorted(caps))
          if r in allow[i]}
     prob += pulp.lpSum(x.values())
@@ -234,8 +238,11 @@ def solve_physical(items, allow, caps, resources, seconds=30):
         for vs in by_res.values():
             if len(vs) > 1:
                 prob += pulp.lpSum(vs) <= 1
+    solver = _cbc(max(1, int(seconds)))
+    if solver is None:
+        return None
     try:
-        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=max(1, int(seconds))))
+        prob.solve(solver)
     except Exception:  # noqa: BLE001 -- no solver: no proposal
         return None
     got = {i: r for (i, r), v in x.items() if (v.value() or 0) > 0.5}

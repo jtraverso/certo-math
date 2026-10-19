@@ -43,6 +43,9 @@ dependencies = [
     "z3-solver>=4.12",
     "pulp>=2.7,<4; python_version < '3.12'",
     "pulp[cbc]>=2.7,<5,!=4.0.1; python_version >= '3.12'",
+    # PuLP 4 imports numpy at module level without declaring it (4.0.1 and
+    # 4.1.0 both): a clean install on 3.12+ could not `import pulp`.
+    "numpy; python_version >= '3.12'",
 ]
 
 [project.urls]

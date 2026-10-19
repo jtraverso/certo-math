@@ -2511,5 +2511,6 @@
   "construction.credit.same_bases": "las bases son las que ubicó el paso de alojamiento, propiedad de sus hosts",
   "construction.credit.same_bases_detail": "las bases del paso {step}",
   "construction.box_reversed": "una caja con lo > hi: {names}",
-  "construction.names_repeat": "{what}: un nombre aparece dos veces"
+  "construction.names_repeat": "{what}: un nombre aparece dos veces",
+  "engine.opt.infeasible_despite": "INFACTIBLE: {solver} dijo {status}, y un rayo de Farkas exacto, comprobado, muestra que las restricciones no pueden cumplirse juntas"
 }

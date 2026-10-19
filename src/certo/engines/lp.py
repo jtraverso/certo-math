@@ -911,6 +911,16 @@ def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
             else "engine.opt.infeasible_no_ray")
         return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
                       ray, detail=detail, meta={"lp_solver": engine()})
+    if st_name in ("Undefined", "Not Solved") and _ray:
+        # CBC through PuLP 4 says "Undefined" for an infeasible LP. A solver
+        # that does not know is not a solver that says no -- but an exact
+        # Farkas ray, checked, is the answer whatever the solver said.
+        ray = infeasible_certificate(spec, lim)
+        if ray is not None:
+            return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
+                          ray, detail=t("engine.opt.infeasible_despite", status=st_name,
+                                        solver=main_name),
+                          meta={"lp_solver": engine()})
     if st_name != "Optimal":
         return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                       engine(), ms(), None,
