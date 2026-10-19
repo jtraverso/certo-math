@@ -911,10 +911,12 @@ def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
             else "engine.opt.infeasible_no_ray")
         return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
                       ray, detail=detail, meta={"lp_solver": engine()})
-    if st_name in ("Undefined", "Not Solved") and _ray:
+    if st_name == "Undefined" and _ray and not discrete:
         # CBC through PuLP 4 says "Undefined" for an infeasible LP. A solver
         # that does not know is not a solver that says no -- but an exact
-        # Farkas ray, checked, is the answer whatever the solver said.
+        # Farkas ray, checked, is the answer whatever the solver said. NOT
+        # after "Not Solved": that is a stop by the clock, and a second solve
+        # of the same size would only spend more of it.
         ray = infeasible_certificate(spec, lim)
         if ray is not None:
             return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
