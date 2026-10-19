@@ -271,7 +271,8 @@ def entries() -> list:
     for name, cls in _spec_classes():
         doc = inspect.getdoc(cls) or ""
         first = doc.split("\n\n")[0].replace("\n", " ")
-        cmds = sorted(c for c, s in routing.SPEC_OF.items() if s == name)
+        cmds = sorted({c for c, s in routing.SPEC_OF.items() if s == name}
+                      | {c for c, takes in routing.ALSO_TAKES.items() if name in takes})
         out.append({"id": name, "type": "spec", "summary": first,
                     "commands": cmds, "use": "{}(...)".format(name),
                     "text": " ".join([name, doc[:900]] + cmds)})
@@ -363,17 +364,17 @@ NOT_AVAILABLE = [
      "why": "an engine, not a checker; not built",
      "instead": "certo cone and certo semigroup for the local toric data"},
     {"id": "ports", "backlog": "Composition with PORTS",
-     "what": "composition with ports: gluing gadgets, transporting resource profiles, projection contracts",
-     "why": "planned; the contracts are not specified yet",
-     "instead": "certo compose with ProofSpec.pending and needs; CoverSpec.repair for relative changes"},
+     "what": "projection contracts for ports, a Kempe trace with lists, balances derived from the trace",
+     "why": "planned; 0.35 checks the gluing itself (ports once, one owner per interior)",
+     "instead": "certo compose with a ConstructionSpec: the glue, lift and hosting contracts"},
     {"id": "parametric_feasibility", "backlog": "Parametric feasibility certificates",
      "what": "a family of bases with rational formulas over regions covering a parameter domain",
      "why": "planned",
      "instead": "certo parametric, certo profile (one parameter), certo atlas, certo covering"},
     {"id": "atlas_charts", "backlog": "Charts in `atlas`",
-     "what": "atlas pieces in other coordinate charts, with the change of coordinates checked",
-     "why": "planned: atlas covers a domain in one chart",
-     "instead": "certo atlas in one chart; certo covering for a conditioned box partition"},
+     "what": "atlas pieces natively in other coordinate charts (the atlas command itself)",
+     "why": "planned: the atlas command covers a domain in one chart",
+     "instead": "certo compose with a ConstructionSpec: the charts and substitution contracts"},
     {"id": "declarative_notation", "backlog": "A declarative spec notation that is not code",
      "what": "a spec notation that is not Python (no exec), or SMT-LIB input",
      "why": "planned; specs other than the JSON types are executed",
@@ -383,9 +384,9 @@ NOT_AVAILABLE = [
      "why": "a witness refutes normality; establishing it is Normaliz's job",
      "instead": "certo semigroup for witnesses and memberships, SemigroupSpec.profiles"},
     {"id": "cegis_provenance", "backlog": "CEGIS witnesses tied to physical resources",
-     "what": "CEGIS counterexamples tied to physical resources (pages, edges, capacities)",
-     "why": "planned with the composition-with-ports work",
-     "instead": "SynthSpec.scope (what is relaxed, whether counterexamples are realisable)"},
+     "what": "CEGIS that produces the matching or cut witness on the same source",
+     "why": "planned; 0.35 checks a synthesised parameter against a resource another step certified",
+     "instead": "certo compose with a ConstructionSpec: the cegis contract (backed_by); SynthSpec.scope"},
     {"id": "packing_upper_bound", "backlog": "A certified integer UPPER bound for packings",
      "what": "a certified integer upper bound for large packings beyond branch and bound",
      "why": "open: needs cuts or another certificate of the integer value",

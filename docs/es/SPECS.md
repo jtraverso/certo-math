@@ -58,6 +58,7 @@ es entero.
 | `SweepSpec` | `sweep`, `shrink`, `enum` |
 | `DomainSpec` | `sweep`, `cases`, `shrink` sobre cualquier dominio finito |
 | `ProofSpec` | `compose` |
+| `ConstructionSpec` | `compose` (contratos sobre objetos compartidos) |
 | `InductSpec` | `induct` |
 | `IdealSpec` | `ideal` |
 | `CoveringSpec` | `covering` |
@@ -296,6 +297,48 @@ familia muy regular eso degenera hacia `n!`, así que hay un tope; alcanzarlo
 fusionara dos familias no isomorfas fusionaría dos órbitas y nada aguas abajo se
 enteraría.
 
+## Contratos a través de una construcción: `ConstructionSpec`
+
+Una desigualdad de costos puede cumplirse aunque el packing que añade reutilice
+una base del hijo; una carpeta puede tener un testigo por archivo y aun así
+omitir un caso; dos devoluciones locales pueden cobrar la misma base. Cada
+certificado comprobaba una cuenta; ninguno comprobaba que las cuentas fueran
+sobre los mismos objetos. Un `ConstructionSpec` nombra los objetos una vez y
+declara PASOS sobre esos nombres, y `certo compose` comprueba cada paso desde
+los datos -- en orden, cada uno pudiendo usar lo que estableció uno anterior --
+y escribe un certificado `construction` que `verify` re-deriva sin llamar a
+ningún constructor.
+
+```json
+{"type": "ConstructionSpec",
+ "graphs": {"K": [["a","b"], ...], "H": [...], "G": [...]},
+ "steps": [{"id": "lift_t", "contract": "lift", ...}, ...],
+ "conclusion": "lo que dices que esto suma"}
+```
+
+La conclusión es DECLARADA: certo comprueba los pasos, no la frase, y lo dice.
+Los números son texto exacto (`"3/4"`); los nombres de vértices siguen siendo
+nombres. Dos ejemplos completos: `examples/construction_split.json` (un
+catálogo, dos levantamientos, alojamiento, un crédito conjunto, un número
+sintetizado respaldado por el alojamiento) y `examples/construction_charts.json`
+(un atlas y un cambio de coordenadas).
+
+| Contrato | Campos | Qué se comprueba |
+|---|---|---|
+| `lift` | `parent`, `child`, `vertex_map` (por defecto: identidad), `child_packing` + `child_cover` o `from` (un levantamiento anterior), `package` (`{"triangle", "owner"}`), `cover_added`, `budget` (`paid_by`, `ratio`) | el mapa lleva el hijo dentro del padre; el packing y la cubierta del hijo son válidos en el hijo; el paquete son triángulos del padre que **no comparten arista** con el packing del hijo; cada propietario es un vértice NUEVO de su triángulo; la cubierta final, reconstruida, toca todo triángulo del padre; el costo lo paga ESTE hijo dentro de la razón |
+| `catalogue` | `max_vertices`, `forbidden` (inducidos), `representatives`, `extensions` (`from`, `neighbours`, luego `to` + `map`, o `excluded` + `at`), opcional `ratio` + `witnesses` | el verificador GENERA toda ampliación de un vértice de cada representante bajo el tamaño y exige que cada una vaya a un representante por un isomorfismo o quede excluida por un subgrafo inducido prohibido -- **una ampliación omitida lo invalida**, un representante duplicado no; testigos comprobados por representante |
+| `credit` | `owners`, `weights` (cualquier signo), `states`, opcional `slots` + `covers`, `cuts` (`p`, `states`), `relation`, `target`, opcional `bases_from` | los propietarios particionan las bases (una base cobrada dos veces se rechaza), cada estado cobra las bases de su propietario una vez, cada cubierta local es un emparejamiento en slots permitidos, las probabilidades son no negativas y suman 1, cada corte da a cada propietario un estado declarado, la suma global en fracciones -- sin re-resolver ningún LP |
+| `hosting` | `items`, `allowed`, `capacities`, `resources`, `assignment`, opcional `target`, `graph` + `bases` | cada base en un host permitido dentro de la capacidad y **ningún recurso dos veces en un host** (un emparejamiento por host); con `graph`, cada base una arista y cada host unido a sus dos extremos |
+| `glue` | `blocks` (`ports`, `interiors`), `matching`, `open`, `owners`, opcional `covers`, `value` (`claim`, `from`, `quantity`) | cada puerto consumido exactamente una vez, cada interior con exactamente un propietario, ninguna cubierta perforada declarada cerrada, y un valor conjunto solo desde un testigo GLOBAL -- nunca una suma de mínimos locales |
+| `certificate` | `path`, opcional `digest`, `obligation` (un spec) | el certificado se EMBEBE, se verifica de nuevo, se comprueba su digest, y se ata a la obligación con `same_obligation` |
+| `cegis` | `certificate` (un paso), `backed_by` (`{param: {step, quantity, relation}}`) | el valor sintetizado de cada parámetro está respaldado por una cantidad que otro paso certificó: un escalar que paga no es todavía un recurso que existe |
+| `charts` | `domain`, `charts` (`selectors`, `certificates`) | hojas recalculadas partiendo a la mitad hasta que en cada una todos los selectores de una carta son >= 0; teselan el dominio; los certificados de cada carta cubren sus hojas y solo suponen sus selectores |
+| `substitution` | `old` (`variables`, `box`, `conditions`), `new` (`variables`), `map` + `denominator`, `inverse` + `inverse_denominator`, `obligation`, `certificate` | `Q = D^k P(N/D)` exactamente, `D > 0` en la caja nueva, `phi(psi(x)) = x`, `E > 0` en la caja vieja, y `psi` lleva el dominio viejo dentro del dominio del certificado -- así `P >= 0` en el dominio viejo |
+
+**Lo que establece es sobre los datos.** Un `lift` comprobado en un padre es un
+hecho sobre ese grafo, no una regla para una familia; que `G` sea el grafo de
+tu teorema es tuyo, y `verify` lo dice siempre.
+
 ## Un spec que no ejecuta nada
 
 `load_spec` compila y ejecuta el `.py` que recibe. Para una persona editando
@@ -325,7 +368,8 @@ CERTO_NO_EXEC=1 certo-mcp    # el servidor entero, en una línea de .mcp.json
 
 Construibles desde datos: `LPSpec`, `PackingSpec`, `MatrixSpec`,
 `LinearSystemSpec`, `ConeSpec`, `CycleSpec`, `CoverSpec`, `CNFSpec`,
-`NumberSpec`, `EquitableQuotientSpec`. Lo que lleva una fórmula z3 o un
+`NumberSpec`, `EquitableQuotientSpec`, `RoleSpec`, `DivisibilitySpec`,
+`ConstructionSpec`, `HypergraphSpec`. Lo que lleva una fórmula z3 o un
 invocable está ausente a propósito: no hay forma de escribirlo en JSON, e
 inventar un lenguaje de expresiones es justo lo que este proyecto decidió no
 hacer.

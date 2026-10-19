@@ -57,7 +57,7 @@ def scope_note(res: Result):
 # ---------------------------------------------------------------------------
 
 
-_HIDDEN_META = ("self_check", "self_check_ms", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
+_HIDDEN_META = ("self_check", "self_check_ms", "steps", "failed", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
                 "counterexample", "hint", "hints", "regime_report", "best_constant", "lemmas", "used", "unused", "bridges", "lo", "hi",
@@ -1244,13 +1244,30 @@ def cmd_compose(args):
     from .engines import compose
     from .spec import ProofSpec, load_spec
 
-    spec = load_spec(args.spec, ProofSpec)
+    spec = load_spec(args.spec)
+    if type(spec).__name__ not in ("ProofSpec", "ConstructionSpec"):
+        print(t("spec.wrong_type", got=type(spec).__name__,
+                want="ProofSpec / ConstructionSpec"), file=sys.stderr)
+        return 1
     res = compose.compose(spec, limits_from(args), spec_path=args.spec,
                           base_dir=Path.cwd())
     rc = emit(res, args)
-    if not args.json and res.meta.get("lemmas"):
+    quiet = args.json or getattr(args, "oneline", False)
+    if not quiet and res.meta.get("lemmas"):
         _print_lemmas(res)
+    if not quiet and res.meta.get("steps"):
+        _print_steps(res)
     return rc
+
+
+def _print_steps(res):
+    """One line per contract, and the first check that failed."""
+    for s in res.meta["steps"]:
+        print("  {} {:<14} {:<12} {}".format(
+            "[ok]" if s["ok"] else "[XX]", s["id"], s["contract"], s["degree"]))
+        for label, ok, detail in s["checks"]:
+            if not ok:
+                print("        !! {}: {}".format(label, detail))
 
 
 def _print_lemmas(res):
@@ -1869,30 +1886,52 @@ def cmd_synth(args):
     # Paso 2: fijar el candidato y demostrar el enunciado GENERAL.
     from .certificate import synth_proved_certificate
 
+    # ONE RESULT ON A MACHINE-READ STREAM. With --oneline or --json the
+    # search's line was printed, then prose about the universal step, and the
+    # file written was the COMBINED certificate: stdout said `synth_optimum`
+    # while the file said `synth_proved`. Those modes now print the combined
+    # result only, and it is the one the file holds.
+    quiet = getattr(args, "json", False) or getattr(args, "oneline", False)
     synth_cert = res.certificate
-    rc = emit(res, args)
-    print()
+    rc = 0
+    if not quiet:
+        rc = emit(res, args)
+        print()
     try:
         uni = cegis.prove_candidate(spec, cegis.implementation_of(synth_cert), lim)
     except ValueError as e:
+        if quiet:
+            return emit(res, args)
         print(t("cli.universal.unavailable"))
         print("  " + str(e))
         return rc
 
-    if uni.verdict is Verdict.PROVED:
-        print(t("cli.universal.pass", status=uni.status.value))
-    elif uni.verdict is Verdict.REFUTED:
-        print(t("cli.universal.fail", status=uni.status.value))
-        print("  " + t("cli.universal.fail.detail"))
-    else:
-        print(t("cli.universal.unknown", status=uni.status.value))
-    print("  " + uni.detail)
+    if not quiet:
+        if uni.verdict is Verdict.PROVED:
+            print(t("cli.universal.pass", status=uni.status.value))
+        elif uni.verdict is Verdict.REFUTED:
+            print(t("cli.universal.fail", status=uni.status.value))
+            print("  " + t("cli.universal.fail.detail"))
+        else:
+            print(t("cli.universal.unknown", status=uni.status.value))
+        print("  " + uni.detail)
 
     combo = synth_proved_certificate(
         candidate=res.meta.get("implementation"),
         synth_cert=synth_cert.to_dict(),
         universal_cert=uni.certificate.to_dict() if uni.certificate else None,
     ).stamp(args.spec)
+    if quiet:
+        verdict = (Verdict.PROVED if uni.verdict is Verdict.PROVED else
+                   Verdict.REFUTED if uni.verdict is Verdict.REFUTED else
+                   Verdict.INCONCLUSIVE)
+        both = Result("synth", uni.status, verdict, res.engine,
+                      res.elapsed_ms + uni.elapsed_ms, combo,
+                      detail=t("cli.combined.detail", candidate=res.meta.get(
+                          "implementation"), universal=uni.detail),
+                      meta=dict(res.meta, universal={"verdict": uni.verdict.value,
+                                                     "status": uni.status.value}))
+        return emit(both, args)
     if args.cert:
         from . import store
 

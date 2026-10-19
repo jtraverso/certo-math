@@ -57,6 +57,7 @@ counterexamples can be spurious (`nu = -1/2`). Declare them with `z3.Int` /
 | `SweepSpec` | `sweep`, `shrink`, `enum` |
 | `DomainSpec` | `sweep`, `cases`, `shrink` over any finite domain |
 | `ProofSpec` | `compose` |
+| `ConstructionSpec` | `compose` (contracts over shared objects) |
 | `InductSpec` | `induct` |
 | `IdealSpec` | `ideal` |
 | `CoveringSpec` | `covering` |
@@ -290,6 +291,46 @@ falling back to a cheaper invariant, because an invariant that merged two
 non-isomorphic families would merge two orbits and nothing downstream would
 notice.
 
+## Contracts across a construction: `ConstructionSpec`
+
+A cost inequality can hold while the packing it adds reuses a base of the
+child; a folder can have a witness for every file and still miss a case; two
+local refunds can charge the same base. Each certificate checked a count; none
+checked that the counts were about the same objects. A `ConstructionSpec`
+names the objects once and states STEPS over those names, and `certo compose`
+checks each step from the data -- in order, each able to use what an earlier
+one established -- and writes one `construction` certificate that `verify`
+re-derives without calling any constructor.
+
+```json
+{"type": "ConstructionSpec",
+ "graphs": {"K": [["a","b"], ...], "H": [...], "G": [...]},
+ "steps": [{"id": "lift_t", "contract": "lift", ...}, ...],
+ "conclusion": "what you say this adds up to"}
+```
+
+The conclusion is DECLARED: certo checks the steps, not the sentence, and says
+so. Numbers are exact text (`"3/4"`); vertex names stay names. Two complete
+examples: `examples/construction_split.json` (a catalogue, two lifts, hosting,
+a joint credit, a synthesised number backed by the hosting) and
+`examples/construction_charts.json` (an atlas and a change of coordinates).
+
+| Contract | Fields | What is checked |
+|---|---|---|
+| `lift` | `parent`, `child`, `vertex_map` (default: identity), `child_packing` + `child_cover` or `from` (an earlier lift), `package` (`{"triangle", "owner"}`), `cover_added`, `budget` (`paid_by`, `ratio`) | the map carries the child into the parent; the child's packing and cover are valid in the child; the package is triangles of the parent sharing **no edge** with the child's packing; every owner is a NEW vertex of its triangle; the final cover, rebuilt, meets every triangle of the parent; the cost is paid by THIS child within the ratio |
+| `catalogue` | `max_vertices`, `forbidden` (induced), `representatives`, `extensions` (`from`, `neighbours`, then `to` + `map`, or `excluded` + `at`), optional `ratio` + `witnesses` | the checker GENERATES every one-vertex extension of every representative below the size and requires each to be mapped by an isomorphism or excluded by a forbidden induced subgraph -- **one omitted extension invalidates it**, a duplicated representative does not; witnesses checked per representative |
+| `credit` | `owners`, `weights` (any sign), `states`, optional `slots` + `covers`, `cuts` (`p`, `states`), `relation`, `target`, optional `bases_from` | owners partition the bases (a base charged twice is refused), every state charges its owner's bases once, every local cover is a matching into allowed slots, the probabilities are non-negative and sum to 1, every cut gives every owner a declared state, the global sum in fractions -- no LP re-solved |
+| `hosting` | `items`, `allowed`, `capacities`, `resources`, `assignment`, optional `target`, `graph` + `bases` | each base on an allowed host within capacity and **no resource twice on one host** (a matching per host); with `graph`, each base an edge and each host joined to both ends |
+| `glue` | `blocks` (`ports`, `interiors`), `matching`, `open`, `owners`, optional `covers`, `value` (`claim`, `from`, `quantity`) | every port consumed exactly once, every interior exactly one owner, no perforated cover declared closed, and a joint value only from a GLOBAL witness -- never a sum of local minima |
+| `certificate` | `path`, optional `digest`, `obligation` (a spec) | the certificate is EMBEDDED, verified again, its digest checked, and tied to the obligation by `same_obligation` |
+| `cegis` | `certificate` (a step), `backed_by` (`{param: {step, quantity, relation}}`) | the synthesised value of each parameter is backed by a quantity another step certified: a scalar that pays is not yet a resource that exists |
+| `charts` | `domain`, `charts` (`selectors`, `certificates`) | leaves recomputed by halving until one chart's selectors are all >= 0 on each; they tile the domain; each chart's certificates cover its leaves and assume only its selectors |
+| `substitution` | `old` (`variables`, `box`, `conditions`), `new` (`variables`), `map` + `denominator`, `inverse` + `inverse_denominator`, `obligation`, `certificate` | `Q = D^k P(N/D)` exactly, `D > 0` on the new box, `phi(psi(x)) = x`, `E > 0` on the old box, and `psi` sends the old domain into the certificate's domain -- so `P >= 0` on the old domain |
+
+**What it establishes is about the data.** A `lift` checked on one parent is a
+fact about that graph, not a rule for a family; that `G` is the graph of your
+theorem is yours, and `verify` says so every time.
+
 ## A spec that executes nothing
 
 `load_spec` compiles and runs the `.py` it is handed. For a person editing
@@ -318,7 +359,8 @@ CERTO_NO_EXEC=1 certo-mcp    # the whole server, in one line of .mcp.json
 
 Buildable from data: `LPSpec`, `PackingSpec`, `MatrixSpec`,
 `LinearSystemSpec`, `ConeSpec`, `CycleSpec`, `CoverSpec`, `CNFSpec`,
-`NumberSpec`, `EquitableQuotientSpec`. Anything carrying a z3 formula or a
+`NumberSpec`, `EquitableQuotientSpec`, `RoleSpec`, `DivisibilitySpec`,
+`ConstructionSpec`, `HypergraphSpec`. Anything carrying a z3 formula or a
 callable is absent on purpose — there is no way to write one in JSON, and
 inventing an expression language is what this project decided not to do.
 

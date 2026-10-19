@@ -1348,11 +1348,15 @@ async def compose(spec_path: str | None = None, spec_source: str | None = None,
     from .spec import ProofSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    sp = await _off(load_spec, f, ProofSpec)
+    sp = await _off(load_spec, f)
+    if not isinstance(sp, ProofSpec) and type(sp).__name__ != "ConstructionSpec":
+        raise TypeError("compose needs a ProofSpec or a ConstructionSpec; "
+                        "spec() returned " + type(sp).__name__)
     res = await _off(cp.compose, sp, _limits(timeout_ms), str(f), _workspace())
     out = _emit(res, spec_file=f)
-    for k in ("lemmas", "used", "unused", "bridges"):
-        out[k] = res.meta.get(k)
+    for k in ("lemmas", "used", "unused", "bridges", "steps", "degree", "failed"):
+        if k in res.meta or k in ("lemmas", "used", "unused", "bridges"):
+            out[k] = res.meta.get(k)
     return out
 
 

@@ -84,8 +84,14 @@ def _solve(T, basis, n_cols, budget, deadline=None, prefer=None):
     m = len(T)
     bland = prefer is None
     streak = 0
+    from . import clock
+
     while True:
         if deadline is not None and time.monotonic() > deadline:
+            raise SimplexLimit("deadline")
+        if clock.expired():
+            # The run's clock, not only a deadline passed in: the simplex
+            # behind `nonneg`'s multipliers was given none.
             raise SimplexLimit("deadline")
         obj = T[-1]
         if bland:

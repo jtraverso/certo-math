@@ -102,6 +102,14 @@ CASES = [
     ("synth_template.py", "synth", ["--prove-candidate"]),
     ("divisibility_triangles.py", "solve", []),
     ("roles_square.py", "roles", []),
+    # 0.35: contracts across a construction. The four first write the
+    # certificates the two constructions embed, so they run first.
+    ("construction_releases.py", "synth", []),
+    ("chart_left.py", "nonneg", []),
+    ("chart_right.py", "nonneg", []),
+    ("chart_pullback.py", "nonneg", []),
+    ("construction_split.json", "compose", []),
+    ("construction_charts.json", "compose", []),
     ("synth_minimum.py", "synth", []),
     ("semigroup_profile.py", "semigroup", []),
     ("synth_prove_identity.py", "synth", ["--prove-candidate"]),
@@ -257,6 +265,8 @@ def main() -> int:
     tracked = _tracked_examples()
     present = {p.name for p in EX.glob("*.py")
                if tracked is None or p.name in tracked}
+    # A spec that is DATA is an example too; it is listed by name below.
+    present |= {c[0] for c in CASES if c[0].endswith(".json") and (EX / c[0]).exists()}
     missing = sorted(present - listed)
 
     failures = 0
@@ -282,7 +292,7 @@ def main() -> int:
                 failures += 1
             continue
 
-        cert = OUT / (name[:-3] + ".json")
+        cert = OUT / (Path(name).stem + ".json")
         # A file left by an earlier run would be read as this run's answer:
         # a `cover` that writes none was reported as having emitted `drat`.
         if cert.exists():

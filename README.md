@@ -16,7 +16,7 @@ costs hours.
 | **[Project page →](https://jtraverso.github.io/certo-math/)** | the didactic introduction: what certo is for, in one page, in both languages |
 | **[Commands](docs/COMMANDS.md)** | all sixty-two, one entry each: the question, the spec, the certificate, and what it does not establish |
 | **[Specs](docs/SPECS.md)** | the DSL: every spec type with a minimal working example, shared options, exit codes |
-| **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the sixty-five kinds, which re-check without a solver |
+| **[Certificates](docs/CERTIFICATES.md)** | why they are the centre, the sixty-six kinds, which re-check without a solver |
 | **[Worked cases](docs/CASES.md)** | real problems end to end: symmetry, sweeps, parametric bounds, packings, toric data |
 | **[What a result means](docs/VERDICTS.md)** | status against verdict, the four optimisation claims that look alike, `false` against `null`, exit codes |
 | **[Limits](docs/LIMITS.md)** | what it does not do, and the FAQ |

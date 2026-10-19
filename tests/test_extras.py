@@ -15301,6 +15301,9 @@ def test_the_pair_clique_parts_returns_is_refused_by_name():
 #: in its first three results. Most of certo is a FLAG or a FIELD, which a
 #: list of commands never shows -- this is the measured surface.
 FIND_GOLDEN = [
+    ("catalogue coverage by one-vertex extensions", ("compose", "ConstructionSpec")),
+    ("resources transported from a child graph to its parent", ("compose", "ConstructionSpec")),
+    ("bases on one host must not reuse a spoke", ("assign", "AssignmentSpec.resources")),
     ("is a polynomial nonnegative on a box", "nonneg"),
     ("cota entera redondeada", "opt --round"),
     ("integer optimum floor of LP bound", "opt --round"),
@@ -18284,6 +18287,492 @@ def test_0_34_reports_go_to_the_data_directory_and_extra_roots_are_explicit():
             os.environ.clear()
             os.environ.update(old)
 
+
+
+# --- 0.35: seven defects of 0.34, the scope of an LP, physical hosting, and
+# --- contracts across a construction -----------------------------------------
+
+
+def test_0_35_region_products_are_named_whatever_the_order():
+    """`g2*g10` in the spec's order, `g10*g2` in the verifier's: a valid
+    certificate refused by its own checker."""
+    import z3
+
+    from certo import NonnegSpec, api
+    from certo.certificate import verify
+
+    x = z3.Real("x")
+    half = Fraction(1, 2)
+    for names in (("g2", "g10"), ("g10", "g2"), ("support_3", "support_11")):
+        s = NonnegSpec(poly=-(x - half) ** 2, box={"x": (0, 1)},
+                       region=[(names[0], x - half), (names[1], half - x)])
+        r = api.run("nonneg", s, self_check="all")
+        assert r.verdict is Verdict.PROVED, (names, r.detail)
+        assert verify(r.certificate).ok
+        # a certificate written by 0.34 in the spec's order still reads
+        c = r.certificate.to_dict()
+        reg = c["payload"]["tree"]["region"]
+        c["payload"]["tree"]["region"] = {"*".join(reversed(k.split("*"))): v
+                                          for k, v in reg.items()}
+        assert verify(c).ok
+    bad = api.run("nonneg", NonnegSpec(poly=x, box={"x": (0, 1)}, region=[("a*b", x)]))
+    assert bad.verdict is Verdict.INCONCLUSIVE and "'*'" in bad.detail
+
+
+def test_0_35_nonneg_stops_inside_its_search_when_the_clock_does():
+    from certo import NonnegSpec, clock
+    from certo.engines import algebra
+    from certo.polynomials import Poly
+
+    R = ("x", "y")
+    x, y = Poly.var(R, "x"), Poly.var(R, "y")
+    from certo import budget
+
+    s = NonnegSpec(poly=(x - y) ** 6 + x * y + Fraction(1, 1000), box={"x": (0, 1), "y": (0, 1)},
+                   subdivide=12)
+    calls = [0]
+    real = clock.expired
+
+    def soon():
+        calls[0] += 1
+        return calls[0] > 1          # the clock passes after the engine starts
+
+    budget._COUNT[0] = -1            # the next tick looks at the clock
+    clock.expired = soon
+    try:
+        r = algebra.nonneg(s, Limits(timeout_ms=60_000))
+    finally:
+        clock.expired = real
+    assert r.status is Status.TIMEOUT, (r.status, r.detail)
+    assert getattr(algebra.nonneg, "honours_timeout", False)
+
+
+def test_0_35_rationals_from_gmpy2_reach_flint():
+    import random
+
+    from certo import exact
+
+    try:
+        import gmpy2
+    except ImportError:
+        return
+    random.seed(3)
+    q = lambda a, b: Fraction(gmpy2.mpq(a, b))  # noqa: E731
+    M = [[q(random.randint(-9, 9), random.randint(1, 5)) for _ in range(21)] for _ in range(20)]
+    got = exact._eliminate(M, 20)
+    plain = exact._eliminate([[Fraction(int(v.numerator), int(v.denominator)) for v in row]
+                              for row in M], 20)
+    assert got == plain and type(got[0].numerator) is int
+    assert type(exact.to_fraction(gmpy2.mpq(1, 3)).numerator) is int
+    assert exact.to_fraction(gmpy2.mpq(10 ** 30 + 1, 10 ** 29)) == Fraction(10 ** 30 + 1, 10 ** 29)
+
+
+def test_0_35_a_long_nested_sum_is_read():
+    import z3
+
+    from certo.polynomials import Poly
+
+    x = z3.Real("x")
+    out = z3.RealVal(0)
+    for _ in range(1500):
+        out = out + x
+    assert Poly.from_z3(out, ("x",)).terms == {(1,): Fraction(1500)}
+    y = z3.Real("y")
+    p = x
+    for _ in range(1200):
+        p = p * 1 - (y - y)
+    assert Poly.from_z3(p, ("x", "y")).terms == {(1, 0): Fraction(1)}
+
+
+def test_0_35_prove_candidate_oneline_reports_the_combined_certificate():
+    import os
+    import subprocess
+    import sys
+    import tempfile
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    with tempfile.TemporaryDirectory() as d:
+        cert = str(pathlib.Path(d) / "c.json")
+        p = subprocess.run([sys.executable, "-m", "certo.cli", "synth",
+                            "examples/synth_template.py", "--prove-candidate",
+                            "--oneline", "--cert", cert], capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", cwd=str(root),
+                           env=dict(os.environ, PYTHONPATH=str(root / "src")))
+        lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
+        assert len(lines) == 1, p.stdout
+        assert lines[0].split("\t")[2] == "synth_proved", lines[0]
+        assert json.loads(pathlib.Path(cert).read_text(encoding="utf-8"))["kind"] == "synth_proved"
+        p = subprocess.run([sys.executable, "-m", "certo.cli", "synth",
+                            "examples/synth_template.py", "--prove-candidate", "--json"],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           cwd=str(root), env=dict(os.environ, PYTHONPATH=str(root / "src")))
+        assert json.loads(p.stdout)["certificate"]["kind"] == "synth_proved"
+
+
+def test_0_35_a_constant_needs_no_box_and_sos_binds_to_its_spec():
+    import z3
+
+    from certo import NonnegSpec, SOSSpec, api
+    from certo.certificate import verify
+    from certo.obligation import same_obligation
+
+    r = api.run("nonneg", NonnegSpec(poly=z3.RealVal(3), box={}), self_check="all")
+    assert r.verdict is Verdict.PROVED and verify(r.certificate).ok
+    assert api.run("nonneg", NonnegSpec(poly=z3.RealVal(-1), box={})).verdict is Verdict.REFUTED
+    assert api.run("nonneg", NonnegSpec(poly=z3.Real("x"), box={})).verdict is Verdict.INCONCLUSIVE
+    x, y = z3.Reals("x y")
+    s = SOSSpec(variables=["x", "y"], poly=x ** 2 - 2 * x * y + 2 * y ** 2)
+    r = api.run("sos", s)
+    assert same_obligation(r.certificate, s)["same"] is True
+    other = SOSSpec(variables=["x", "y"], poly=x ** 2 + 2 * y ** 2)
+    assert same_obligation(r.certificate, other)["same"] is False
+
+
+def test_0_35_a_farkas_ray_binds_through_same_program():
+    from certo import LPSpec, api
+    from certo.certificate import same_program
+
+    def lp(rhs):
+        p = LPSpec(sense="max")
+        p.variable("x")
+        p.variable("y")
+        p.objective({"x": 1})
+        p.constraint({"x": 1, "y": 1}, "<=", 1)
+        p.constraint({"x": 1}, ">=", rhs)
+        return p
+
+    r = api.run("opt", lp(2))
+    assert r.certificate.kind == "farkas_ray"
+    assert same_program(r.certificate, lp(2))["same"] is True
+    assert same_program(r.certificate, lp(3))["same"] is False
+
+
+def test_0_35_an_lp_says_feasible_when_nothing_was_optimised():
+    from certo import LPSpec, api
+    from certo.certificate import verify
+    from certo.engines.lp import lp_scope
+
+    def mk(obj, integer=False, rhs=1):
+        p = LPSpec(sense="min", integer=integer)
+        p.variable("x")
+        p.variable("y")
+        p.objective(obj)
+        p.constraint({"x": 1, "y": 1}, ">=", rhs)
+        p.constraint({"x": 2, "y": 1}, "<=", 3, name="budget")
+        return p
+
+    r = api.run("opt", mk({"x": 0, "y": 0}), self_check="all")
+    assert r.meta["scope"] == "feasible" and r.meta["optimality_certified"] is False
+    assert "FEASIBLE" in r.detail and "optimum" not in r.detail.lower().split("(")[0]
+    assert "FEASIBLE" in verify(r.certificate).detail
+    r = api.run("opt", mk({"x": 0, "y": 0}), primal={"x": "1/2", "y": "1/2"})
+    assert r.meta["scope"] == "feasible"
+    r = api.run("opt", mk({"x": 1, "y": 2}))
+    assert r.meta["scope"] == "optimum" and lp_scope(r.certificate) == "optimum"
+    r = api.run("opt", mk({"x": 1, "y": 1}, integer=True, rhs=Fraction(3, 2)))
+    assert r.meta["scope"] == "bound"
+    p = mk({"x": 1})
+    p.constraint({"x": 1}, ">=", 5)
+    assert api.run("opt", p).meta["scope"] == "infeasible"
+
+
+def test_0_35_assignment_with_resources_refuses_the_relaxation_as_physical():
+    from certo import AssignmentSpec, api
+    from certo.certificate import verify
+
+    s = AssignmentSpec(items=["ab", "bc"], allowed={"ab": ["s"], "bc": ["s"]},
+                       capacities={"s": 2}, resources={"ab": ["a", "b"], "bc": ["b", "c"]},
+                       target=2)
+    r = api.run("assign", s, self_check="all")
+    assert r.verdict is Verdict.INCONCLUSIVE, r.detail
+    assert "NOT a physical packing" in r.detail and r.meta["relaxation_size"] == 2
+    assert r.meta["size"] == 1 and verify(r.certificate).ok
+    forged = r.certificate.to_dict()
+    forged["payload"]["physical"]["assignment"] = {"ab": "s", "bc": "s"}
+    forged["payload"]["physical"]["size"] = 2
+    forged["payload"]["reached"] = True
+    assert not verify(forged).ok
+    ok = AssignmentSpec(items=["ab", "cd"], allowed={"ab": ["s"], "cd": ["s"]},
+                        capacities={"s": 2}, resources={"ab": ["a", "b"], "cd": ["c", "d"]},
+                        target=2)
+    r = api.run("assign", ok, self_check="all")
+    assert r.verdict is Verdict.PROVED and r.meta["optimality_certified"]
+    # without resources nothing changes
+    plain = AssignmentSpec(items=["ab", "bc"], allowed={"ab": ["s"], "bc": ["s"]},
+                           capacities={"s": 2}, target=2)
+    assert api.run("assign", plain).verdict is Verdict.PROVED
+
+
+def test_0_35_polynomials_as_text_are_read_exactly_and_nothing_else():
+    from certo.polynomials import parse_text
+
+    p = parse_text(("x", "y"), "x^2 - 2*x*y + 1/3 - (x-y)**2 + 0.25*y")
+    assert str(p) == str(parse_text(("x", "y"), "-y^2 + 1/4*y + 1/3"))
+    for bad in ("x/y", "x^y", "z+1", "2x", "x^-1", "__import__('os')", "x;y"):
+        try:
+            parse_text(("x", "y"), bad)
+        except ValueError:
+            continue
+        raise AssertionError(bad)
+
+
+def _construction(name):
+    root = pathlib.Path(__file__).resolve().parent.parent
+    return json.loads((root / "examples" / name).read_text(encoding="utf-8")), root
+
+
+def _ensure_prereqs(root):
+    import os
+    import subprocess
+    import sys
+
+    for cmd, ex, out in (("synth", "construction_releases.py", "construction_releases.json"),
+                         ("nonneg", "chart_left.py", "chart_left.json"),
+                         ("nonneg", "chart_right.py", "chart_right.json"),
+                         ("nonneg", "chart_pullback.py", "chart_pullback.json")):
+        if not (root / "out" / out).exists():
+            (root / "out").mkdir(exist_ok=True)
+            subprocess.run([sys.executable, "-m", "certo.cli", cmd, "examples/" + ex,
+                            "--cert", "out/" + out], cwd=str(root), capture_output=True,
+                           env=dict(os.environ, PYTHONPATH=str(root / "src")))
+
+
+def _run_construction(data, root):
+    from certo import dataspec
+    from certo.engines.construction import construct
+
+    spec = dataspec.build("ConstructionSpec", data)
+    return construct(spec, LIM, str(root / "examples" / "x.json"), root)
+
+
+def test_0_35_the_vertical_example_holds_and_verifies_from_its_own_file():
+    from certo.certificate import Certificate, verify
+
+    data, root = _construction("construction_split.json")
+    _ensure_prereqs(root)
+    r = _run_construction(data, root)
+    assert r.verdict is Verdict.PROVED, r.detail
+    contracts = {s["contract"] for s in r.meta["steps"]}
+    assert contracts == {"catalogue", "lift", "hosting", "credit", "certificate", "cegis"}
+    # the file alone: round-tripped, re-derived
+    again = Certificate.from_dict(json.loads(json.dumps(r.certificate.to_dict())))
+    rep = verify(again)
+    assert rep.ok and rep.degree == "with_solver", rep.detail
+    assert any("yours" in str(w) for w in rep.warnings)
+    data, root = _construction("construction_charts.json")
+    r = _run_construction(data, root)
+    assert r.verdict is Verdict.PROVED and r.certificate.solver_free, r.detail
+    assert verify(r.certificate).ok
+
+
+def _mutated(path_fn):
+    import copy
+
+    data, root = _construction("construction_split.json")
+    _ensure_prereqs(root)
+    d = copy.deepcopy(data)
+    path_fn(d)
+    return _run_construction(d, root)
+
+
+def _step(d, sid):
+    return next(s for s in d["steps"] if s["id"] == sid)
+
+
+def test_0_35_lift_contract_acceptance():
+    """A package sharing ONE edge with the child, a spoke with the wrong
+    owner, a cost paid by another child, a chain from the wrong step: each
+    rejected by name; the valid chain accepted with its witnesses rebuilt."""
+    def shares(d):
+        _step(d, "lift_s")["package"] = [{"triangle": ["s", "a", "b"], "owner": "s"}]
+
+    def owner(d):
+        _step(d, "lift_s")["package"][0]["owner"] = "b"
+
+    def paid(d):
+        _step(d, "lift_s")["budget"]["paid_by"] = "K"
+
+    def chain(d):
+        _step(d, "lift_s")["from"] = "hosting"
+
+    def cover(d):
+        _step(d, "lift_s")["cover_added"] = []
+
+    for fn, words in ((shares, "shares an edge"), (owner, "not a new vertex"),
+                      (paid, "paid by K"), (chain, "did not end"), (cover, "a-c-s")):
+        r = _mutated(fn)
+        assert r.verdict is Verdict.REFUTED and "lift_s" in r.meta["failed"], fn.__name__
+        assert words in r.detail, (fn.__name__, r.detail)
+
+
+def test_0_35_catalogue_contract_acceptance():
+    def omit(d):
+        _step(d, "split_catalogue")["extensions"].pop(5)
+
+    def dup(d):
+        c = _step(d, "split_catalogue")
+        c["representatives"]["R4_copy"] = c["representatives"]["R4_0"]
+        c["witnesses"]["R4_copy"] = c["witnesses"]["R4_0"]
+
+    r = _mutated(omit)
+    assert r.verdict is Verdict.REFUTED and "missing" in r.detail
+    assert _mutated(dup).verdict is Verdict.PROVED
+
+
+def test_0_35_credit_contract_acceptance():
+    def p_sum(d):
+        _step(d, "credit")["cuts"]["c3"]["p"] = "1/8"
+
+    def omitted(d):
+        del _step(d, "credit")["cuts"]["c2"]["states"]["t"]
+
+    def twice(d):
+        _step(d, "credit")["owners"]["t"].append("ab")
+
+    def cover(d):
+        _step(d, "credit")["covers"]["s"]["ab_ac"] = {"ab": "s1", "ac": "s1"}
+
+    def negative_weight_is_fine(d):
+        _step(d, "credit")["weights"]["bc"] = "-7"
+
+    for fn, words in ((p_sum, "sum to 7/8"), (omitted, "t@c2"), (twice, "ab"),
+                      (cover, "invalid local cover")):
+        r = _mutated(fn)
+        assert r.verdict is Verdict.REFUTED and "credit" in r.meta["failed"], fn.__name__
+        assert words in r.detail, (fn.__name__, r.detail)
+    assert _mutated(negative_weight_is_fine).verdict is Verdict.PROVED
+
+
+def test_0_35_hosting_contract_acceptance():
+    def spoke(d):
+        _step(d, "hosting")["assignment"] = {"ab": "s", "bc": "s", "cd": "t"}
+
+    def renamed(d):
+        h = _step(d, "hosting")
+        h["bases"]["ab"] = ["a", "x"]
+
+    for fn, words in ((spoke, "resource b twice"), (renamed, "ab")):
+        r = _mutated(fn)
+        assert r.verdict is Verdict.REFUTED and "hosting" in r.meta["failed"], fn.__name__
+        assert words in r.detail, (fn.__name__, r.detail)
+
+
+def test_0_35_cegis_parameter_must_be_backed():
+    def unbacked(d):
+        _step(d, "releases_exist")["backed_by"] = {}
+
+    def short(d):
+        _step(d, "hosting")["assignment"] = {"ab": "s"}
+        _step(d, "hosting")["target"] = 1
+
+    for fn in (unbacked, short):
+        r = _mutated(fn)
+        assert r.verdict is Verdict.REFUTED and "releases_exist" in r.meta["failed"], fn.__name__
+
+
+def test_0_35_glue_contract():
+    from certo import construction as C
+
+    good = {"id": "g", "contract": "glue",
+            "blocks": {"B1": {"ports": ["p1", "p2"], "interiors": ["i1"]},
+                       "B2": {"ports": ["q1"], "interiors": ["i2"]}},
+            "matching": [["p1", "q1"]], "open": ["p2"],
+            "owners": {"i1": "B1", "i2": "B2"},
+            "covers": {"c": {"closed": False, "removed": [["u", "v"]]}}}
+
+    def ok(step, outputs=None):
+        steps, rep = C.run({}, [{"id": "w", "contract": "hosting", "items": ["x"],
+                                 "allowed": {"x": ["h"]}, "capacities": {"h": 1},
+                                 "assignment": {"x": "h"}}, step])
+        return rep[1]["ok"], rep[1]["rows"]
+
+    import copy
+
+    assert ok(good)[0]
+    for change in (lambda s: s["open"].append("p1"),               # consumed twice
+                   lambda s: s.__setitem__("open", []),             # p2 never
+                   lambda s: s["blocks"]["B2"]["interiors"].append("i1"),  # two owners
+                   lambda s: s["owners"].pop("i2"),                  # no owner
+                   lambda s: s["covers"]["c"].__setitem__("closed", True),
+                   lambda s: s.__setitem__("value", {"claim": "4/5"}),     # no witness
+                   lambda s: s.__setitem__("value", {"claim": "2", "from": "w",
+                                                     "quantity": "placed"})):
+        s = copy.deepcopy(good)
+        change(s)
+        assert not ok(s)[0], s
+    s = copy.deepcopy(good)
+    s["value"] = {"claim": "1", "from": "w", "quantity": "placed"}
+    assert ok(s)[0]
+
+
+def test_0_35_charts_and_substitution_contracts():
+    import copy
+
+    data, root = _construction("construction_charts.json")
+    _ensure_prereqs(root)
+
+    def run(fn):
+        d = copy.deepcopy(data)
+        fn(d)
+        return _run_construction(d, root)
+
+    def gap(d):            # selectors that leave (1/2, 3/5) uncovered... no: a gap
+        _step(d, "atlas")["charts"]["L"]["selectors"]["left"] = "1/3 - x"
+        _step(d, "atlas")["charts"]["R"]["selectors"]["right"] = "x - 2/3"
+
+    def wrong_cert(d):
+        _step(d, "atlas")["charts"]["L"]["certificates"] = ["right"]
+
+    def pull(d):
+        _step(d, "pullback")["obligation"] = "3*x - 1"
+
+    def inverse(d):
+        _step(d, "pullback")["inverse"] = {"u": "1 + x"}
+
+    def outside(d):
+        _step(d, "pullback")["old"]["box"] = {"x": ["1/4", "1"]}
+
+    for fn, sid in ((gap, "atlas"), (wrong_cert, "atlas"), (pull, "pullback"),
+                    (inverse, "pullback"), (outside, "pullback")):
+        r = run(fn)
+        assert r.verdict is Verdict.REFUTED and sid in r.meta["failed"], (fn.__name__, r.detail)
+
+
+def test_0_35_a_construction_certificate_resists_coordinated_edits():
+    import copy
+
+    from certo.certificate import verify
+
+    data, root = _construction("construction_split.json")
+    _ensure_prereqs(root)
+    r = _run_construction(data, root)
+    base = r.certificate.to_dict()
+
+    def edit(fn):
+        c = copy.deepcopy(base)
+        fn(c["payload"])
+        return verify(c).ok
+
+    def rename(p):       # a base and its owner renamed together, off the graph
+        h = _step(p, "hosting")
+        h["items"] = ["ax" if i == "ab" else i for i in h["items"]]
+        h["allowed"]["ax"] = h["allowed"].pop("ab")
+        h["resources"]["ax"] = h["resources"].pop("ab")
+        h["bases"]["ax"] = ["a", "x"]
+        del h["bases"]["ab"]
+        h["assignment"]["ax"] = h["assignment"].pop("ab")
+
+    def graph(p):
+        p["graphs"]["G"] = [e for e in p["graphs"]["G"] if e != ["s", "c"]]
+
+    def embedded(p):
+        _step(p, "releases")["embedded"]["payload"]["title"] = "edited"
+
+    def dropped(p):
+        p["steps"] = [s for s in p["steps"] if s["id"] != "credit"]
+
+    for fn in (rename, graph, embedded, dropped):
+        assert not edit(fn), fn.__name__
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

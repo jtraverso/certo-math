@@ -58,6 +58,14 @@ La escalera, con números de Ramsey como ejemplo:
 - Un LP exacto resuelto desde la base del solver en flotante sigue siendo
   **comprobado**, no creído: `check_lp` decide, sea cual sea la ruta que lo
   encontró.
+- Una `construction` es sobre sus **datos**: un `lift` comprobado en un padre
+  es un hecho sobre ese grafo, no una regla para una familia, y que los datos
+  sean el objeto de tu teorema es tuyo. Su conclusión declarada es una frase que
+  certo repite, no una que comprueba; lo comprobado son los pasos.
+- `assign` con `resources` certifica una asignación física y la cota de la
+  relajación; cuando difieren, la brecha **no** queda certificada en ningún sentido.
+- Un LP con objetivo cero certifica **factibilidad**, no el óptimo de ningún
+  costo; el resultado dice `scope: feasible`.
 
 **El nicho es claro:** descubrir objetos, destruir formulaciones falsas y
 minimizar hipótesis antes de pagar el coste de formalizarlas.

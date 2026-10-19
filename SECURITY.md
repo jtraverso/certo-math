@@ -53,9 +53,10 @@ certo opt spec.py --safe     # refuses a .py outright
 CERTO_NO_EXEC=1 certo-mcp    # process-wide, one line in .mcp.json
 ```
 
-Twelve spec types build from JSON: `LPSpec`, `PackingSpec`, `HypergraphSpec`,
+Fourteen spec types build from JSON: `LPSpec`, `PackingSpec`, `HypergraphSpec`,
 `MatrixSpec`, `LinearSystemSpec`, `ConeSpec`, `CycleSpec`, `CoverSpec`,
-`CNFSpec`, `NumberSpec`, `EquitableQuotientSpec`, `RoleSpec`. Anything carrying a formula or a
+`CNFSpec`, `NumberSpec`, `EquitableQuotientSpec`, `RoleSpec`,
+`DivisibilitySpec`, `ConstructionSpec`. Anything carrying a formula or a
 callable is deliberately absent, because there is no way to write one in JSON.
 
 **What `--safe` guarantees is exactly one thing: no code from the file runs.**
@@ -153,9 +154,10 @@ certo opt spec.py --safe     # rechaza un .py de plano
 CERTO_NO_EXEC=1 certo-mcp    # para todo el proceso, una línea en .mcp.json
 ```
 
-Doce tipos se construyen desde JSON: `LPSpec`, `PackingSpec`, `HypergraphSpec`,
+Catorce tipos se construyen desde JSON: `LPSpec`, `PackingSpec`, `HypergraphSpec`,
 `MatrixSpec`, `LinearSystemSpec`, `ConeSpec`, `CycleSpec`, `CoverSpec`,
-`CNFSpec`, `NumberSpec`, `EquitableQuotientSpec`, `RoleSpec`. Lo que lleva una fórmula o un invocable
+`CNFSpec`, `NumberSpec`, `EquitableQuotientSpec`, `RoleSpec`,
+`DivisibilitySpec`, `ConstructionSpec`. Lo que lleva una fórmula o un invocable
 está ausente a propósito, porque no hay forma de escribirlo en JSON.
 
 **Lo que `--safe` garantiza es exactamente una cosa: ningún código del archivo

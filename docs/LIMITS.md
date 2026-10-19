@@ -56,6 +56,14 @@ The ladder, with Ramsey numbers as the example:
   pending is conditional.
 - An exact LP solved from the float solver's basis is still **checked**, not
   believed: `check_lp` decides, whatever the route that found it.
+- A `construction` is about its **data**: a `lift` checked on one parent is a
+  fact about that graph, not a rule for a family, and that the data is your
+  theorem's object is yours. Its declared conclusion is a sentence certo
+  repeats, not one it checks; the steps are what is checked.
+- `assign` with `resources` certifies a physical assignment and the
+  relaxation's bound; when they differ, the gap is **not** certified either way.
+- An LP with a zero objective certifies **feasibility**, not the optimum of any
+  cost; the result says `scope: feasible`.
 
 **The niche is clear:** discover objects, destroy false formulations and
 minimise hypotheses before paying the cost of formalising them.

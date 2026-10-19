@@ -51,7 +51,7 @@ class NotData(ValueError):
 BUILDABLE = (
     "LPSpec", "PackingSpec", "HypergraphSpec", "MatrixSpec", "LinearSystemSpec", "ConeSpec",
     "CycleSpec", "CoverSpec", "CNFSpec", "NumberSpec", "EquitableQuotientSpec",
-    "RoleSpec", "DivisibilitySpec",
+    "RoleSpec", "DivisibilitySpec", "ConstructionSpec",
 )
 
 
@@ -83,6 +83,9 @@ def _exact(value):
 #: `1` before anything could notice.
 LABELS = {"HypergraphSpec": ("edges", "vertices"),
           "DivisibilitySpec": ("pieces", "target"),
+          # labels AND numbers as text: every contract reads its own fields
+          # exactly (`"1/3"` a weight, `"1"` a vertex), so nothing is converted
+          "ConstructionSpec": ("graphs", "steps"),
           "RoleSpec": ("edges", "roles", "roles_after", "mapping", "vertices",
                        "properties"),
           "CoverSpec": ("universe", "parts", "candidates")}

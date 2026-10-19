@@ -74,6 +74,29 @@ from certo.tamper import probe as _probe                            # noqa: E402
 #: `used`, `unused` and hypothesis labels; a core's names; polynomial
 #: exponents read in a ring of the wrong size; duplicated variable names.
 STRUCTURAL_BENIGN = {
+    # A construction: an edge list or a list of extensions in another order,
+    # or with a line repeated, is the same set; a map reversed that is still
+    # an isomorphism is another valid map; a forbidden graph no extension
+    # uses (none at 3 vertices, C5 at 4) changes the class only above the
+    # catalogue's size -- another true statement. A certificate cited twice
+    # by a chart is cited; the leaves and the inclusion trees (by name) in
+    # another order are the same; a provenance is a record; and an
+    # obligation link dropped is a WEAKER claim, which the report then makes.
+    'construction': {
+        'graphs.G.*:reversed', 'graphs.G:dup', 'graphs.G:reversed',
+        'graphs.K.*:reversed', 'graphs.K:dup', 'graphs.K:reversed',
+        'steps.*.extensions.*.map:reversed', 'steps.*.extensions.*.neighbours:reversed',
+        'steps.*.extensions:dup', 'steps.*.extensions:reversed',
+        'steps.*.forbidden:dropkey', 'steps.*.forbidden:empty',
+    } | {'steps.*.forbidden.{}{}'.format(g, f) for g in ("2K2", "C4", "C5")
+         for f in (".edges.*:beyond", ".edges.*:dup", ".edges.*:reversed",
+                   ".edges:dup", ".edges:empty", ".edges:reversed", ".edges:short",
+                   ":dropkey")} | {
+        'steps.*.charts.L.certificates:dup', 'steps.*.charts.R.certificates:dup',
+        'steps.*.embedded.provenance:dropkey', 'steps.*.embedded.provenance:empty',
+        'steps.*.inclusion_trees:dup', 'steps.*.inclusion_trees:reversed',
+        'steps.*.leaves:reversed', 'steps.*.obligation:dropkey',
+    },
     # A covering's leaves in another order are the same tiling; a value
     # relabelled everywhere is another box, consistently; an obligation with
     # a term dropped (or emptied to 0 >= 0) is ANOTHER obligation, still true
@@ -1519,6 +1542,9 @@ def _from_example(name, command, *flags):
 #: What an example reads from `out/`, produced first by `_from_example`.
 PREREQUISITES = {
     "lean_binding.py": [("counting_bound.py", "prove", "out/counting_bound.json")],
+    "construction_charts.json": [("chart_left.py", "nonneg", "out/chart_left.json"),
+                                 ("chart_right.py", "nonneg", "out/chart_right.json"),
+                                 ("chart_pullback.py", "nonneg", "out/chart_pullback.json")],
 }
 
 
@@ -1559,6 +1585,8 @@ EXAMPLE_FIXTURES = [
     ("synth_prove_identity.py", "synth", ("--prove-candidate",)),
     ("toric_cone.py", "cone", ()),
     ("variable_range.py", "range", ("--var", "a")),
+    # certificates embedded, an atlas and a change of coordinates
+    ("construction_charts.json", "compose", ()),
 ]
 
 
@@ -1596,7 +1624,48 @@ def _built_fixtures() -> list:
     start = next(i for i in dspec.enumerate() if dspec.id_of(i) == "s=2,r=2")
     out.append(shrink.shrink_domain(dspec, start, LIM,
                                     spec_path=str(src)).certificate.to_dict())
+    out.append(_small_construction())
     return out
+
+
+def _small_construction() -> dict:
+    """The combinatorial contracts, small: a catalogue to 3 vertices, a lift,
+    a physical hosting, a joint credit, a glue."""
+    import importlib.util
+    from pathlib import Path
+
+    from certo import dataspec
+    from certo.engines.construction import construct
+
+    root = Path(__file__).resolve().parent.parent
+    sp = importlib.util.spec_from_file_location(
+        "make_catalogue", root / "examples" / "construction" / "make_catalogue.py")
+    mod = importlib.util.module_from_spec(sp)
+    sp.loader.exec_module(mod)
+    K = [["a", "b"], ["a", "c"], ["b", "c"]]
+    data = {"graphs": {"K": K, "G": K + [["s", "a"], ["s", "b"]]},
+            "conclusion": "small", "steps": [
+                mod.main(3),
+                {"id": "lift", "contract": "lift", "parent": "G", "child": "K",
+                 "child_packing": [["a", "b", "c"]], "child_cover": [["a", "b"]],
+                 "package": [], "cover_added": [], "budget": {"paid_by": "K", "ratio": 2}},
+                {"id": "host", "contract": "hosting", "graph": "G",
+                 "bases": {"ab": ["a", "b"]}, "items": ["ab"], "allowed": {"ab": ["s"]},
+                 "capacities": {"s": 1}, "assignment": {"ab": "s"}, "target": 1},
+                {"id": "credit", "contract": "credit", "bases_from": "host",
+                 "owners": {"s": ["ab"]}, "weights": {"ab": "1/2"},
+                 "states": {"s": {"none": [], "ab": ["ab"]}},
+                 "cuts": {"c1": {"p": "1/2", "states": {"s": "ab"}},
+                          "c2": {"p": "1/2", "states": {"s": "none"}}},
+                 "relation": ">=", "target": "1/4"},
+                {"id": "glue", "contract": "glue",
+                 "blocks": {"B1": {"ports": ["p"], "interiors": ["i"]},
+                            "B2": {"ports": ["q"], "interiors": []}},
+                 "matching": [["p", "q"]], "owners": {"i": "B1"},
+                 "value": {"claim": "1", "from": "host", "quantity": "placed"}}]}
+    r = construct(dataspec.build("ConstructionSpec", data), LIM, "", root)
+    assert r.certificate is not None, r.detail
+    return r.certificate.to_dict()
 
 
 #: Fields of the example-built kinds that carry no claim, so `probe` -- one

@@ -117,11 +117,14 @@ def region_terms(region, lows):
     DERIVED and not assumed -- the same step `nlinarith` takes, and the reason
     a region of two conditions can cut out a curved face rather than a corner.
     """
+    from .bernstein import condition_names, product_name
+
+    condition_names(region)
     base = [(str(n), shift(g, lows)) for n, g in region]
     out = list(base)
     for i, (n1, g1) in enumerate(base):
         for n2, g2 in base[i:]:
-            out.append(("{}*{}".format(n1, n2), g1 * g2))
+            out.append((product_name(n1, n2), g1 * g2))
     return out
 
 
@@ -231,6 +234,9 @@ def nonneg_on_region(poly: Poly, lows: dict, terms):
     try:
         lam = minimise(A, [Fraction(1)] * len(columns), c)
     except SimplexLimit:
+        from .bernstein import _out_of_time_if_expired
+
+        _out_of_time_if_expired()
         return False, shifted, {}, shifted
 
     remainder = shifted

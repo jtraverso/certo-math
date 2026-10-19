@@ -793,6 +793,60 @@ def pin(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                   meta={"value": None, "lower": L, "upper": X})
 
 
+def _assign_physical(spec, items, allow, caps, got, U, b, target, payload, t0,
+                     spec_path, limits):
+    """`assign` with `resources`: the relaxation (the flow and its Hall
+    bound, as without them) and a PHYSICAL assignment beside it -- no
+    resource twice on a receiver. The Hall bound bounds the physical
+    question too, so a physical assignment that meets it is maximum."""
+    from .. import assignment as A
+    from ..certificate import assignment_certificate
+
+    try:
+        res = A.normalise_resources(items, spec.resources)
+    except A.NotAnAssignment as e:
+        return Result("assign", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_COVER, (time.perf_counter() - t0) * 1000, None,
+                      detail=str(e))
+    clash = A.collisions(got, res)
+    if not clash:
+        phys = dict(got)
+    else:
+        secs = (limits.timeout_ms / 1000) if limits and limits.timeout_ms else 30
+        phys = A.solve_physical(items, allow, caps, res, seconds=secs) or {}
+    payload["resources"] = res
+    payload["physical"] = {"assignment": dict(sorted(phys.items())), "size": len(phys),
+                           "relaxation_collisions": [[r, s, its] for r, s, its in clash]}
+    k = len(phys)
+    payload["reached"] = None if target is None else k >= target
+    cert = assignment_certificate(payload).stamp(spec_path or None)
+    ms = (time.perf_counter() - t0) * 1000
+    tight = k == b["value"]
+    head = (t("engine.assign.physical_same", n=k) if not clash else
+            t("engine.assign.physical_clash", n=len(got), receiver=clash[0][0],
+              resource=clash[0][1], items=", ".join(clash[0][2]), k=k))
+    tail = (t("engine.assign.physical_tight", bound=b["value"]) if tight
+            else t("engine.assign.physical_gap", k=k, bound=b["value"]))
+    meta = {"size": k, "relaxation_size": len(got), "items": len(items), "U": U,
+            "bound": b["value"], "physical": True, "optimality_certified": tight,
+            "relaxation_collisions": len(clash)}
+    if target is None:
+        return Result("assign", Status.SAT, Verdict.SATISFIABLE, ENGINE_COVER,
+                      ms, cert, detail=head + " " + tail, meta=meta)
+    if k >= target:
+        return Result("assign", Status.SAT, Verdict.PROVED, ENGINE_COVER, ms, cert,
+                      detail=t("engine.assign.reached", n=k, target=target) + " "
+                      + head, meta=meta)
+    if b["value"] < target:
+        return Result("assign", Status.UNSAT, Verdict.REFUTED, ENGINE_COVER, ms,
+                      cert, detail=t("engine.assign.short", target=target,
+                                     n=b["value"]) + " " + head, meta=meta)
+    return Result("assign", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                  ENGINE_COVER, ms, cert,
+                  detail=t("engine.assign.physical_open", k=k, target=target,
+                           bound=b["value"]) + " " + head, meta=meta)
+
+
 @honours_timeout("assign", ENGINE_COVER)
 def assign(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """The largest assignment of items to receivers, and the Hall set that
@@ -816,6 +870,9 @@ def assign(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                "hall": {"U": U, "capacity": b["capacity"],
                         "not_confined": b["not_confined"], "value": b["value"]},
                "target": target, "reached": reached, "title": spec.title}
+    if getattr(spec, "resources", None) is not None:
+        return _assign_physical(spec, items, allow, caps, got, U, b, target,
+                                payload, t0, spec_path, limits)
     cert = assignment_certificate(payload).stamp(spec_path or None)
     ms = (time.perf_counter() - t0) * 1000
     why = ("items" if not U else "capacity" if set(U) == set(caps)
@@ -840,6 +897,7 @@ def assign(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                                  n=b["value"]) + " " + detail, meta=meta)
 
 
+@honours_timeout("nonneg", ENGINE_NONNEG)
 def nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     """`poly >= 0` on a box, cut by a region -- with `meta["method"]` saying
     which test ran: `bernstein` on a closed box, `shift` on one with an open
@@ -879,7 +937,16 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
 
     ring = tuple(spec.box or {})
     if not ring:
-        return refuse(t("nonneg.no_box"))
+        # A CONSTANT needs no box: its sign is read, not searched for. 0.34
+        # asked for a box even here, and a user added an irrelevant variable
+        # to get one.
+        try:
+            Poly.from_z3(spec.poly, ()) if not isinstance(
+                spec.poly, (Poly, int, Fraction)) else None
+        except Exception:  # noqa: BLE001 -- not a constant
+            return refuse(t("nonneg.no_box"))
+        if isinstance(spec.poly, Poly) and spec.poly.vars:
+            return refuse(t("nonneg.no_box"))
     try:
         box = {n: (Fraction(spec.box[n][0]),
                    None if spec.box[n][1] is None else Fraction(spec.box[n][1]))
@@ -928,6 +995,7 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         else:
             poly = P(spec.poly)
         conditions = [(str(n), P(g)) for n, g in (spec.region or [])]
+        bernstein.condition_names(conditions)
     except (ValueError, TypeError, KeyError) as e:
         return refuse(e)
     payload = {"parameters": list(ring), "poly": poly.serialize(),
@@ -950,7 +1018,7 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             dict(payload, holds=True, tree=tree)).stamp(spec_path or None)
         return Result("nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG,
                       ms(), cert, detail=t("nonneg.proved", poly=str(poly) or "0",
-                                           box=_box_text(box),
+                                           box=_box_text(box) or t("nonneg.constant"),
                                            region=_region_text(conditions)))
 
     # A point where it fails: the corners of a grid on the box, finest last,

@@ -624,6 +624,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     `1/8`; nothing on screen said which was which."""
     res = _opt(spec, limits, use_exact, target, dual_direction, _vectors_only,
                round, cuts, _ray, exact_required, primal)
+    _typed_scope(res)
     cert = res.certificate
     if cert is not None and cert.kind == "lp_dual":
         p = cert.payload
@@ -636,6 +637,60 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
             res.meta["canonical_form"] = (
                 "max of the NEGATED objective" if res.meta["sense"] == "min"
                 else "max of the objective")
+    return res
+
+
+#: what an `opt` result establishes, from strongest to weakest
+SCOPES = ("optimum", "feasible", "bound", "float_candidate", "infeasible", "none")
+
+
+def lp_scope(cert) -> str:
+    """The SCOPE of an LP certificate, read from the certificate alone:
+
+    - `feasible`  -- exact, and the objective is ZERO: the point satisfies
+                     every constraint (a budget written as one among them)
+                     and nothing was optimised. "EXACT optimum" said here
+                     was read by a dozen sessions as the minimum of a cost.
+    - `optimum`   -- exact, a non-zero objective, closed by the dual
+    - `bound`     -- exact, integer variables, and no integral point meeting
+                     the relaxation's bound: a bound, not an optimum
+    - `float_candidate` -- floating point, NOT citable
+    - `infeasible` -- a Farkas ray
+    """
+    from .. import exact
+
+    if cert is None:
+        return "none"
+    p = cert.payload
+    if cert.kind == "farkas_ray":
+        return "infeasible"
+    if cert.kind != "lp_dual":
+        return "none"
+    if not p.get("exact"):
+        return "float_candidate"
+    if all(exact.to_fraction(v) == 0 for v in p.get("c") or []):
+        return "feasible"
+    if p.get("integer"):
+        io = p.get("integral_objective")
+        if io is None or exact.to_fraction(io) != exact.to_fraction(p.get("objective")):
+            return "bound"
+    return "optimum"
+
+
+def _typed_scope(res):
+    """`meta["scope"]`, and a detail that says FEASIBLE when that is all an
+    exact certificate with a zero objective shows."""
+    scope = lp_scope(res.certificate)
+    if res.certificate is None and res.verdict is Verdict.SATISFIABLE             and res.meta.get("exact") is False:
+        scope = "float_candidate"
+    if scope == "bound" and res.meta.get("optimality_certified"):
+        scope = "optimum"          # closed by the rounded bound
+    res.meta["scope"] = scope
+    if scope == "feasible":
+        res.meta["optimality_certified"] = False
+        res.meta["feasible_exact"] = True
+        res.detail = t("engine.opt.feasible_exact",
+                       n=len(res.certificate.payload.get("b") or []))
     return res
 
 

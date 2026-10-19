@@ -61,44 +61,116 @@ def _mul(p: dict, q: dict) -> dict:
 
 
 def polynomial(e) -> dict:
-    """z3 arithmetic term -> {monomial: Fraction}."""
+    """z3 arithmetic term -> {monomial: Fraction}.
+
+    SUMS AND PRODUCTS ARE WALKED WITH A STACK, NOT BY RECURSION. A sum built
+    as `out += term` is a chain as deep as it is long, and 1500 terms took
+    0.34 past Python's recursion limit -- reported as a `ctypes.ArgumentError`
+    that named neither the depth nor the sum. The same polynomial written with
+    `z3.Sum` was read; now the shape of the term does not matter.
+    """
+    return _polynomial(e, {})
+
+
+def _flatten(e, is_op):
+    """The operands of a chain of one associative operator, left to right,
+    without recursion."""
+    out, stack = [], [e]
+    while stack:
+        x = stack.pop()
+        if is_op(x):
+            stack.extend(reversed(x.children()))
+        else:
+            out.append(x)
+    return out
+
+
+def _signed_terms(e):
+    """A chain of `+`, `-` and unary minus as `[(sign, term)]`."""
+    out, stack = [], [(1, e)]
+    while stack:
+        sign, x = stack.pop()
+        if z3.is_add(x):
+            stack.extend((sign, c) for c in reversed(x.children()))
+        elif z3.is_sub(x):
+            a, b = x.children()
+            stack.append((-sign, b))
+            stack.append((sign, a))
+        elif z3.is_app_of(x, z3.Z3_OP_UMINUS):
+            stack.append((-sign, x.arg(0)))
+        else:
+            out.append((sign, x))
+    return out
+
+
+def _kids(e):
+    """The subterms `_combine` needs, in the order it reads them."""
+    if z3.is_add(e) or z3.is_sub(e) or z3.is_app_of(e, z3.Z3_OP_UMINUS):
+        return [c for _sign, c in _signed_terms(e)]
+    if z3.is_mul(e):
+        return _flatten(e, z3.is_mul)
+    if z3.is_div(e) or z3.is_idiv(e):
+        return list(e.children())
+    if z3.is_app_of(e, z3.Z3_OP_POWER):
+        return [e.children()[0]]
+    return []
+
+
+def _combine(e, memo):
+    """`e`'s polynomial from its subterms', all already in `memo`."""
     if z3.is_int_value(e):
         return {CONST: Fraction(e.as_long())}
     if z3.is_rational_value(e):
         return {CONST: Fraction(e.as_fraction())}
     if z3.is_const(e) and e.decl().kind() == z3.Z3_OP_UNINTERPRETED:
         return {(str(e),): Fraction(1)}
-    if z3.is_add(e):
-        out: dict = {}
-        for c in e.children():
-            out = _add(out, polynomial(c))
-        return out
-    if z3.is_sub(e):
-        a, b = e.children()
-        return _add(polynomial(a), polynomial(b), scale=-1)
+    if z3.is_add(e) or z3.is_sub(e) or z3.is_app_of(e, z3.Z3_OP_UMINUS):
+        out = {}
+        for sign, c in _signed_terms(e):          # in place: a long sum is linear
+            for m, v in memo[c.get_id()].items():
+                out[m] = out.get(m, Fraction(0)) + v * sign
+        return {m: v for m, v in out.items() if v != 0}
     if z3.is_mul(e):
         out = {CONST: Fraction(1)}
-        for c in e.children():
-            out = _mul(out, polynomial(c))
+        for c in _flatten(e, z3.is_mul):
+            out = _mul(out, memo[c.get_id()])
         return out
-    if z3.is_app_of(e, z3.Z3_OP_UMINUS):
-        return _add({}, polynomial(e.arg(0)), scale=-1)
     if z3.is_div(e) or z3.is_idiv(e):
         a, b = e.children()
-        db = polynomial(b)
+        db = memo[b.get_id()]
         if list(db) != [CONST] or db[CONST] == 0:
             raise NotPolynomial("division by a non-constant: {}".format(e))
-        return {m: c / db[CONST] for m, c in polynomial(a).items()}
+        return {m: c / db[CONST] for m, c in memo[a.get_id()].items()}
     if z3.is_app_of(e, z3.Z3_OP_POWER):
         base, exp = e.children()
         n = _literal_exponent(exp)
         if n is None:
             raise NotPolynomial("non-constant or negative exponent: {}".format(e))
+        b = memo[base.get_id()]
         out = {CONST: Fraction(1)}
         for _ in range(n):
-            out = _mul(out, polynomial(base))
+            out = _mul(out, b)
         return out
     raise NotPolynomial("not polynomial arithmetic: {}".format(e))
+
+
+def _polynomial(e, memo):
+    """Post-order over the term with an explicit stack: no recursion at all,
+    whatever mixes of sums, products and minus signs nest how deep."""
+    stack = [(e, False)]
+    while stack:
+        node, ready = stack.pop()
+        key = node.get_id()
+        if key in memo:
+            continue
+        if ready:
+            memo[key] = _combine(node, memo)
+            continue
+        stack.append((node, True))
+        for c in _kids(node):
+            if c.get_id() not in memo:
+                stack.append((c, False))
+    return memo[e.get_id()]
 
 
 def _literal_exponent(exp):

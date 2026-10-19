@@ -709,6 +709,16 @@ PuLP for every solve. `certo.existence.estimate_cliques(n, edges, ...)` says
 how large a clique LP would be -- columns, non-zeros, the memory of a dense
 and a sparse expansion -- before anything is built.
 
+**The scope, typed** *(0.35)*. `meta["scope"]` says what the run
+established: `optimum` (exact, a non-zero objective closed by the dual),
+`feasible` (exact, and the objective is ZERO -- a point satisfying every
+constraint, a budget among them, with nothing optimised), `bound` (integer
+variables and no integral point meeting the relaxation), `float_candidate`
+(not citable) or `infeasible` (a Farkas ray). A zero objective used to print
+"EXACT optimum certified", which a dozen sessions read as the minimum of a
+cost; it now prints **EXACT FEASIBLE point**, and `verify` says the same.
+`same_program` also binds a `farkas_ray` to its program, by the constraints.
+
 ### `certo mixed`
 
 **Question** — …and is it really optimal over the integers?
@@ -1557,6 +1567,13 @@ and certifies `N` -- or `-N` when `D` is negative there. The orientation, the
 denominator and its proof travel in the certificate (`cleared`), and `verify`
 redoes both; a `D` that vanishes or changes sign on the box is refused.
 
+*(0.35)* The region's products are named the same whichever order the
+conditions were declared in (0.34 refused valid certificates whose names were
+out of order; a certificate written then still reads), and a condition's name
+may not contain `*`. The run honours `--timeout` inside the Bernstein tensor
+and the multipliers' simplex -- 0.34 ran for minutes past it. A CONSTANT needs
+no box: its sign is read.
+
 ### `certo assign`
 
 **Question** — Items to receivers under capacities: how many can be placed,
@@ -1581,6 +1598,16 @@ assignment beats that number, and one that meets it is maximum. `U = {}`
 says there are not enough items; `U` = every receiver, not enough capacity;
 anything between is a bottleneck, and the detail names it.
 `examples/assignment_hall.py`: six pages, five fit, and `{a, b}` is why.
+
+**Physical conflicts** *(0.35)*: `resources={item: [...]}` (a base's
+spokes, its ends) makes the question physical -- the items on one receiver
+must use pairwise disjoint resources, a matching per host. The flow and its
+Hall bound stay (the relaxation, and an upper bound for the physical
+question); a PHYSICAL assignment is found beside it and checked. When the
+relaxation's optimum repeats a resource the result says so by name -- "the
+relaxation's optimum, NOT a physical packing" -- and is PROVED only when the
+physical assignment reaches the target, REFUTED when the Hall bound is below
+it, and INCONCLUSIVE in between.
 
 ### `certo pin`
 
@@ -2284,6 +2311,31 @@ pending step -- directly, or as a prerequisite of a lemma it uses, at any
 depth -- is reported **NOT CLOSED**, with the chain (`not_closed` in the
 certificate, recomputed by `verify`), the card lists it as pending, and
 `status` counts it as resting on pending.
+
+**Contracts across a construction** *(0.35)*. `compose` also takes a
+`ConstructionSpec`: graphs and resources under stable names, and steps --
+`lift`, `catalogue`, `credit`, `hosting`, `glue`, `certificate`, `cegis`,
+`charts`, `substitution` -- each checked from the data, in order, each able
+to use what an earlier one established. One `construction` certificate,
+re-derived by `verify` without calling any constructor; embedded certificates
+travel inside it. The fields are in SPECS.md; the vertical example:
+
+```
+$ certo compose examples/construction_split.json
+PROVED  [unsat]
+  CONSTRUCTION HOLDS: 7 steps (catalogue, cegis, certificate, credit, hosting, lift) ...
+  [ok] split_catalogue catalogue    complete
+  [ok] lift_t         lift         complete
+  [ok] lift_s         lift         complete
+  [ok] hosting        hosting      complete
+  [ok] credit         credit       complete
+  [ok] releases       certificate  with_solver
+  [ok] releases_exist cegis        with_solver
+```
+
+A failing step names its first failed check -- "shares an edge with the
+child's packing: b-c", "1 extension(s) missing: R3_0+[0, 1, 2]", "the
+probabilities sum to 7/8, not 1" -- and nothing is written.
 
 ### `certo verify`
 

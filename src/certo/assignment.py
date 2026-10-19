@@ -174,3 +174,103 @@ def check(payload) -> dict:
         hall.append(_t("assign.check.not_tight", size=size, bound=b["value"]))
     return {"ok": not problems and not hall, "problems": problems + hall,
             "legal": problems, "hall": hall, "size": size, "bound": b}
+
+
+# --- physical conflicts: a matching per receiver -----------------------------
+#
+# Assigning bases to hosts is not always an ordinary capacitated assignment:
+# the bases on ONE host must also be pairwise disjoint in what they use (two
+# triangle bases on a host may not reuse a spoke). An aggregate capacity does
+# not see that, and the flow above can be OPTIMAL for the relaxation while
+# repeating a spoke -- a witness that is not a physical packing at all.
+
+
+def normalise_resources(items, resources):
+    """`{item: sorted resource names}`; every key an item."""
+    out = {}
+    known = set(items)
+    for k, rs in (resources or {}).items():
+        if _key(k) not in known:
+            raise NotAnAssignment(_t("assign.unknown_item", items=_key(k)))
+        out[_key(k)] = sorted({_key(r) for r in rs})
+    return {i: out.get(i, []) for i in items}
+
+
+def collisions(assign, resources) -> list:
+    """`[(receiver, resource, [items])]`: a resource used twice on one
+    receiver. Empty means the assignment is physical."""
+    use = {}
+    for i, r in assign.items():
+        for s in resources.get(i, []):
+            use.setdefault((r, s), []).append(i)
+    return sorted((r, s, sorted(its)) for (r, s), its in use.items() if len(its) > 1)
+
+
+def solve_physical(items, allow, caps, resources, seconds=30):
+    """A largest assignment with no collision, by a 0-1 program -- the
+    PROPOSER. Its optimality is NOT certified here: the certificate holds the
+    assignment (checked by counting) and the relaxation's Hall bound, and
+    says whether they meet. Returns `{item: receiver}` or None."""
+    import pulp
+
+    prob = pulp.LpProblem("physical", pulp.LpMaximize)
+    x = {(i, r): pulp.LpVariable("x_{}_{}".format(k, j), cat="Binary")
+         for k, i in enumerate(items) for j, r in enumerate(sorted(caps))
+         if r in allow[i]}
+    prob += pulp.lpSum(x.values())
+    for i in items:
+        row = [v for (a, _r), v in x.items() if a == i]
+        if row:
+            prob += pulp.lpSum(row) <= 1
+    for r in caps:
+        col = [v for (_i, b), v in x.items() if b == r]
+        if col:
+            prob += pulp.lpSum(col) <= caps[r]
+        by_res = {}
+        for (i, b), v in x.items():
+            if b == r:
+                for s in resources.get(i, []):
+                    by_res.setdefault(s, []).append(v)
+        for vs in by_res.values():
+            if len(vs) > 1:
+                prob += pulp.lpSum(vs) <= 1
+    try:
+        prob.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=max(1, int(seconds))))
+    except Exception:  # noqa: BLE001 -- no solver: no proposal
+        return None
+    got = {i: r for (i, r), v in x.items() if (v.value() or 0) > 0.5}
+    # Whatever the solver said, the proposal is kept only if it IS physical.
+    return got if not collisions(got, resources) else None
+
+
+def check_physical(payload) -> list:
+    """What is wrong with the PHYSICAL half of a payload that declares
+    `resources`: the physical assignment legal, within capacity, and with no
+    resource repeated on a receiver; `[]` when nothing is."""
+    problems = []
+    try:
+        items, allow, caps = normalise(payload["items"], payload["allowed"],
+                                       payload["capacities"])
+        res = normalise_resources(items, payload.get("resources"))
+    except (NotAnAssignment, KeyError, TypeError, AttributeError) as e:
+        return [str(e)]
+    phys = (payload.get("physical") or {})
+    got = {str(k): str(v) for k, v in (phys.get("assignment") or {}).items()}
+    for i, r in got.items():
+        if i not in allow:
+            problems.append(_t("assign.check.unknown_item", item=i))
+        elif r not in allow[i]:
+            problems.append(_t("assign.check.not_allowed", item=i, receiver=r))
+    load = {}
+    for r in got.values():
+        load[r] = load.get(r, 0) + 1
+    over = sorted(r for r, n in load.items() if n > caps.get(r, 0))
+    if over:
+        problems.append(_t("assign.check.overload", receivers=", ".join(over[:4])))
+    for r, s, its in collisions(got, res)[:3]:
+        problems.append(_t("assign.check.collision", receiver=r, resource=s,
+                           items=", ".join(its)))
+    if int(phys.get("size", len(got))) != len(got):
+        problems.append(_t("assign.check.size", declared=phys.get("size"),
+                           actual=len(got)))
+    return problems

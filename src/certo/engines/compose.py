@@ -110,6 +110,11 @@ def not_closed(entries, used) -> list:
 
 def compose(spec, limits: Limits | None = None, spec_path: str = "",
             base_dir=None) -> Result:
+    if type(spec).__name__ == "ConstructionSpec":
+        # contracts over shared objects, rather than lemmas over formulas
+        from .construction import construct
+
+        return construct(spec, limits, spec_path, base_dir)
     lim = limits or Limits()
     t0 = time.perf_counter()
 

@@ -16,6 +16,7 @@ Families, by certificate kind:
 
     ideal                      IdealSpec: variables, equations, claim, nonzero
     polynomial_nonneg          NonnegSpec: the polynomial, the box, the region
+    sos                        SOSSpec: the variables and the polynomial
     exact_cover, sat_optimum,  CoverSpec or HypergraphSpec: the universe, the
     recurrence_table           candidates (or parts), exact or not
     drat, cnf_model            CNFSpec: the clauses
@@ -47,11 +48,12 @@ FAMILIES = {
     "unsat_core": "smt", "model": "smt", "propositional_refutation": "smt",
     "parametric_atlas": "atlas", "conditioned_cover": "covering",
     "role_transport": "roles", "farkas_ray": "system",
+    "sos": "sos",
 }
 
 #: families whose certificate carries the whole obligation
 WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp", "atlas", "covering", "roles",
-         "system")
+         "system", "sos")
 
 
 # --- canonical pieces ---------------------------------------------------------
@@ -136,6 +138,9 @@ def _of_cert(cert) -> dict:
                                for n, g in (p.get("conditions") or {}).items()},
                 "obligations": {n: [o["relation"], _poly_key(Poly.parse(vs, o["poly"]))]
                                 for n, o in (p.get("obligations") or {}).items()}}
+    if fam == "sos":
+        vs = tuple(p["variables"])
+        return {"variables": sorted(vs), "poly": _poly_key(Poly.parse(vs, p["poly"]))}
     if fam == "nonneg":
         vs = tuple(p["parameters"])
         return {"variables": sorted(vs),
@@ -255,6 +260,18 @@ def _of_spec(spec, family, cert=None) -> dict:
         return {"variables": sorted(ring), "domain": dom,
                 "region": {str(n): _poly_key(P(g)) for n, g in (spec.region or [])},
                 "claim": [rel, None if target is None else _poly_key(P(target))]}
+    if family == "sos":
+        # 0.34 answered `same: None` for a sum of squares, and three sessions
+        # bound their SOS certificates by hand.
+        from .polynomials import Poly
+
+        ring = tuple(str(v) for v in spec.variables)
+        poly = spec.poly
+        if isinstance(poly, (int, Fraction)):
+            poly = Poly.const(ring, poly)
+        elif not isinstance(poly, Poly):
+            poly = Poly.from_z3(poly, ring)
+        return {"variables": sorted(ring), "poly": _poly_key(poly)}
     if family == "nonneg":
         import z3  # noqa: F401 -- a z3 term is read through the same parser
 
@@ -378,7 +395,7 @@ def _obligations(obls):
 def _family_of_spec(spec):
     return {"IdealSpec": "ideal", "NonnegSpec": "nonneg", "CoverSpec": "cover",
             "AtlasSpec": "atlas", "CoveringSpec": "covering", "RoleSpec": "roles",
-            "CNFSpec": "cnf", "LPSpec": "lp", "PackingSpec": "lp",
+            "CNFSpec": "cnf", "LPSpec": "lp", "PackingSpec": "lp", "SOSSpec": "sos",
             "Spec": "smt"}.get(type(spec).__name__)
 
 

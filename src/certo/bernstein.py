@@ -94,12 +94,17 @@ def coefficients(poly, box, degrees=None):
     grid = {}
     for idx in product(*(range(di + 1) for di in d)):
         grid[idx] = a.get(idx, Fraction(0))
+    from .budget import tick
+
     for axis in range(m):
         da = d[axis]
         if da == 0:
             continue
         new = {}
         for idx in grid:
+            # THE CLOCK, INSIDE THE TENSOR: 0.34 built a tensor for 241 s
+            # under a 45 s budget, because nothing here looked at it.
+            tick(512)
             k = idx[axis]
             s = Fraction(0)
             for j in range(k + 1):
@@ -335,15 +340,59 @@ def diagnose(poly, box, degrees=None):
 # on a box are the next step and are not here.
 
 
+def _out_of_time_if_expired():
+    """A search the clock stopped is a TIMEOUT, not a failure to find."""
+    from . import clock
+    from .budget import OutOfTime
+
+    if clock.expired():
+        raise OutOfTime()
+
+
+def product_name(n1, n2):
+    """The name of the product of two conditions, the SAME whichever order
+    they were declared in: the product commutes, and its name must too. 0.34
+    named `g2*g10` in the order of the spec and the verifier, which reads the
+    conditions sorted, looked for `g10*g2` -- a valid certificate refused by
+    its own checker."""
+    return "*".join(sorted((str(n1), str(n2))))
+
+
+def condition_names(region):
+    """The names, refused when one would make a product ambiguous: with a
+    condition called `a*b`, the product of `a` and `b` would share its name."""
+    names = [str(n) for n, _g in region]
+    for n in names:
+        if "*" in n:
+            raise ValueError("a region condition's name cannot contain '*' "
+                             "(it names the products of conditions): {!r}".format(n))
+    if len(set(names)) != len(names):
+        raise ValueError("two region conditions share a name: {}".format(
+            sorted({n for n in names if names.count(n) > 1})))
+    return names
+
+
 def region_terms(region):
     """The conditions, UNSHIFTED -- a box needs no substitution -- with their
     pairwise products, as `(name, poly)`."""
+    condition_names(region)
     base = [(str(n), g) for n, g in region]
     out = list(base)
     for i, (n1, g1) in enumerate(base):
         for n2, g2 in base[i:]:
-            out.append(("{}*{}".format(n1, n2), g1 * g2))
+            out.append((product_name(n1, n2), g1 * g2))
     return out
+
+
+def term_named(terms, name):
+    """`terms[name]`, reading a product named in either order -- a certificate
+    written by 0.34 with the conditions out of order still names its terms."""
+    if name in terms:
+        return terms[name]
+    parts = name.split("*")
+    if len(parts) == 2:
+        return terms.get(product_name(*parts))
+    return None
 
 
 def _region_degrees(poly, terms, degrees):
@@ -374,6 +423,7 @@ def nonneg_region(poly, box, terms, depth=0, degrees=None):
         lam = minimise(A, [Fraction(1)] * len(gs),
                        [-r.get(c, Fraction(0)) for c in cells])
     except SimplexLimit:
+        _out_of_time_if_expired()
         return False, None
     used = {n: v for (n, _g), v in zip(gs, lam) if v}
     leaf = {"deg": list(d), "region": {n: str(v) for n, v in used.items()}}
@@ -392,9 +442,10 @@ def _region_leaf_holds(poly, box, leaf, terms):
         rest = poly
         for name, v in (leaf.get("region") or {}).items():
             lam = Fraction(v)
-            if lam < 0 or name not in terms:
+            term = term_named(terms, name)
+            if lam < 0 or term is None:
                 return False
-            rest = rest - terms[name].scaled(lam)
+            rest = rest - term.scaled(lam)
         if not rest.terms:
             return True
         if any(x < y for x, y in zip(d, degrees_of(rest))):

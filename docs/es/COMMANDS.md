@@ -725,6 +725,17 @@ cota de HiGHS como `solver_bound`, la del solver, no la de certo.
 ceros, la memoria de una expansión densa y una dispersa -- antes de construir
 nada.
 
+**El alcance, tipado** *(0.35)*. `meta["scope"]` dice qué estableció la
+corrida: `optimum` (exacto, un objetivo no nulo cerrado por el dual),
+`feasible` (exacto, y el objetivo es CERO -- un punto que cumple cada
+restricción, un presupuesto entre ellas, sin optimizar nada), `bound`
+(variables enteras y ningún punto entero que alcance la relajación),
+`float_candidate` (no citable) o `infeasible` (un rayo de Farkas). Un objetivo
+cero imprimía "EXACT optimum certified", que una docena de sesiones leyó como
+el mínimo de un costo; ahora imprime **EXACT FEASIBLE point**, y `verify` dice
+lo mismo. `same_program` también ata un `farkas_ray` a su programa, por las
+restricciones.
+
 ### `certo mixed`
 
 **Pregunta** — …y ¿es realmente óptimo sobre los enteros?
@@ -1589,6 +1600,13 @@ estricto) y certifica `N` -- o `-N` cuando `D` es negativo ahí. La orientación
 el denominador y su prueba viajan en el certificado (`cleared`), y `verify`
 rehace ambos; un `D` que se anula o cambia de signo en la caja se rechaza.
 
+*(0.35)* Los productos de la región se nombran igual sea cual sea el orden
+en que se declararon las condiciones (0.34 rechazaba certificados válidos con
+los nombres desordenados; uno escrito entonces se sigue leyendo), y el nombre
+de una condición no puede contener `*`. La corrida respeta `--timeout` dentro
+del tensor de Bernstein y del simplex de los multiplicadores -- 0.34 seguía
+minutos después. Una CONSTANTE no necesita caja: su signo se lee.
+
 ### `certo assign`
 
 **Pregunta** — Ítems a receptores con capacidades: ¿cuántos caben, y por qué
@@ -1615,6 +1633,16 @@ ninguna asignación supera ese número, y una que lo alcanza es máxima.
 suficiente capacidad; lo intermedio es un cuello de botella, y el detalle lo
 nombra. `examples/assignment_hall.py`: seis páginas, caben cinco, y `{a, b}`
 es la razón.
+
+**Conflictos físicos** *(0.35)*: `resources={item: [...]}` (los spokes de
+una base, sus extremos) vuelve físico el problema -- los ítems de un mismo
+receptor deben usar recursos disjuntos dos a dos, un emparejamiento por host.
+El flujo y su cota de Hall se mantienen (la relajación, y una cota superior
+del problema físico); al lado se busca y comprueba una asignación FÍSICA.
+Cuando el óptimo de la relajación repite un recurso, el resultado lo dice por
+nombre -- "el óptimo de la relajación, NO un packing físico" -- y es PROVED
+solo cuando la asignación física alcanza el objetivo, REFUTED cuando la cota
+de Hall queda por debajo, e INCONCLUSIVE entre medio.
 
 ### `certo pin`
 
@@ -2335,6 +2363,31 @@ teorema que descansa en un paso pendiente -- directamente, o como prerrequisito
 de un lema que usa, a cualquier profundidad -- se informa **NO CERRADO**, con la
 cadena (`not_closed` en el certificado, recalculado por `verify`); la tarjeta
 lo lista como pendiente y `status` lo cuenta como apoyado en pendientes.
+
+**Contratos a través de una construcción** *(0.35)*. `compose` también
+acepta un `ConstructionSpec`: grafos y recursos con nombres estables, y pasos
+-- `lift`, `catalogue`, `credit`, `hosting`, `glue`, `certificate`, `cegis`,
+`charts`, `substitution` -- cada uno comprobado desde los datos, en orden,
+pudiendo usar lo que estableció uno anterior. Un certificado `construction`,
+re-derivado por `verify` sin llamar a ningún constructor; los certificados
+embebidos viajan dentro. Los campos están en SPECS.md; el ejemplo vertical:
+
+```
+$ certo compose examples/construction_split.json
+PROVED  [unsat]
+  CONSTRUCTION HOLDS: 7 steps (catalogue, cegis, certificate, credit, hosting, lift) ...
+  [ok] split_catalogue catalogue    complete
+  [ok] lift_t         lift         complete
+  [ok] lift_s         lift         complete
+  [ok] hosting        hosting      complete
+  [ok] credit         credit       complete
+  [ok] releases       certificate  with_solver
+  [ok] releases_exist cegis        with_solver
+```
+
+Un paso que falla nombra su primera comprobación fallida -- "comparte una
+arista con el packing del hijo: b-c", "falta(n) 1 ampliación(es):
+R3_0+[0, 1, 2]", "las probabilidades suman 7/8, no 1" -- y no se escribe nada.
 
 ### `certo verify`
 

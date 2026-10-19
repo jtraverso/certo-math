@@ -160,7 +160,8 @@ ALSO = {"PackingSpec": "opt", "DomainSpec": "sweep",
 
 #: Spec types a command takes BESIDES its own. `farkas` reads a linear
 #: program as hypotheses with the claim False: is it infeasible, and why?
-ALSO_TAKES = {"farkas": ("LPSpec", "PackingSpec"), "solve": ("DivisibilitySpec",)}
+ALSO_TAKES = {"farkas": ("LPSpec", "PackingSpec"), "solve": ("DivisibilitySpec",),
+              "compose": ("ConstructionSpec",)}
 
 
 def command_for(spec) -> str | None:
@@ -255,7 +256,10 @@ TIER = {
     "bisect": DEPENDS,     # on its children
 
     # Re-solves, and says so.
-    "audit": NO, "compose": NO, "induct": NO, "synth": NO, "family": NO,
+    # `compose` re-solves a ProofSpec's final step; a ConstructionSpec of
+    # contracts re-derives by counting, unless it embeds a solver certificate.
+    "compose": DEPENDS,
+    "audit": NO, "induct": NO, "synth": NO, "family": NO,
     "bind": NO,
 
     # Report or route; they make no claim of their own.
@@ -272,7 +276,8 @@ KIND_OF = {
     # `MultiSpec` gives a table of cores, not one core.
     "prove": ("unsat_core", "model", "propositional_refutation"), "check": "model",
     "core": ("unsat_core", "core_matrix", "mus"),
-    "audit": "hypothesis_audit", "farkas": "farkas", "compose": "proof",
+    "audit": "hypothesis_audit", "farkas": "farkas",
+    "compose": ("proof", "construction"),
     "induct": "induction",
     # `--prove-candidate` adds the universal half to the bounded one.
     "synth": ("cegis", "synth_proved", "cegis_none", "synth_optimum"),

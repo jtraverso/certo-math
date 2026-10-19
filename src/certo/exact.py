@@ -29,11 +29,22 @@ DENOM_LADDER = (1, 2, 3, 4, 6, 8, 12, 24, 60, 120, 360, 720,
 def to_fraction(v) -> Fraction:
     """Cualquier numero -> Fraction exacta. Los float se toman tal cual."""
     if isinstance(v, Fraction):
-        return v
+        # A Fraction can CARRY gmpy2 integers (`Fraction(gmpy2.mpq(...))`
+        # keeps them), and FLINT refuses those: 0.34 died in `_eliminate`
+        # with "cannot create fmpz/fmpq from object of type mpz".
+        if type(v.numerator) is int and type(v.denominator) is int:
+            return v
+        return Fraction(int(v.numerator), int(v.denominator))
+    if isinstance(v, bool):
+        return Fraction(int(v))
     if isinstance(v, int):
         return Fraction(v)
     if isinstance(v, str):
         return Fraction(v)
+    if not isinstance(v, float) and hasattr(v, "numerator") and hasattr(v, "denominator"):
+        # An EXACT rational of another library (gmpy2.mpq, a sympy Rational,
+        # an mpz): taken exactly. Only a float is rounded below.
+        return Fraction(int(v.numerator), int(v.denominator))
     return Fraction(v).limit_denominator(10**12)
 
 
@@ -410,7 +421,7 @@ def _eliminate(M, unknowns):
 
         fl = _flint()
         if fl is not None:
-            R, rank = fl.fmpq_mat([[fl.fmpq(v.numerator, v.denominator)
+            R, rank = fl.fmpq_mat([[fl.fmpq(int(v.numerator), int(v.denominator))
                                     for v in row] for row in M]).rref()
             rows = R.tolist()
             # pinned: rank == unknowns with the pivots on the first columns;

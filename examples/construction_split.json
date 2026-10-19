@@ -1,0 +1,1327 @@
+{
+ "type": "ConstructionSpec",
+ "_": "A split graph G: the clique {a, b, c, d}, and s, t independent, s joined to a, b, c and t to c, d. One vertical example: a catalogue of split graphs to 4 vertices covered by extensions; G built from the clique K by two lifts, the packing and cover rebuilt at each step; the bases hosted physically (no spoke twice on a host); a joint credit over a common cut distribution; and a synthesised number of releases backed by the hosting. Every step is checked from this file. `certo compose examples/construction_split.json`.",
+ "title": "tau <= 2 nu on a split graph, built by lifts",
+ "conclusion": "tau(G) <= 2 nu(G) for this G (cover 3, packing 3); every split graph on at most 4 vertices satisfies tau <= 2 nu; the bases are hosted with no spoke repeated; the joint credit is 9/16 >= 1/2; the 2 releases CEGIS asked for exist",
+ "graphs": {
+  "K": [
+   [
+    "a",
+    "b"
+   ],
+   [
+    "a",
+    "c"
+   ],
+   [
+    "a",
+    "d"
+   ],
+   [
+    "b",
+    "c"
+   ],
+   [
+    "b",
+    "d"
+   ],
+   [
+    "c",
+    "d"
+   ]
+  ],
+  "H": [
+   [
+    "a",
+    "b"
+   ],
+   [
+    "a",
+    "c"
+   ],
+   [
+    "a",
+    "d"
+   ],
+   [
+    "b",
+    "c"
+   ],
+   [
+    "b",
+    "d"
+   ],
+   [
+    "c",
+    "d"
+   ],
+   [
+    "t",
+    "c"
+   ],
+   [
+    "t",
+    "d"
+   ]
+  ],
+  "G": [
+   [
+    "a",
+    "b"
+   ],
+   [
+    "a",
+    "c"
+   ],
+   [
+    "a",
+    "d"
+   ],
+   [
+    "b",
+    "c"
+   ],
+   [
+    "b",
+    "d"
+   ],
+   [
+    "c",
+    "d"
+   ],
+   [
+    "t",
+    "c"
+   ],
+   [
+    "t",
+    "d"
+   ],
+   [
+    "s",
+    "a"
+   ],
+   [
+    "s",
+    "b"
+   ],
+   [
+    "s",
+    "c"
+   ]
+  ]
+ },
+ "steps": [
+  {
+   "id": "split_catalogue",
+   "contract": "catalogue",
+   "max_vertices": 4,
+   "forbidden": {
+    "2K2": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       2,
+       3
+      ]
+     ]
+    },
+    "C4": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       3
+      ],
+      [
+       1,
+       2
+      ],
+      [
+       2,
+       3
+      ]
+     ]
+    },
+    "C5": {
+     "n": 5,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       4
+      ],
+      [
+       1,
+       2
+      ],
+      [
+       2,
+       3
+      ],
+      [
+       3,
+       4
+      ]
+     ]
+    }
+   },
+   "representatives": {
+    "R1_0": {
+     "n": 1,
+     "edges": []
+    },
+    "R2_0": {
+     "n": 2,
+     "edges": []
+    },
+    "R2_1": {
+     "n": 2,
+     "edges": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R3_0": {
+     "n": 3,
+     "edges": []
+    },
+    "R3_1": {
+     "n": 3,
+     "edges": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R3_2": {
+     "n": 3,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ]
+     ]
+    },
+    "R3_3": {
+     "n": 3,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ]
+    },
+    "R4_0": {
+     "n": 4,
+     "edges": []
+    },
+    "R4_1": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R4_2": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ]
+     ]
+    },
+    "R4_3": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ]
+     ]
+    },
+    "R4_4": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       1,
+       2
+      ]
+     ]
+    },
+    "R4_5": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       1,
+       3
+      ]
+     ]
+    },
+    "R4_6": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ],
+      [
+       1,
+       2
+      ]
+     ]
+    },
+    "R4_7": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ],
+      [
+       1,
+       2
+      ],
+      [
+       1,
+       3
+      ]
+     ]
+    },
+    "R4_8": {
+     "n": 4,
+     "edges": [
+      [
+       0,
+       1
+      ],
+      [
+       0,
+       2
+      ],
+      [
+       0,
+       3
+      ],
+      [
+       1,
+       2
+      ],
+      [
+       1,
+       3
+      ],
+      [
+       2,
+       3
+      ]
+     ]
+    }
+   },
+   "extensions": [
+    {
+     "from": "R1_0",
+     "neighbours": [],
+     "to": "R2_0",
+     "map": [
+      0,
+      1
+     ]
+    },
+    {
+     "from": "R1_0",
+     "neighbours": [
+      0
+     ],
+     "to": "R2_1",
+     "map": [
+      0,
+      1
+     ]
+    },
+    {
+     "from": "R2_0",
+     "neighbours": [],
+     "to": "R3_0",
+     "map": [
+      0,
+      1,
+      2
+     ]
+    },
+    {
+     "from": "R2_0",
+     "neighbours": [
+      0
+     ],
+     "to": "R3_1",
+     "map": [
+      0,
+      2,
+      1
+     ]
+    },
+    {
+     "from": "R2_0",
+     "neighbours": [
+      1
+     ],
+     "to": "R3_1",
+     "map": [
+      2,
+      0,
+      1
+     ]
+    },
+    {
+     "from": "R2_0",
+     "neighbours": [
+      0,
+      1
+     ],
+     "to": "R3_2",
+     "map": [
+      1,
+      2,
+      0
+     ]
+    },
+    {
+     "from": "R2_1",
+     "neighbours": [],
+     "to": "R3_1",
+     "map": [
+      0,
+      1,
+      2
+     ]
+    },
+    {
+     "from": "R2_1",
+     "neighbours": [
+      0
+     ],
+     "to": "R3_2",
+     "map": [
+      0,
+      1,
+      2
+     ]
+    },
+    {
+     "from": "R2_1",
+     "neighbours": [
+      1
+     ],
+     "to": "R3_2",
+     "map": [
+      1,
+      0,
+      2
+     ]
+    },
+    {
+     "from": "R2_1",
+     "neighbours": [
+      0,
+      1
+     ],
+     "to": "R3_3",
+     "map": [
+      0,
+      1,
+      2
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [],
+     "to": "R4_0",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      0
+     ],
+     "to": "R4_1",
+     "map": [
+      0,
+      2,
+      3,
+      1
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      1
+     ],
+     "to": "R4_1",
+     "map": [
+      2,
+      0,
+      3,
+      1
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      2
+     ],
+     "to": "R4_1",
+     "map": [
+      2,
+      3,
+      0,
+      1
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      0,
+      1
+     ],
+     "to": "R4_2",
+     "map": [
+      1,
+      2,
+      3,
+      0
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      0,
+      2
+     ],
+     "to": "R4_2",
+     "map": [
+      1,
+      3,
+      2,
+      0
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      1,
+      2
+     ],
+     "to": "R4_2",
+     "map": [
+      3,
+      1,
+      2,
+      0
+     ]
+    },
+    {
+     "from": "R3_0",
+     "neighbours": [
+      0,
+      1,
+      2
+     ],
+     "to": "R4_3",
+     "map": [
+      1,
+      2,
+      3,
+      0
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [],
+     "to": "R4_1",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      0
+     ],
+     "to": "R4_2",
+     "map": [
+      0,
+      1,
+      3,
+      2
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      1
+     ],
+     "to": "R4_2",
+     "map": [
+      1,
+      0,
+      3,
+      2
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      2
+     ],
+     "excluded": "2K2",
+     "at": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      0,
+      1
+     ],
+     "to": "R4_4",
+     "map": [
+      0,
+      1,
+      3,
+      2
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      0,
+      2
+     ],
+     "to": "R4_5",
+     "map": [
+      0,
+      2,
+      3,
+      1
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      1,
+      2
+     ],
+     "to": "R4_5",
+     "map": [
+      2,
+      0,
+      3,
+      1
+     ]
+    },
+    {
+     "from": "R3_1",
+     "neighbours": [
+      0,
+      1,
+      2
+     ],
+     "to": "R4_6",
+     "map": [
+      1,
+      2,
+      3,
+      0
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [],
+     "to": "R4_2",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      0
+     ],
+     "to": "R4_3",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      1
+     ],
+     "to": "R4_5",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      2
+     ],
+     "to": "R4_5",
+     "map": [
+      0,
+      2,
+      1,
+      3
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      0,
+      1
+     ],
+     "to": "R4_6",
+     "map": [
+      0,
+      1,
+      3,
+      2
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      0,
+      2
+     ],
+     "to": "R4_6",
+     "map": [
+      0,
+      3,
+      1,
+      2
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      1,
+      2
+     ],
+     "excluded": "C4",
+     "at": [
+      0,
+      1,
+      3,
+      2
+     ]
+    },
+    {
+     "from": "R3_2",
+     "neighbours": [
+      0,
+      1,
+      2
+     ],
+     "to": "R4_7",
+     "map": [
+      0,
+      2,
+      3,
+      1
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [],
+     "to": "R4_4",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      0
+     ],
+     "to": "R4_6",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      1
+     ],
+     "to": "R4_6",
+     "map": [
+      1,
+      0,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      2
+     ],
+     "to": "R4_6",
+     "map": [
+      1,
+      2,
+      0,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      0,
+      1
+     ],
+     "to": "R4_7",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      0,
+      2
+     ],
+     "to": "R4_7",
+     "map": [
+      0,
+      2,
+      1,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      1,
+      2
+     ],
+     "to": "R4_7",
+     "map": [
+      2,
+      0,
+      1,
+      3
+     ]
+    },
+    {
+     "from": "R3_3",
+     "neighbours": [
+      0,
+      1,
+      2
+     ],
+     "to": "R4_8",
+     "map": [
+      0,
+      1,
+      2,
+      3
+     ]
+    }
+   ],
+   "ratio": 2,
+   "witnesses": {
+    "R1_0": {
+     "packing": [],
+     "cover": []
+    },
+    "R2_0": {
+     "packing": [],
+     "cover": []
+    },
+    "R2_1": {
+     "packing": [],
+     "cover": []
+    },
+    "R3_0": {
+     "packing": [],
+     "cover": []
+    },
+    "R3_1": {
+     "packing": [],
+     "cover": []
+    },
+    "R3_2": {
+     "packing": [],
+     "cover": []
+    },
+    "R3_3": {
+     "packing": [
+      [
+       0,
+       1,
+       2
+      ]
+     ],
+     "cover": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R4_0": {
+     "packing": [],
+     "cover": []
+    },
+    "R4_1": {
+     "packing": [],
+     "cover": []
+    },
+    "R4_2": {
+     "packing": [],
+     "cover": []
+    },
+    "R4_3": {
+     "packing": [],
+     "cover": []
+    },
+    "R4_4": {
+     "packing": [
+      [
+       0,
+       1,
+       2
+      ]
+     ],
+     "cover": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R4_5": {
+     "packing": [],
+     "cover": []
+    },
+    "R4_6": {
+     "packing": [
+      [
+       0,
+       1,
+       2
+      ]
+     ],
+     "cover": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R4_7": {
+     "packing": [
+      [
+       0,
+       1,
+       2
+      ]
+     ],
+     "cover": [
+      [
+       0,
+       1
+      ]
+     ]
+    },
+    "R4_8": {
+     "packing": [
+      [
+       0,
+       1,
+       2
+      ]
+     ],
+     "cover": [
+      [
+       0,
+       1
+      ],
+      [
+       2,
+       3
+      ]
+     ]
+    }
+   }
+  },
+  {
+   "id": "lift_t",
+   "contract": "lift",
+   "parent": "H",
+   "child": "K",
+   "_": "t joins c and d: the new triangle tcd is t's, and cd already meets it",
+   "child_packing": [
+    [
+     "a",
+     "b",
+     "d"
+    ]
+   ],
+   "child_cover": [
+    [
+     "a",
+     "b"
+    ],
+    [
+     "c",
+     "d"
+    ]
+   ],
+   "package": [
+    {
+     "triangle": [
+      "t",
+      "c",
+      "d"
+     ],
+     "owner": "t"
+    }
+   ],
+   "cover_added": [],
+   "budget": {
+    "paid_by": "K",
+    "ratio": 2
+   }
+  },
+  {
+   "id": "lift_s",
+   "contract": "lift",
+   "parent": "G",
+   "child": "H",
+   "from": "lift_t",
+   "_": "s joins a, b, c: sbc is s's, sharing no edge with abd or tcd; sc meets sac and sbc",
+   "package": [
+    {
+     "triangle": [
+      "s",
+      "b",
+      "c"
+     ],
+     "owner": "s"
+    }
+   ],
+   "cover_added": [
+    [
+     "s",
+     "c"
+    ]
+   ],
+   "budget": {
+    "paid_by": "H",
+    "ratio": 2
+   }
+  },
+  {
+   "id": "hosting",
+   "contract": "hosting",
+   "_": "a base (a clique edge) on a host (an independent vertex) is a triangle; two bases on one host sharing an end would reuse a spoke, so each host's bases form a matching. ab and bc on s would reuse s-b: not physical",
+   "graph": "G",
+   "bases": {
+    "ab": [
+     "a",
+     "b"
+    ],
+    "ac": [
+     "a",
+     "c"
+    ],
+    "bc": [
+     "b",
+     "c"
+    ],
+    "cd": [
+     "c",
+     "d"
+    ]
+   },
+   "items": [
+    "ab",
+    "ac",
+    "bc",
+    "cd"
+   ],
+   "allowed": {
+    "ab": [
+     "s"
+    ],
+    "ac": [
+     "s"
+    ],
+    "bc": [
+     "s"
+    ],
+    "cd": [
+     "t"
+    ]
+   },
+   "capacities": {
+    "s": 2,
+    "t": 1
+   },
+   "resources": {
+    "ab": [
+     "a",
+     "b"
+    ],
+    "ac": [
+     "a",
+     "c"
+    ],
+    "bc": [
+     "b",
+     "c"
+    ],
+    "cd": [
+     "c",
+     "d"
+    ]
+   },
+   "assignment": {
+    "ab": "s",
+    "cd": "t"
+   },
+   "target": 2
+  },
+  {
+   "id": "credit",
+   "contract": "credit",
+   "_": "s owns ab, ac, bc and t owns cd; weights are algebraic credit, of any sign",
+   "bases_from": "hosting",
+   "owners": {
+    "s": [
+     "ab",
+     "ac",
+     "bc"
+    ],
+    "t": [
+     "cd"
+    ]
+   },
+   "weights": {
+    "ab": "1/2",
+    "ac": "-1/4",
+    "bc": "1/3",
+    "cd": "1/3"
+   },
+   "states": {
+    "s": {
+     "none": [],
+     "ab": [
+      "ab"
+     ],
+     "ab_ac": [
+      "ab",
+      "ac"
+     ]
+    },
+    "t": {
+     "none": [],
+     "cd": [
+      "cd"
+     ]
+    }
+   },
+   "slots": {
+    "s": {
+     "allowed": {
+      "ab": [
+       "s1"
+      ],
+      "ac": [
+       "s2"
+      ],
+      "bc": [
+       "s1",
+       "s2"
+      ]
+     }
+    },
+    "t": {
+     "allowed": {
+      "cd": [
+       "t1"
+      ]
+     }
+    }
+   },
+   "covers": {
+    "s": {
+     "none": {},
+     "ab": {
+      "ab": "s1"
+     },
+     "ab_ac": {
+      "ab": "s1",
+      "ac": "s2"
+     }
+    },
+    "t": {
+     "none": {},
+     "cd": {
+      "cd": "t1"
+     }
+    }
+   },
+   "cuts": {
+    "c1": {
+     "p": "1/2",
+     "states": {
+      "s": "ab",
+      "t": "cd"
+     }
+    },
+    "c2": {
+     "p": "1/4",
+     "states": {
+      "s": "ab_ac",
+      "t": "cd"
+     }
+    },
+    "c3": {
+     "p": "1/4",
+     "states": {
+      "s": "none",
+      "t": "none"
+     }
+    }
+   },
+   "relation": ">=",
+   "target": "1/2"
+  },
+  {
+   "id": "releases",
+   "contract": "certificate",
+   "path": "out/construction_releases.json"
+  },
+  {
+   "id": "releases_exist",
+   "contract": "cegis",
+   "certificate": "releases",
+   "backed_by": {
+    "r": {
+     "step": "hosting",
+     "quantity": "placed",
+     "relation": "<="
+    }
+   }
+  }
+ ]
+}

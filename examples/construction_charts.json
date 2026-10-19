@@ -1,0 +1,86 @@
+{
+ "type": "ConstructionSpec",
+ "_": "An atlas and a change of coordinates. Two charts cover the square: the left one where x <= 3/5, the right one where x >= 2/5, each with a sign certificate that assumes exactly its selector; the leaves are recomputed. Then 2x - 1 >= 0 on [1/2, 1], proved in the coordinate u = (1 - x)/x where it reads 1 - u >= 0. `certo compose examples/construction_charts.json`.",
+ "title": "an atlas of two charts and a pull-back",
+ "conclusion": "on [0, 1]^2 one of the two chart bounds holds at every point; and 2x - 1 >= 0 on [1/2, 1]",
+ "steps": [
+  {
+   "id": "left",
+   "contract": "certificate",
+   "path": "out/chart_left.json",
+   "obligation": "chart_left.py"
+  },
+  {
+   "id": "right",
+   "contract": "certificate",
+   "path": "out/chart_right.json"
+  },
+  {
+   "id": "atlas",
+   "contract": "charts",
+   "domain": {
+    "x": [
+     "0",
+     "1"
+    ],
+    "y": [
+     "0",
+     "1"
+    ]
+   },
+   "charts": {
+    "L": {
+     "selectors": {
+      "left": "3/5 - x"
+     },
+     "certificates": [
+      "left"
+     ]
+    },
+    "R": {
+     "selectors": {
+      "right": "x - 2/5"
+     },
+     "certificates": [
+      "right"
+     ]
+    }
+   }
+  },
+  {
+   "id": "u_cert",
+   "contract": "certificate",
+   "path": "out/chart_pullback.json"
+  },
+  {
+   "id": "pullback",
+   "contract": "substitution",
+   "certificate": "u_cert",
+   "old": {
+    "variables": [
+     "x"
+    ],
+    "box": {
+     "x": [
+      "1/2",
+      "1"
+     ]
+    }
+   },
+   "new": {
+    "variables": [
+     "u"
+    ]
+   },
+   "map": {
+    "x": "1"
+   },
+   "denominator": "1 + u",
+   "inverse": {
+    "u": "1 - x"
+   },
+   "inverse_denominator": "x",
+   "obligation": "2*x - 1"
+  }
+ ]
+}

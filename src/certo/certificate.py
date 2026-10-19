@@ -305,6 +305,13 @@ def same_program(cert, spec) -> dict:
 
     if isinstance(cert, dict):
         cert = Certificate.from_dict(cert)
+    if cert.kind == "farkas_ray":
+        # A ray is about the SYSTEM, not an objective: the comparison is the
+        # constraints' (two sessions compared A and b by hand).
+        from .obligation import same_obligation
+
+        got = same_obligation(cert, spec)
+        return {"same": got["same"], "differences": got["differences"]}
     p = cert.payload
     if cert.kind == "gap":
         p = (p.get("relaxation") or {}).get("payload", p)
@@ -1298,6 +1305,13 @@ def clique_lp_certificate(out, title="") -> Certificate:
                        note_key="cert.note.clique_lp")
 
 
+def construction_certificate(payload, solver_free=True) -> Certificate:
+    """Steps over shared names, each with the data it was checked on;
+    embedded certificates travel inside, so the file is checked anywhere."""
+    return Certificate(kind="construction", solver_free=solver_free,
+                       payload=payload, note_key="cert.note.construction")
+
+
 def assignment_certificate(payload) -> Certificate:
     """An integral assignment and the Hall set that shows it is maximum."""
     return Certificate(kind="assignment", solver_free=True, payload=payload,
@@ -2214,6 +2228,12 @@ def verify(cert, limits=None, source=None) -> VerifyReport:
                                      known=SCHEMA_VERSION))
         return rep
     except Exception as e:  # noqa: BLE001
+        from .budget import OutOfTime
+
+        if isinstance(e, OutOfTime):
+            # Stopped by the clock: INCONCLUSIVE, never invalid.
+            return VerifyReport(False, cert.kind, cert.solver_free,
+                                detail=t("verify.out_of_time"), timed_out=True)
         return VerifyReport(
             False, cert.kind, cert.solver_free,
             detail=t("verify.failed", type=type(e).__name__, message=e),
@@ -3524,18 +3544,72 @@ def _verify_assignment(cert, limits) -> VerifyReport:
              "verify.assign.hall_detail", cap=b.get("capacity"),
              free=b.get("not_confined"), value=b.get("value"))),
     ]
+    size = got["size"]
+    if "resources" in p:
+        # PHYSICAL: the assignment that counts is the one with no resource
+        # repeated on a receiver; the relaxation's (above) only bounds it.
+        phys = assignment.check_physical(p)
+        size = int((p.get("physical") or {}).get("size", 0) or 0)
+        checks.append((t("verify.assign.physical"), not phys,
+                       "; ".join(phys[:3]) or t("verify.assign.physical_detail",
+                                                n=size, bound=b.get("value"))))
+        try:
+            items, _allow, _caps = assignment.normalise(
+                p["items"], p["allowed"], p["capacities"])
+            res = assignment.normalise_resources(items, p.get("resources"))
+            relax = {str(k): str(v) for k, v in (p.get("assignment") or {}).items()}
+            clash = [[r, s, its] for r, s, its in assignment.collisions(relax, res)]
+            declared = [[str(c[0]), str(c[1]), sorted(map(str, c[2]))] for c in
+                        (p.get("physical") or {}).get("relaxation_collisions") or []]
+            same = declared == clash
+        except (assignment.NotAnAssignment, KeyError, TypeError, IndexError) as e:
+            clash, same = [str(e)], False
+        checks.append((t("verify.assign.relaxation_collisions"), same,
+                       str(len(clash))))
     target = p.get("target")
     if target is not None:
-        met = got["size"] >= int(target)
+        met = size >= int(target)
         checks.append((t("verify.assign.target"),
                        bool(p.get("reached")) == met,
-                       t("verify.assign.target_detail", size=got["size"],
+                       t("verify.assign.target_detail", size=size,
                          target=target)))
     ok = got["ok"] and all(c[1] for c in checks)
     return VerifyReport(ok, "assignment", True, checks=checks,
                         method_key="verify.assign.method",
-                        detail=t("verify.assign.detail", n=got["size"],
+                        detail=t("verify.assign.detail", n=size,
                                  items=len(p.get("items") or [])))
+
+
+def _verify_construction(cert, limits) -> VerifyReport:
+    """Every step re-derived from the data the certificate carries, in
+    order, each able to use only what the steps before it established."""
+    from . import construction as C
+
+    p = cert.payload
+    steps, report = C.run(p.get("graphs") or {}, p.get("steps") or [], limits,
+                          None, prepare=False)
+    checks, warnings = [], []
+    for r in report:
+        for label, ok, detail in r["rows"]:
+            checks.append(("[{}] {}".format(r["id"], label), ok, detail))
+        if r["degree"] == "relative" and r["ok"]:
+            warnings.append(_note("assumed", "verify.construction.relative", step=r["id"]))
+    # THE SUMMARY IS RECOMPUTED, not read: each step's contract, verdict,
+    # degree and what it established, as the checks above found them.
+    from .engines.construction import _plain
+
+    declared = [{k: s.get(k) for k in ("id", "contract", "ok", "degree", "outputs")}
+                for s in p.get("summary") or []]
+    again = [{"id": r["id"], "contract": r["contract"], "ok": r["ok"],
+              "degree": r["degree"], "outputs": _plain(r["outputs"])} for r in report]
+    checks.append((t("verify.construction.steps"), declared == again, str(len(report))))
+    warnings.append(t("verify.construction.meaning"))
+    degree = C.degree_of(report)
+    ok = all(c[1] for c in checks)
+    return VerifyReport(ok, "construction", degree == "complete", checks=checks,
+                        warnings=warnings, method_key="verify.construction.method",
+                        detail=t("verify.construction.detail", n=len(report),
+                                 conclusion=p.get("conclusion") or "-"))
 
 
 def _verify_pinned_value(cert, limits) -> VerifyReport:
@@ -6525,7 +6599,10 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
     # optimum is the one thing a rejection must not invite.
     # A rejected certificate gets NO summary of its own: `verify` builds it
     # from the first failed check, the same way for every kind.
+    feasible_only = all(v == 0 for v in c)
     detail = ("" if not ok
+              else t("verify.lp.feasible.detail", rows=len(b))
+              if feasible_only
               else t("verify.lp.exact.detail", value=value)
               if not p.get("integer")
               else t("verify.lp.ilp.detail",
@@ -7966,6 +8043,7 @@ def _value(z3, sort, val):
 #: catalogue that keeps the documents honest had no source for the kinds
 #: and a new kind meant editing a table nobody could see.
 VERIFIERS = {
+    "construction": _verify_construction,
     "assignment": _verify_assignment,
     "model": _verify_model,
     "unsat_core": _verify_unsat_core,

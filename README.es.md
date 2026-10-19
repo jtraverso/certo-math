@@ -16,7 +16,7 @@ formalización cuesta horas.
 | **[Página del proyecto →](https://jtraverso.github.io/certo-math/)** | la introducción didáctica: para qué sirve, en una página, en ambos idiomas |
 | **[Comandos](docs/es/COMMANDS.md)** | los sesenta y dos, una entrada cada uno: la pregunta, el spec, el certificado, y qué **no** establece |
 | **[Specs](docs/es/SPECS.md)** | el DSL: cada tipo con un ejemplo mínimo que funciona, opciones comunes, códigos de salida |
-| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los sesenta y cinco tipos, cuáles se re-comprueban sin solver |
+| **[Certificados](docs/es/CERTIFICATES.md)** | por qué son el centro, los sesenta y seis tipos, cuáles se re-comprueban sin solver |
 | **[Casos trabajados](docs/es/CASES.md)** | problemas reales de punta a punta: simetría, barridos, cotas paramétricas, empaquetamientos, datos tóricos |
 | **[Qué significa un resultado](docs/es/VERDICTS.md)** | estado frente a veredicto, las cuatro afirmaciones de optimización que se parecen, `false` frente a `null`, códigos de salida |
 | **[Límites](docs/es/LIMITS.md)** | qué no hace, y las preguntas frecuentes |

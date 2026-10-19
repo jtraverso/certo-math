@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The sixty-five kinds
+## The sixty-six kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -68,7 +68,7 @@ answers"*. The table below is the map; the header is the territory.
 | `clique_lp` | an LP optimum over every clique of a graph, without listing them | **yes**, rational arithmetic and the pricing search rerun |
 | `parametric_atlas` | one parametric bound on a whole domain, from N certificates on N boxes | **yes**, every piece re-verified and the covering recomputed |
 | `polynomial_nonneg` | a polynomial >= 0 on a box (cut by a region), or the point where it is negative | **yes**, Bernstein coefficients recomputed, or one evaluation |
-| `assignment` | the largest assignment of items to receivers, and a Hall set showing no larger one | **yes**, placements, loads and the Hall bound counted |
+| `assignment` | the largest assignment of items to receivers, and a Hall set showing no larger one; with `resources`, a PHYSICAL assignment beside it (no resource twice on a receiver) and the relaxation's collisions named | **yes**, placements, loads and the Hall bound counted |
 | `pinned_value` | `cp_r(G)` between two certified bounds -- equal, or the range | **yes**, both halves re-verified and tied to one edge list |
 | `symmetric_inertia` | the inertia of a symmetric rational matrix, PSD, and a vector refuting PSD | **yes**, two rational products: `S A Sᵀ = D`, `S S⁻¹ = I` |
 | `affine_semigroup` | pointedness, cone, group and semigroup membership, a refutation of normality, a proposed Hilbert basis | **yes**, the negatives by redoing the bounded search |
@@ -88,6 +88,7 @@ answers"*. The table below is the map; the header is the territory.
 | `bound_step` | a step between bounds: each substitution monotone and in range, and the conclusion above the substituted bound, as signs on a box | **yes**, Bernstein coefficients |
 | `conditioned_cover` | a box tiled by leaves, each with an obligation that keeps its sign there or a condition negative there | **yes**, Bernstein coefficients and the tiling |
 | `role_transport` | an automorphism of a graph carrying each role onto its new one, with the declared properties before and after | **yes**, edge sets compared |
+| `construction` | contracts over shared named objects -- lifts with their packing and cover rebuilt, a catalogue closed under one-vertex extensions, a joint credit, physical hosting, ports glued, embedded certificates tied to their obligations, a synthesised parameter backed by a certified resource, an atlas of charts, a change of coordinates -- each re-derived from the data in order | **yes** unless it embeds a certificate that needs one; then as that certificate |
 | `synth_optimum` | the best candidate within a template: one synthesis attains the value, one refuted search shows nothing better meets the contract | no, both halves ask a solver |
 | `recurrence_table` | the minimum number of candidates partitioning (or covering) a universe: every state of the recurrence over masks, each the minimum over its children | **yes**, comparing integers |
 | `repair_refusal` | a change of a partition is NOT admissible, at the step and for the reasons recorded -- re-checked by the rules that accept repairs | **yes**, counting |

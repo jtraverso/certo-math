@@ -72,7 +72,7 @@ def _flint_mul(a, b):
                                 "lex")
 
     def to(p):
-        return ctx.from_dict({e: fl.fmpq(c.numerator, c.denominator)
+        return ctx.from_dict({e: fl.fmpq(int(c.numerator), int(c.denominator))
                               for e, c in p.terms.items()})
 
     prod = to(a) * to(b)
@@ -683,4 +683,139 @@ def combination(hs, gs, variables=None) -> Poly:
     out = Poly(gs[0].vars if gs else tuple(variables or ()))
     for h, g in zip(hs, gs):
         out = out + h * g
+    return out
+
+
+# ---------------------------------------------------------------------------
+# polynomials written as TEXT, for specs that are data
+# ---------------------------------------------------------------------------
+#
+# A JSON spec cannot carry a z3 term, and `eval` is what this project decided
+# not to run on a model's text. So: a small reader for exactly the arithmetic
+# a polynomial needs -- numbers (exact, `1/3` and `0.25` alike), names, + - *,
+# division by a NUMBER, `^` or `**` with a natural exponent, parentheses --
+# and nothing else. A name outside the ring is refused by name.
+
+
+def _tokens(text):
+    import re
+
+    pos, out = 0, []
+    pat = re.compile(r"\s*(?:(\d+(?:\.\d+)?)|([A-Za-z_][A-Za-z_0-9]*)|(\*\*|[-+*/^()]))")
+    text = str(text)
+    while pos < len(text):
+        if text[pos:].strip() == "":
+            break
+        m = pat.match(text, pos)
+        if not m or m.end() == pos:
+            raise ValueError(t("poly.text_bad", text=text[:60], at=pos))
+        out.append(("num", m.group(1)) if m.group(1) else
+                   ("name", m.group(2)) if m.group(2) else ("op", m.group(3)))
+        pos = m.end()
+    return out
+
+
+def parse_text(variables, text) -> "Poly":
+    """`"x^2 - 2*x*y + 1/3"` over the ring `variables`, exactly."""
+    ring = tuple(variables)
+    toks = _tokens(text)
+    i = [0]
+
+    def peek():
+        return toks[i[0]] if i[0] < len(toks) else (None, None)
+
+    def take():
+        tok = peek()
+        i[0] += 1
+        return tok
+
+    def expr():
+        out = term()
+        while peek() in (("op", "+"), ("op", "-")):
+            op = take()[1]
+            rhs = term()
+            out = out + rhs if op == "+" else out - rhs
+        return out
+
+    def term():
+        out = factor()
+        while peek() in (("op", "*"), ("op", "/")):
+            op = take()[1]
+            rhs = factor()
+            if op == "*":
+                out = out * rhs
+            else:
+                if any(any(e) for e in rhs.terms) or not rhs.terms:
+                    raise ValueError(t("poly.text_division", text=str(text)[:60]))
+                out = out / rhs.terms[(0,) * len(ring)]
+        return out
+
+    def factor():
+        if peek() == ("op", "-"):
+            take()
+            return -factor()
+        if peek() == ("op", "+"):
+            take()
+            return factor()
+        base = atom()
+        if peek() in (("op", "^"), ("op", "**")):
+            take()
+            kind, val = take()
+            if kind != "num" or "." in val:
+                raise ValueError(t("poly.text_exponent", text=str(text)[:60]))
+            return base ** int(val)
+        return base
+
+    def atom():
+        kind, val = take()
+        if kind == "num":
+            return Poly.const(ring, Fraction(val))
+        if kind == "name":
+            if val not in ring:
+                raise ValueError(t("poly.text_name", name=val, ring=", ".join(ring)))
+            return Poly.var(ring, val)
+        if (kind, val) == ("op", "("):
+            out = expr()
+            if take() != ("op", ")"):
+                raise ValueError(t("poly.text_bad", text=str(text)[:60], at=i[0]))
+            return out
+        raise ValueError(t("poly.text_bad", text=str(text)[:60], at=i[0]))
+
+    out = expr()
+    if i[0] != len(toks):
+        raise ValueError(t("poly.text_bad", text=str(text)[:60], at=i[0]))
+    return out
+
+
+def as_poly(ring, x) -> "Poly":
+    """A polynomial over `ring` from text, a z3 term, a number or a Poly of
+    that ring."""
+    ring = tuple(ring)
+    if isinstance(x, Poly):
+        if x.vars != ring:
+            raise ValueError(t("poly.ring_mismatch", got=", ".join(x.vars),
+                               want=", ".join(ring)))
+        return x
+    if isinstance(x, str):
+        return parse_text(ring, x)
+    if isinstance(x, (int, Fraction)) and not isinstance(x, bool):
+        return Poly.const(ring, x)
+    return Poly.from_z3(x, ring)
+
+
+def compose_map(p: "Poly", images: dict, ring) -> "Poly":
+    """`p(images)`: every variable of `p` replaced at once by a polynomial
+    over the new `ring`."""
+    ring = tuple(ring)
+    out = Poly(ring)
+    powers = {}
+    for e, c in p.terms.items():
+        term = Poly.const(ring, c)
+        for v, k in zip(p.vars, e):
+            if k:
+                key = (v, k)
+                if key not in powers:
+                    powers[key] = images[v] ** k
+                term = term * powers[key]
+        out = out + term
     return out
