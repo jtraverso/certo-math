@@ -2458,8 +2458,11 @@ Roles: `consumer`, `existence`, `refutation`, `finite_check`.
 **Sobre ESTA obligación.** `verify CERT --obligation SPEC` agrega un chequeo:
 el certificado es sobre la obligación que declara la spec, leída como la lee
 el motor (`certo.obligation.same_obligation(cert, spec)` en la API). Para un
-ideal, un nonneg, una cubierta, un CNF y un LP el certificado lleva la
-obligación entera y ambos lados tienen una **huella** canónica
+ideal, un nonneg, una suma de cuadrados, una cubierta, un CNF, un LP, una
+síntesis (`cegis`, `cegis_none`, `synth_optimum`, `synth_proved`), una razón,
+un resultante, un pico entero, un paso entre cotas y una cota paramétrica
+*(0.35.1)* el certificado lleva la obligación entera y ambos lados tienen una
+**huella** canónica
 (`certo.obligation.fingerprint`, y `obligation` en `verify --json`); para una
 prueba de `prove`, que guarda solo las hipótesis que usó, cada una se compara
 por nombre, junto con la afirmación. Un certificado válido de `0 = 0` puesto

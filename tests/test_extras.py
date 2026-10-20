@@ -19133,6 +19133,81 @@ def test_0_35_1_every_result_says_what_it_is():
                          "basis": r.outcome["basis"]}
     assert r.to_dict()["outcome"]["state"] in STATES
 
+
+# --- 0.35.1: from the 0.35 research sessions (377-400) -------------------------
+
+
+def test_0_35_1_same_obligation_covers_synthesis_ratio_resultant_peak_step_parametric():
+    """Sessions bound these by hand: `same: None` for `synth_optimum`,
+    `ratio_bound`, `resultant`. Each family now compares part by part, read
+    the way its engine reads the spec -- and refuses another spec."""
+    from certo import api
+    from certo.obligation import fingerprint, same_obligation
+    from certo.spec import load_spec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    cases = [("synth_minimum", "synth"), ("synth_constant", "synth"),
+             ("synth_none", "synth"), ("ratio_window", "ratio"),
+             ("eliminate_parameter", "eliminate"), ("peak_residues", "peak"),
+             ("bound_step", "step"), ("parametric_bound", "parametric")]
+    certs = {}
+    for ex, cmd in cases:
+        spec = load_spec(str(root / "examples" / (ex + ".py")))
+        r = api.run(cmd, spec)
+        assert r.certificate is not None, (ex, r.detail)
+        got = same_obligation(r.certificate, spec)
+        assert got["same"] is True, (ex, got["differences"])
+        assert fingerprint(r.certificate) == got["fingerprint"]["spec"]
+        certs[ex] = (r.certificate, spec)
+    # another spec of the same family is another obligation
+    for a, b in (("synth_minimum", "synth_constant"), ("synth_constant", "synth_none")):
+        assert same_obligation(certs[a][0], certs[b][1])["same"] is False, (a, b)
+
+
+def test_0_35_1_a_synthesis_scope_is_checked_when_the_spec_is_made():
+    import z3
+
+    from certo import SynthSpec
+
+    a, x = z3.Ints("a x")
+    try:
+        SynthSpec(impl_vars=[a], input_vars=[x], correctness=a >= x,
+                  scope={"counterexamples": "relaxation of the envelope"})
+    except ValueError as e:
+        assert "realisable" in str(e) and "relaxation" in str(e)
+    else:
+        raise AssertionError("a free description was accepted")
+    SynthSpec(impl_vars=[a], input_vars=[x], correctness=a >= x,
+              scope={"counterexamples": "relaxation"})
+
+
+def test_0_35_1_a_resultant_is_a_derived_condition():
+    from certo import api
+    from certo.spec import load_spec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    r = api.run("eliminate", load_spec(str(root / "examples" / "eliminate_parameter.py")))
+    assert r.outcome["state"] == "ALGEBRAIC_CONDITION_DERIVED"
+
+
+def test_0_35_1_a_covering_can_start_at_declared_cuts():
+    """Halving at depth 1 cannot resolve an overlap (1, 101/100); a cut
+    declared inside it does, and a cut outside the box is refused."""
+    import z3
+
+    from certo.certificate import verify
+    from certo.engines import algebra
+    from certo.spec import CoveringSpec
+
+    x = z3.Real("x")
+    base = dict(domain={"x": (0, 2), "y": (0, 1)},
+                obligations=[("A", Fraction(101, 100) - x), ("B", x - 1)], subdivide=1)
+    assert algebra.covering(CoveringSpec(**base)).verdict is Verdict.INCONCLUSIVE
+    r = algebra.covering(CoveringSpec(**base, cuts={"x": ["201/200"]}))
+    assert r.verdict is Verdict.PROVED and verify(r.certificate).ok
+    bad = algebra.covering(CoveringSpec(**base, cuts={"x": [3]}))
+    assert bad.verdict is Verdict.INCONCLUSIVE and "inside" in bad.detail
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

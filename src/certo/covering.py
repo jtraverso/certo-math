@@ -98,6 +98,27 @@ def _halves(box, name):
     return left, right
 
 
+def cut_at(domain, cuts):
+    """The domain cut at the declared values, variable by variable: the
+    starting boxes. A value outside its interval is refused by name."""
+    from itertools import product
+
+    axes = []
+    for name in domain:
+        lo, hi = domain[name]
+        vals = sorted({Fraction(str(v)) for v in (cuts or {}).get(name, [])})
+        bad = [v for v in vals if not (lo < v < hi)]
+        if bad:
+            raise NotACovering(t("covering.cut_outside", name=name, value=str(bad[0]),
+                                 lo=str(lo), hi=str(hi)))
+        ends = [lo] + vals + [hi]
+        axes.append([(ends[i], ends[i + 1]) for i in range(len(ends) - 1)])
+    unknown = sorted(set(cuts or {}) - set(domain))
+    if unknown:
+        raise NotACovering(t("covering.cut_unknown", names=", ".join(unknown)))
+    return [dict(zip(domain, iv)) for iv in product(*axes)]
+
+
 def build(domain, obligations, conditions, depth, roots=None, deadline_check=None):
     """The leaves: each root (the domain, or the boxes supplied) cut in half
     along its widest side until a reason holds or `depth` runs out."""

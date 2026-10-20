@@ -145,6 +145,10 @@ class SynthSpec:
     def __post_init__(self):
         import z3
 
+        # THE SCOPE IS CHECKED WHEN THE SPEC IS MADE, not when the engine
+        # runs: three sessions wrote a free description in `counterexamples`
+        # and learnt the allowed values only from a failed run.
+        self.scope_data()
         if self.templates:
             names = {str(v) for v in self.impl_vars}
             extra = [v for tp in self.templates for v in tp.vars if str(v) not in names]
@@ -1895,6 +1899,9 @@ class CoveringSpec:
     conditions: list = field(default_factory=list)  # [(name, expr)] read >= 0
     leaves: list = None              # boxes of your own partition, to start from
     subdivide: int = 12              # halvings allowed below each starting box
+    # name -> [values]: cut the domain THERE first (a declared frontier, such
+    # as 1 and 101/100, says more than halving until the overlap resolves)
+    cuts: dict | None = None
     title: str = ""
 
 

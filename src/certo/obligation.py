@@ -17,6 +17,16 @@ Families, by certificate kind:
     ideal                      IdealSpec: variables, equations, claim, nonzero
     polynomial_nonneg          NonnegSpec: the polynomial, the box, the region
     sos                        SOSSpec: the variables and the polynomial
+    cegis, cegis_none,         SynthSpec: the implementation's constraints, the
+    synth_optimum,             domain, the correctness (and the objective and
+    synth_proved               its sense, for an optimum)
+    ratio_bound                RatioSpec: parameters, both sides, relation, region
+    resultant                  EliminateSpec: variables, the two equations, the
+                               variable eliminated
+    integer_peak               PeakSpec: parameters, the integer variable, objective
+    bound_step                 StepSpec: box, bound, substitutions, conclusion,
+                               conditions
+    parametric_bound           ParametricSpec: parameters, objective, constraints
     exact_cover, sat_optimum,  CoverSpec or HypergraphSpec: the universe, the
     recurrence_table           candidates (or parts), exact or not
     drat, cnf_model            CNFSpec: the clauses
@@ -49,11 +59,17 @@ FAMILIES = {
     "parametric_atlas": "atlas", "conditioned_cover": "covering",
     "role_transport": "roles", "farkas_ray": "system",
     "sos": "sos",
+    # 0.35.1: the families a user bound by hand, session after session
+    "cegis": "synth", "cegis_none": "synth", "synth_optimum": "synth",
+    "synth_proved": "synth",
+    "ratio_bound": "ratio", "resultant": "resultant", "integer_peak": "peak",
+    "bound_step": "step", "parametric_bound": "parametric",
 }
 
 #: families whose certificate carries the whole obligation
 WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp", "atlas", "covering", "roles",
-         "system", "sos")
+         "system", "sos", "synth", "ratio", "resultant", "peak", "step",
+         "parametric")
 
 
 # --- canonical pieces ---------------------------------------------------------
@@ -141,6 +157,41 @@ def _of_cert(cert) -> dict:
     if fam == "sos":
         vs = tuple(p["variables"])
         return {"variables": sorted(vs), "poly": _poly_key(Poly.parse(vs, p["poly"]))}
+    if fam == "synth":
+        if kind == "synth_proved":
+            from .certificate import Certificate
+
+            return _of_cert(Certificate.from_dict(p["synth"]))
+        if kind == "synth_optimum":
+            found = (p.get("found") or {}).get("payload") or {}
+            sm = found.get("smt2") or {}
+            return {"impl_constraints": _canon_smt2(p.get("base_smt2")),
+                    "behavior": _canon_smt2(sm.get("behavior")),
+                    "correctness": _canon_smt2(sm.get("correctness")),
+                    "objective": [p.get("sense"), _canon_smt2(p.get("value_smt2"))]}
+        sm = p.get("smt2") or {}
+        return {"impl_constraints": _canon_smt2(sm.get("impl_constraints")),
+                "behavior": _canon_smt2(sm.get("behavior")),
+                "correctness": _canon_smt2(sm.get("correctness")),
+                "objective": None}
+    if fam == "ratio":
+        return {"parameters": {n: _fraction(v) for n, v in p["parameters"].items()},
+                "left": p["left"], "right": p["right"], "relation": p["relation"],
+                "region": p.get("region") or {}}
+    if fam == "resultant":
+        return {"variables": list(p["variables"]), "eliminated": p["eliminated"],
+                "equations": [p["f"], p["g"]]}
+    if fam == "peak":
+        return {"parameters": {n: _fraction(v) for n, v in p["parameters"].items()},
+                "variable": p["variable"], "objective": p["objective"]}
+    if fam == "step":
+        return {"parameters": list(p["parameters"]), "box": p["box"],
+                "conditions": p.get("conditions") or {}, "bound": p["bound"],
+                "substitutions": [[s["var"], s["upper"]] for s in p.get("steps") or []],
+                "conclude": p["conclude"]}
+    if fam == "parametric":
+        return {"parameters": {n: _fraction(v) for n, v in p["parameters"].items()},
+                "objective": p["objective"], "constraints": p["constraints"]}
     if fam == "nonneg":
         vs = tuple(p["parameters"])
         return {"variables": sorted(vs),
@@ -176,6 +227,19 @@ def _of_cert(cert) -> dict:
         return {"formulas": _cert_formulas(cert),
                 "dropped": list(p.get("dropped") or [])}
     return None
+
+
+def _canon_smt2(text):
+    """An SMT-LIB formula in a form two processes agree on: parsed back here
+    and printed again. The writer numbers its `let`s by z3's internal ids, so
+    the same formula built twice printed `$x18` once and `$x11` the next time;
+    parsed in ONE context, equal formulas are one term and print alike."""
+    import z3
+
+    if text is None:
+        return None
+    fs = list(z3.parse_smt2_string(text))
+    return _one(fs[0] if len(fs) == 1 else z3.And(*fs))
 
 
 def _one(f) -> str:
@@ -260,6 +324,77 @@ def _of_spec(spec, family, cert=None) -> dict:
         return {"variables": sorted(ring), "domain": dom,
                 "region": {str(n): _poly_key(P(g)) for n, g in (spec.region or [])},
                 "claim": [rel, None if target is None else _poly_key(P(target))]}
+    if family == "synth":
+        from . import z3util
+
+        impl, behav, corr = spec.normalized()
+        out = {"impl_constraints": _canon_smt2(z3util.smt2(impl)),
+               "behavior": _canon_smt2(z3util.smt2(behav)),
+               "correctness": _canon_smt2(z3util.smt2(corr)), "objective": None}
+        obj = spec.minimize if spec.minimize is not None else spec.maximize
+        if obj is not None and cert is not None and cert.kind in ("synth_optimum",):
+            value = cert.payload.get("value")
+            out["objective"] = ["min" if spec.minimize is not None else "max",
+                                _canon_smt2(z3util.smt2(obj == int(value)))
+                                if value is not None else None]
+        if obj is not None and cert is not None and cert.kind == "synth_proved":
+            inner = cert.payload.get("synth") or {}
+            if inner.get("kind") == "synth_optimum":
+                from .certificate import Certificate
+
+                return _of_spec(spec, family, Certificate.from_dict(inner))
+        return out
+    if family in ("ratio", "peak", "parametric"):
+        params = {str(n): _fraction(v) for n, v in spec.parameters.items()}
+        if family == "ratio":
+            from .ratio import as_ratio
+
+            ring = tuple(spec.parameters)
+            ln, ld = as_ratio(spec.left, ring)
+            rn, rd = as_ratio(spec.right, ring)
+            return {"parameters": params, "left": [ln.serialize(), ld.serialize()],
+                    "right": [rn.serialize(), rd.serialize()], "relation": spec.relation,
+                    "region": {str(n): as_ratio(g, ring)[0].serialize()
+                               for n, g in (spec.region or [])}}
+        if family == "peak":
+            return {"parameters": params, "variable": spec.variable,
+                    "objective": spec.objective.serialize()}
+        from .engines.algebra import _ser
+
+        return {"parameters": params,
+                "objective": {v: _ser(spec, c) for v, c in spec.objective.items()},
+                "constraints": [[str(n), {v: _ser(spec, c) for v, c in row.items()},
+                                 sense, _ser(spec, rhs)]
+                                for n, row, sense, rhs in spec.constraints]}
+    if family == "resultant":
+        from .engines.algebra import _poly
+
+        variables = tuple(spec.variables)
+        f, g = (_poly(e, variables) for e in spec.equations)
+        return {"variables": list(variables), "eliminated": spec.eliminate,
+                "equations": [f.serialize(), g.serialize()]}
+    if family == "step":
+        from . import boundstep as BS
+        from .polynomials import Poly, as_poly, rational_function
+
+        ring = tuple(spec.box)
+        one = Poly.const(ring, 1)
+
+        def R(x):
+            if isinstance(x, Poly):
+                return x, one
+            if isinstance(x, (int, Fraction)):
+                return Poly.const(ring, x), one
+            return BS.normal(rational_function(x, ring))
+
+        return {"parameters": list(ring),
+                "box": {n: [str(Fraction(lo)), str(Fraction(hi))]
+                        for n, (lo, hi) in spec.box.items()},
+                "conditions": {str(n): as_poly(ring, g).serialize()
+                               for n, g in (spec.conditions or [])},
+                "bound": BS.ser(R(spec.bound)),
+                "substitutions": [[str(v), BS.ser(R(u))] for v, u in (spec.substitute or [])],
+                "conclude": BS.ser(R(spec.conclude))}
     if family == "sos":
         # 0.34 answered `same: None` for a sum of squares, and three sessions
         # bound their SOS certificates by hand.
@@ -396,6 +531,8 @@ def _family_of_spec(spec):
     return {"IdealSpec": "ideal", "NonnegSpec": "nonneg", "CoverSpec": "cover",
             "AtlasSpec": "atlas", "CoveringSpec": "covering", "RoleSpec": "roles",
             "CNFSpec": "cnf", "LPSpec": "lp", "PackingSpec": "lp", "SOSSpec": "sos",
+            "SynthSpec": "synth", "RatioSpec": "ratio", "EliminateSpec": "resultant",
+            "PeakSpec": "peak", "StepSpec": "step", "ParametricSpec": "parametric",
             "Spec": "smt"}.get(type(spec).__name__)
 
 

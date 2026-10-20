@@ -36,6 +36,22 @@ optional fields: `occupied`, `occupied_from` (hosting), `declared_only`,
 - **`cegis` let one backed parameter cover for another**: every parameter is
   now backed or declared unbacked by name.
 
+### Fixed (the 0.35 research sessions)
+
+- **`same_obligation` answered `None`** for `synth_optimum` (and every
+  synthesis kind), `ratio_bound` and `resultant`, and was asked for `peak`,
+  `step` and `parametric`: all nine now compare part by part, with
+  fingerprints. A synthesis contract is compared after re-reading its SMT-LIB
+  in one context (the same formula printed `$x18` in one run, `$x11` in another).
+- **`SynthSpec.scope` was checked when the engine ran**; a free text in
+  `counterexamples` is now refused when the spec is made.
+- **The clock in `nonneg` now reaches the expansion** to the unit box and the
+  grid of candidate points, not only the tensor.
+- A resultant's outcome is `ALGEBRAIC_CONDITION_DERIVED`, not a bare
+  `satisfiable`.
+- `CoveringSpec(cuts={"x": [...]})`: start at declared frontiers rather than
+  halving until an overlap resolves.
+
 ### Fixed (an external report on 0.35.0)
 
 - **Notes that contradicted the check**: a linear `unsat_core`, verified by

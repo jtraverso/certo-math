@@ -1038,7 +1038,10 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         for idx in _product(range(k + 1), repeat=len(ring)):
             cands.append({n: box[n][0] + (box[n][1] - box[n][0]) * Fraction(i, k)
                           for n, i in zip(ring, idx)})
+    from ..budget import tick
+
     for pt in cands:
+        tick(64)
         v = evaluate(poly, pt)
         if v < 0 and inside(pt):
             cert = polynomial_nonneg_certificate(dict(
@@ -2805,6 +2808,10 @@ def covering(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             return refuse(t("covering.relation"))
         conds = [(str(n), P(g)) for n, g in (spec.conditions or [])]
         roots = [C._box(b, ring) for b in spec.leaves] if spec.leaves else None
+        if getattr(spec, "cuts", None):
+            if roots:
+                return refuse(t("covering.cuts_and_leaves"))
+            roots = C.cut_at(domain, spec.cuts)
         if roots:
             ok, why = C.tiles(domain, roots)
             if not ok:

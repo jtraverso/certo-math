@@ -28,6 +28,7 @@ certificate and typed metadata -- nothing is parsed from text -- as
     PHYSICAL_WITNESS_VERIFIED a physical object rebuilt and checked (no
                               resource or edge used twice)
     CONSTRUCTION_VERIFIED     every contract of a construction re-derived
+    ALGEBRAIC_CONDITION_DERIVED  a resultant: necessary for a common root
     REFUTED                   the claim is false, with its witness
     SATISFIABLE               an object exists, and is exhibited
     INCONCLUSIVE              no answer -- of any kind
@@ -40,7 +41,8 @@ STATES = (
     "SYNTHESIS_PROVED_UNIVERSAL", "NO_PARAMETER", "FINITE_DOMAIN_COVERED",
     "CONTINUOUS_OPTIMUM", "INTEGER_OPTIMUM", "BOUND_ONLY", "FEASIBLE_POINT",
     "INFEASIBLE", "TARGET_MET", "PHYSICAL_WITNESS_VERIFIED",
-    "CONSTRUCTION_VERIFIED", "REFUTED", "SATISFIABLE", "INCONCLUSIVE",
+    "CONSTRUCTION_VERIFIED", "ALGEBRAIC_CONDITION_DERIVED", "REFUTED",
+    "SATISFIABLE", "INCONCLUSIVE",
 )
 
 
@@ -77,6 +79,10 @@ def _state(res):
             return "CONTINUOUS_OPTIMUM", "primal and dual, exact"
         if cmd == "mixed" and meta.get("optimality_certified"):
             return "INTEGER_OPTIMUM", "branch and bound closed"
+    if cmd == "eliminate" or kind == "resultant":
+        # a resultant is DERIVED: a necessary condition on the remaining
+        # variables, not a theorem and not a point
+        return "ALGEBRAIC_CONDITION_DERIVED", "a resultant: necessary for a common root"
     if cmd in ("sweep", "cases") and v == "proved":
         return "FINITE_DOMAIN_COVERED", "every case of the finite domain checked"
     if cmd == "check" and v == "satisfiable":

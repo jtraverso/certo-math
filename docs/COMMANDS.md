@@ -2405,8 +2405,11 @@ included. Roles: `consumer`, `existence`, `refutation`, `finite_check`.
 **About THIS obligation.** `verify CERT --obligation SPEC` adds one check: the
 certificate is about the obligation the spec states, read the way the engine
 reads it (`certo.obligation.same_obligation(cert, spec)` in the API). For an
-ideal, a nonneg, a cover, a CNF and an LP the certificate carries the whole
-obligation and both sides get a canonical **fingerprint**
+ideal, a nonneg, a sum of squares, a cover, a CNF, an LP, a synthesis
+(`cegis`, `cegis_none`, `synth_optimum`, `synth_proved`), a ratio, a
+resultant, an integer peak, a step between bounds and a parametric bound
+*(0.35.1)* the certificate carries the whole obligation and both sides get a
+canonical **fingerprint**
 (`certo.obligation.fingerprint`, and `obligation` in `verify --json`); for a
 proof by `prove`, which keeps only the hypotheses it used, each one is
 compared by name, with the claim. A valid certificate of `0 = 0` standing in

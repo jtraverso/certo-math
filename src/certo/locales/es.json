@@ -2539,5 +2539,8 @@
   "engine.farkas.tightened": "Sobre los enteros: {n} fila(s) estricta(s) ajustada(s) (t < 0 leído como t <= -1), registradas en el certificado.",
   "verify.farkas.tightened": "cada fila ajustada es escala x original + 1 <= 0, desde una fila estricta lineal sobre variables Int",
   "verify.farkas.tightened_detail": "{n} fila(s), cada una re-derivada",
-  "cli.outcome": "resultado: {state} ({basis})"
+  "cli.outcome": "resultado: {state} ({basis})",
+  "covering.cuts_and_leaves": "da `cuts` o `leaves`, no ambos",
+  "covering.cut_outside": "el corte {name} = {value} no está estrictamente dentro de [{lo}, {hi}]",
+  "covering.cut_unknown": "cortes en variables fuera del dominio: {names}"
 }

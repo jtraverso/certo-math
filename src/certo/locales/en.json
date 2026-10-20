@@ -2539,5 +2539,8 @@
   "engine.farkas.tightened": "Over the integers: {n} strict row(s) tightened (t < 0 read as t <= -1), recorded in the certificate.",
   "verify.farkas.tightened": "every tightened row is scale x original + 1 <= 0, from a strict row linear over Int variables",
   "verify.farkas.tightened_detail": "{n} row(s), each re-derived",
-  "cli.outcome": "outcome: {state} ({basis})"
+  "cli.outcome": "outcome: {state} ({basis})",
+  "covering.cuts_and_leaves": "give either `cuts` or `leaves`, not both",
+  "covering.cut_outside": "cut {name} = {value} is not strictly inside [{lo}, {hi}]",
+  "covering.cut_unknown": "cuts on variables not in the domain: {names}"
 }

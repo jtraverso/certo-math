@@ -59,12 +59,17 @@ def parse_box(box, ring):
 def _unit(poly, box):
     """`poly` in coordinates `t_i in [0,1]`, `p_i = lo_i + w_i t_i`: a dict
     exponent -> coefficient."""
+    from .budget import tick
+
     terms = dict(poly.terms)
     for k, name in enumerate(poly.vars):
         lo, hi = box[name]
         w = hi - lo
         out = {}
         for e, c in terms.items():
+            # the clock in the EXPANSION too, before the tensor: a 20 ms
+            # budget ran for a second, most of it here
+            tick(512)
             power = e[k]
             for j in range(power + 1):
                 mono = list(e)
