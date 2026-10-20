@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-10-19, at **0.35.0**.
+Last updated: 2026-10-20, at **0.36.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -386,7 +386,7 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
-| Construction contracts that check MEANING (edge-disjoint hosting, computed bindings, strict fields, owners, label collisions, every CEGIS parameter accounted for), `core_selector` and `adversary_reduction`, typed `outcome`, notes from the evidence, integer strict rows in `farkas`, typed LP and synthesis numbers, `same_obligation` for nine more families, `CoveringSpec.cuts` | **next release (unreleased)** |
+| Construction contracts that check MEANING (edge-disjoint hosting, computed bindings, strict fields, owners, label collisions, every CEGIS parameter accounted for), `core_selector` and `adversary_reduction`, typed `outcome`, notes from the evidence, integer strict rows in `farkas`, typed LP and synthesis numbers, `same_obligation` for nine more families, `CoveringSpec.cuts` | **0.36.0** |
 | `ConstructionSpec` (contracts: lift, catalogue, credit, hosting, glue, certificate, cegis, charts, substitution) with its vertical example; physical conflicts in `assign`; the typed scope of an LP; region products named canonically; `nonneg` within its budget; gmpy2 rationals; an iterative polynomial reader; `--oneline` after `--prove-candidate`; constants in `nonneg`; `sos` and `farkas_ray` bound to their specs | **0.35.0** |
 | CEGIS templates and decisive counterexamples, `--prove-candidate` after an optimum, branch and bound with your incumbent and progress (and twice as fast a node), `DivisibilitySpec`, report folders in the data directory, extra MCP roots, options tested in combination | **0.34.0** |
 | HiGHS directly (basis, IIS, MIP incumbent and bound), `certo step` (bound shapes), the packing recurrence, coherent forgeries, `estimate_cliques`, `farkas_ray` against its program; the evidence labels, the scope of a synthesis and `same_program` beyond LPs (shipped in 0.31, removed here) | **0.33.0** |
@@ -1112,7 +1112,7 @@ local commits; **pushing to the public repository is not automatic** and is
 asked for each time. Each release bumps the version, writes its section of
 [CHANGELOG.md](CHANGELOG.md), and is tagged.
 
-Current: **0.35.0**, with **66 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
+Current: **0.36.0**, with **66 certificate kinds** and `SCHEMA_VERSION` 5. The certificate schema was **frozen** at 4 from 0.4.0 to 0.19,
 and moved to 5 once, for one removal the owner decided while the tool was
 still used almost only by its own project: `parametric_bound` rows past 64
 terms by size. Everything else since 0.4 has been a new kind, an optional

@@ -6,15 +6,21 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
-**The meaning of a construction, checked -- six findings of an external
-review of 0.35.0.** No new commands or kinds; the schema stays 5. New
-optional fields: `occupied`, `occupied_from` (hosting), `declared_only`,
-`required_backing` (cegis); new outputs `established`,
+## [0.36.0] — 2026-10-20
+
+**Results say what they are, and a construction checks what it means.** A
+core selector and an adversary reduction; typed outcomes; bindings for nine
+more certificate families; six findings of an external review of 0.35.0, the
+bugs the 0.35 research sessions reported. No new commands (62) and no new
+kinds (66); the schema stays 5. New optional fields: `claim_scope`
+(`lp_dual`), `integer_tightened` (`farkas`), `occupied`, `occupied_from`
+(hosting), `declared_only`, `required_backing` (cegis), `cuts`
+(`CoveringSpec`); new outputs `outcome`, `established`,
 `assignment_feasible`, `edge_disjoint_realization_verified`,
 `obligation_binding`, `backed_parameters` / `unbacked_parameters` /
 `declared_only_parameters`. A construction certificate of 0.35.0 still reads.
 
-### Fixed
+### Fixed (an external review of 0.35.0: construction contracts)
 
 - **`hosting` with a graph counted per host, not per edge**: two names for
   one base on two hosts, the same triangle reached from two bases, or a base
