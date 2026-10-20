@@ -72,6 +72,44 @@ def _q(v, what="") -> Fraction:
         raise NotAConstruction(t("construction.not_exact", what=what, value=v))
 
 
+def _same_label(a, b) -> bool:
+    """Two raw labels name the same object: equal as values (`1` and
+    `Fraction(1)`), never merely alike in print (`1` and `"1"`)."""
+    try:
+        return a == b
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _distinct(values, what):
+    """The labels as text, REFUSED when two different labels print alike.
+    `str()` then deduplication used to merge `1` and `"1"` -- a path of four
+    vertices read as a triangle."""
+    seen = {}
+    for v in values:
+        if isinstance(v, (bool, float)):
+            raise NotAConstruction(t("construction.label_type", what=what, value=v))
+        k = str(v)
+        if k in seen and not _same_label(seen[k], v):
+            raise NotAConstruction(t("construction.labels_collide", what=what,
+                                     a=repr(seen[k]), b=repr(v)))
+        seen.setdefault(k, v)
+    return seen
+
+
+def _nat(v, what) -> int:
+    """A natural number, as written: an int (or an integral Fraction). A
+    float, a bool, text or a non-integral rational is REFUSED -- `int(1.9)`
+    is 1, and a target of 1.9 used to be checked as 1."""
+    if isinstance(v, bool) or not (isinstance(v, int) or
+                                   (isinstance(v, Fraction) and v.denominator == 1)):
+        raise NotAConstruction(t("construction.not_natural", what=what, value=v))
+    n = int(v)
+    if n < 0:
+        raise NotAConstruction(t("construction.not_natural", what=what, value=v))
+    return n
+
+
 def _s(x) -> str:
     return str(x)
 
@@ -99,9 +137,12 @@ def graph(raw) -> tuple:
     """`(vertices, edges)` from `[[u, v], ...]` or `{"edges": ..., "vertices": ...}`."""
     if isinstance(raw, dict):
         es = raw.get("edges") or []
-        vs = {_s(v) for v in raw.get("vertices") or []}
+        listed = list(raw.get("vertices") or [])
     else:
-        es, vs = raw or [], set()
+        es, listed = raw or [], []
+    _distinct(listed + [x for e in es for x in (e if isinstance(e, (list, tuple)) else [e])],
+              "vertices")
+    vs = {_s(v) for v in listed}
     E = set()
     for e in es:
         if len(e) != 2:
@@ -132,6 +173,97 @@ def _row(key, ok, detail="", **kw):
 def _first(xs, k=3):
     xs = list(xs)
     return ", ".join(map(str, xs[:k])) + (" ..." if len(xs) > k else "")
+
+
+# --- the fields each contract reads: anything else is REFUSED -----------------
+#
+# A step is a dictionary, and `dataspec` checked only the spec's own fields: a
+# `targte` in a hosting step was ignored, and the threshold went unchecked. A
+# schema per contract: `None` -- read by the contract itself; a dict -- the
+# fields of a nested object; ("each", {...}) -- the fields of every element of
+# a list; ("values", {...}) -- of every value of a mapping. A key starting with
+# `_` is a comment, as everywhere in a data spec.
+
+_EDGES = None
+SCHEMAS = {
+    "lift": {"parent": None, "child": None, "vertex_map": None, "child_packing": None,
+             "child_cover": None, "from": None, "cover_added": None,
+             "package": ("each", {"triangle": None, "owner": None}),
+             "budget": {"paid_by": None, "ratio": None}},
+    "catalogue": {"max_vertices": None, "ratio": None,
+                  "forbidden": ("values", {"n": None, "edges": None}),
+                  "representatives": ("values", {"n": None, "edges": None}),
+                  "extensions": ("each", {"from": None, "neighbours": None, "to": None,
+                                          "map": None, "excluded": None, "at": None}),
+                  "witnesses": ("values", {"packing": None, "cover": None})},
+    "credit": {"bases": None, "bases_from": None, "owners": None, "weights": None,
+               "states": None, "covers": None, "relation": None, "target": None,
+               "slots": ("values", {"allowed": None}),
+               "cuts": ("values", {"p": None, "states": None})},
+    "hosting": {"graph": None, "bases": None, "items": None, "allowed": None,
+                "capacities": None, "resources": None, "assignment": None,
+                "target": None, "occupied": None, "occupied_from": None},
+    "glue": {"matching": None, "open": None, "owners": None,
+             "blocks": ("values", {"ports": None, "interiors": None}),
+             "covers": ("values", {"closed": None, "removed": None, "block": None}),
+             "value": {"claim": None, "from": None, "quantity": None}},
+    "certificate": {"path": None, "digest": None, "embedded": None,
+                    "declared_digest": None, "obligation": None},
+    "cegis": {"certificate": None, "required_backing": None, "declared_only": None,
+              "backed_by": ("values", {"step": None, "quantity": None, "relation": None})},
+    "charts": {"domain": None, "depth": None, "leaves": None, "unresolved": None,
+               "charts": ("values", {"selectors": None, "certificates": None})},
+    "substitution": {"certificate": None, "map": None, "denominator": None,
+                     "inverse": None, "inverse_denominator": None, "obligation": None,
+                     "power": None, "depth": None, "inclusion_trees": None,
+                     "inverse_denominator_tree": None,
+                     "old": {"variables": None, "box": None, "conditions": None},
+                     "new": {"variables": None}},
+}
+
+
+def _fields(obj, schema, where):
+    if not isinstance(obj, dict):
+        raise NotAConstruction(t("construction.not_object", where=where))
+    unknown = sorted(k for k in obj if not str(k).startswith("_") and k not in schema)
+    if unknown:
+        raise NotAConstruction(t("construction.unknown_field", where=where,
+                                 names=", ".join(map(str, unknown)),
+                                 known=", ".join(sorted(schema))))
+    for k, sub in schema.items():
+        if sub is None or k not in obj or obj[k] is None:
+            continue
+        if isinstance(sub, dict):
+            _fields(obj[k], sub, "{}.{}".format(where, k))
+        elif sub[0] == "each":
+            for i, x in enumerate(obj[k] or []):
+                _fields(x, sub[1], "{}.{}[{}]".format(where, k, i))
+        elif sub[0] == "values":
+            for n, x in (obj[k] or {}).items():
+                _fields(x, sub[1], "{}.{}.{}".format(where, k, n))
+
+
+def _no_floats(x, where):
+    """Numbers are exact or refused, at every depth: `_label` used to stop at
+    the first dictionary."""
+    if isinstance(x, float):
+        raise NotAConstruction(t("construction.not_exact", what=where, value=x))
+    if isinstance(x, dict):
+        for k, v in x.items():
+            _no_floats(v, "{}.{}".format(where, k))
+    elif isinstance(x, (list, tuple)):
+        for i, v in enumerate(x):
+            _no_floats(v, "{}[{}]".format(where, i))
+
+
+def validate(step):
+    """Refuse a step whose fields its contract does not read, or with an
+    inexact number anywhere in it."""
+    contract = _s(step.get("contract"))
+    schema = dict(SCHEMAS[contract], id=None, contract=None)
+    _fields(step, schema, _s(step.get("id")))
+    if contract != "certificate":          # an embedded certificate is its own
+        _no_floats(step, _s(step.get("id")))
 
 
 # --- lift ----------------------------------------------------------------------
@@ -235,7 +367,15 @@ def check_lift(step, ctx):
                        package=len(package), cover=len(cover), packing=len(final_pack))))
     out = {"graph": pid, "packing": [list(x) for x in final_pack],
            "cover": [list(e) for e in sorted(cover)], "packing_size": len(final_pack),
-           "cover_size": len(cover), "ratio": str(ratio)}
+           "cover_size": len(cover), "ratio": str(ratio),
+           "established": {
+               "object": pid,
+               # a TRANSVERSAL: every triangle meets the cover -- not a
+               # partition of the edges, which is another notion entirely
+               "coverage_kind": "triangle transversal (every triangle meets the cover)",
+               "verified_cost": "{} <= {} x {}".format(len(cover), ratio, len(final_pack)),
+               "dependencies": [_s(src)] if src is not None else [],
+               "unproved_bridges": []}}
     return rows, out, "complete"
 
 
@@ -243,10 +383,10 @@ def check_lift(step, ctx):
 
 def _small(raw, what):
     """`(n, set of (i, j))` on vertices 0..n-1."""
-    n = int(raw["n"])
+    n = _nat(raw["n"], what + ".n")
     E = set()
     for e in raw.get("edges") or []:
-        i, j = int(e[0]), int(e[1])
+        i, j = _nat(e[0], what), _nat(e[1], what)
         if not (0 <= i < n and 0 <= j < n) or i == j:
             raise NotAConstruction(t("construction.catalogue.bad_graph", g=what, e=e))
         E.add((min(i, j), max(i, j)))
@@ -297,7 +437,7 @@ def _small_witness(n, E, w, ratio):
 
 def check_catalogue(step, ctx):
     rows = []
-    N = int(step["max_vertices"])
+    N = _nat(step["max_vertices"], "max_vertices")
     reps = {_s(k): _small(v, k) for k, v in (step.get("representatives") or {}).items()}
     forb = {_s(k): _small(v, k) for k, v in (step.get("forbidden") or {}).items()}
     big = [k for k, (n, _e) in reps.items() if n > N]
@@ -306,7 +446,8 @@ def check_catalogue(step, ctx):
                      t("construction.catalogue.reps_detail", n=len(reps), N=N)))
     entries = {}
     for x in step.get("extensions") or []:
-        key = (_s(x["from"]), tuple(sorted(int(s) for s in x.get("neighbours") or [])))
+        key = (_s(x["from"]), tuple(sorted(_nat(s, "neighbours")
+                                           for s in x.get("neighbours") or [])))
         entries.setdefault(key, []).append(x)
     missing, invalid, checked = [], [], 0
     for name, (n, E) in sorted(reps.items()):
@@ -323,12 +464,12 @@ def check_catalogue(step, ctx):
                     checked += 1
                     if x.get("excluded") is not None:
                         fn = _s(x["excluded"])
-                        good = fn in forb and _induces(m, F, [int(a) for a in x.get("at") or []],
+                        good = fn in forb and _induces(m, F, [_nat(a, "at") for a in x.get("at") or []],
                                                        forb[fn][0], forb[fn][1])
                     else:
                         to = _s(x.get("to"))
                         good = to in reps and _iso(m, F, reps[to][0], reps[to][1],
-                                                   [int(a) for a in x.get("map") or []])
+                                                   [_nat(a, "map") for a in x.get("map") or []])
                     if not good:
                         invalid.append("{}+{}".format(name, list(S)))
     unknown = [k for k in entries if k[0] not in reps]
@@ -482,11 +623,54 @@ def check_hosting(step, ctx):
                               "physical": {"assignment": got, "size": len(got)}})
     rows.append(_row("hosting.physical", not probs, "; ".join(probs[:3]) or
                      t("construction.hosting.detail", n=len(got))))
+    realized = None
+    if gid is not None and not bad:
+        # THE PIECES, NOT THE BOOKKEEPING. Per host, "no resource twice" is
+        # what a host's own spokes need; in ONE graph two hosts can still
+        # consume the same edge (ab on x and ab on y, under two names), and a
+        # base on one host can be a spoke of another. So every placed base
+        # u-v on host h is rebuilt as the edges {uv, hu, hv}, and each edge
+        # of the graph may be used once in all of them -- and not at all if it
+        # is already occupied (existing is not being free).
+        occupied = {_edge(*e) for e in step.get("occupied") or []}
+        src = step.get("occupied_from")
+        if src is not None:
+            prev = ctx["outputs"].get(_s(src)) or {}
+            occupied |= {e for tr in prev.get("packing") or [] for e in _tri_edges(tuple(tr))}
+        use = {}
+        for i, h in sorted(got.items()):
+            u, v = bases[i]
+            for e in (_edge(u, v), _edge(h, u), _edge(h, v)):
+                use.setdefault(e, []).append("{}@{}".format(i, h))
+        twice = ["{}-{} ({})".format(e[0], e[1], ", ".join(w)) for e, w in sorted(use.items())
+                 if len(w) > 1]
+        taken = ["{}-{}".format(*e) for e in sorted(use) if e in occupied]
+        realized = not twice and not taken
+        rows.append(_row("hosting.edge_disjoint", realized,
+                         t("construction.hosting.edge_twice", which=_first(twice)) if twice else
+                         t("construction.hosting.edge_taken", which=_first(taken)) if taken else
+                         t("construction.hosting.edge_disjoint_detail", n=len(got),
+                           e=len(use), occ=len(occupied))))
     target = step.get("target")
     if target is not None:
-        rows.append(_row("hosting.target", len(got) >= int(target),
-                         t("construction.hosting.target_detail", n=len(got), target=target)))
-    return rows, {"placed": len(got), "items": list(items), "hosts": sorted(caps)}, "complete"
+        n = _nat(target, "target")
+        rows.append(_row("hosting.target", len(got) >= n,
+                         t("construction.hosting.target_detail", n=len(got), target=n)))
+    out = {"placed": len(got), "items": list(items), "hosts": sorted(caps),
+           "assignment_feasible": not probs,
+           # None: no graph was given, so no realization could be rebuilt
+           "edge_disjoint_realization_verified": realized,
+           "target": None if target is None else _nat(target, "target")}
+    if gid is not None and realized:
+        out["packing"] = sorted([sorted([bases[i][0], bases[i][1], h])
+                                 for i, h in got.items()])
+    out["established"] = {
+        "object": _s(gid) if gid is not None else None,
+        "resource_model": ("edge-disjoint realization in the graph" if gid is not None
+                           else "resources per host only; no realization rebuilt"),
+        "verified_count": len(got),
+        "dependencies": [_s(step["occupied_from"])] if step.get("occupied_from") else []}
+    return rows, out, "complete"
 
 
 # --- glue -----------------------------------------------------------------------------
@@ -494,6 +678,9 @@ def check_hosting(step, ctx):
 def check_glue(step, ctx):
     rows = []
     blocks = step.get("blocks") or {}
+    _distinct(list(blocks), "blocks")
+    _distinct([p for raw in blocks.values() for p in raw.get("ports") or []], "ports")
+    _distinct([i for raw in blocks.values() for i in raw.get("interiors") or []], "interiors")
     port_block, dup = {}, []
     for b, raw in blocks.items():
         for p in raw.get("ports") or []:
@@ -528,11 +715,16 @@ def check_glue(step, ctx):
             where.setdefault(_s(i), []).append(_s(b))
     two = [i for i, bs in where.items() if len(bs) > 1]
     none = [i for i in where if i not in owners]
-    badown = [i for i, o in owners.items() if i not in where or o not in {_s(b) for b in blocks}]
+    # THE OWNER IS THE BLOCK THAT DECLARES THE INTERIOR. Any known block
+    # name used to pass, so two owners could be crossed; a change of owner
+    # is a transport, to be declared as one, not a name that happens to exist.
+    badown = ["{}->{}".format(i, o) for i, o in owners.items()
+              if i not in where or o not in where[i]]
     rows.append(_row("glue.owners", not two and not none and not badown,
                      (t("construction.glue.two_owners", which=_first(two)) if two else
                       t("construction.glue.no_owner", which=_first(none)) if none else
-                      _first(badown)) or t("construction.glue.owners_detail", n=len(where))))
+                      t("construction.glue.wrong_owner", which=_first(badown)) if badown
+                      else "") or t("construction.glue.owners_detail", n=len(where))))
     perforated = [n for n, c in (step.get("covers") or {}).items()
                   if c.get("closed") and (c.get("removed") or [])]
     rows.append(_row("glue.covers", not perforated,
@@ -577,8 +769,9 @@ def prepare_certificate(step, ctx):
 
         sp = load_spec(str(_resolve(ob, ctx)))
         got = O.same_obligation(cert, sp)
-        out["obligation"] = {"path": _s(ob), "same": got["same"],
-                             "differences": got["differences"][:4],
+        # Only the SPEC's fingerprint is recorded: whether the certificate is
+        # about it is recomputed by `verify` from the certificate itself.
+        out["obligation"] = {"path": _s(ob), "differences": got["differences"][:4],
                              "fingerprint": (got.get("fingerprint") or {}).get("spec")}
     return out
 
@@ -640,15 +833,37 @@ def check_certificate(step, ctx):
                      "{} ({})".format(cert.kind, rep.degree)))
     degree = "complete" if rep.ok and rep.degree == "complete" else (
         "with_solver" if rep.ok and rep.degree == "with_solver" else "relative")
-    ob = step.get("obligation")
-    if ob is not None:
-        mine = O.fingerprint(cert)
-        same = bool(ob.get("same")) and (ob.get("fingerprint") is None or mine == ob.get("fingerprint"))
-        rows.append(_row("certificate.obligation", same,
-                         t("construction.certificate.obligation_detail", path=ob.get("path"))
-                         if same else "; ".join(ob.get("differences") or []) or ob.get("path")))
     out = _values_of(cert)
     out["degree"] = rep.degree
+    out["certificate_validity"] = "verified" if rep.ok else "invalid"
+    ob = step.get("obligation")
+    if ob is not None:
+        # A BINDING IS COMPUTED, NOT READ. `same: true` with a null
+        # fingerprint used to pass: a valid certificate of A, declared to be
+        # about B, was accepted as B's. The certificate's own fingerprint is
+        # recomputed here and must equal the obligation's, which must exist.
+        if not isinstance(ob, dict):
+            ob = {"path": ob}
+        mine = O.fingerprint(cert)
+        want = ob.get("fingerprint")
+        if mine is None:
+            # this kind keeps only part of its obligation (a core): the tie
+            # cannot be recomputed, and is said so -- never taken as a match
+            out["obligation_binding"] = "unsupported"
+            out["relative_because"] = t("construction.certificate.binding_unsupported",
+                                        kind=cert.kind, path=ob.get("path"))
+            degree = "relative"
+        else:
+            bound = want is not None and mine == want
+            out["obligation_binding"] = "verified" if bound else "differs"
+            rows.append(_row("certificate.obligation", bound,
+                             t("construction.certificate.obligation_detail", path=ob.get("path"),
+                               fp=mine[:12]) if bound else
+                             t("construction.certificate.no_fingerprint", path=ob.get("path"))
+                             if want is None else
+                             "; ".join(ob.get("differences") or []) or
+                             t("construction.certificate.fingerprint_differs",
+                               path=ob.get("path"), want=_s(want)[:12], got=mine[:12])))
     return rows, out, degree
 
 
@@ -664,6 +879,21 @@ def check_cegis(step, ctx):
                      t("construction.cegis.source_detail", step=src, kind=prev.get("kind"),
                        impl=_first("{}={}".format(k, v) for k, v in impl.items()))))
     backed = step.get("backed_by") or {}
+    declared_only = [_s(p) for p in step.get("declared_only") or []]
+    required = [_s(p) for p in step.get("required_backing") or []]
+    # EVERY PARAMETER IS ACCOUNTED FOR. One parameter backed used to cover
+    # for another that was not (a = 1 backed, b = 100 not even mentioned).
+    # Each is backed, or declared unbacked by name -- an algebraic parameter
+    # needs no resource -- and a required one cannot be declared away.
+    unbacked = [p for p in impl if p not in {_s(k) for k in backed} and p not in declared_only]
+    clash = [p for p in required if p in declared_only or p not in {_s(k) for k in backed}]
+    unknown = [p for p in declared_only + required if p not in impl]
+    rows.append(_row("cegis.accounted", not unbacked and not clash and not unknown,
+                     t("construction.cegis.unaccounted", which=_first(unbacked)) if unbacked else
+                     t("construction.cegis.required_missing", which=_first(clash)) if clash else
+                     _first(unknown) if unknown else
+                     t("construction.cegis.accounted_detail", b=len(backed),
+                       d=len(declared_only))))
     bad = []
     for param, b in backed.items():
         have = (ctx["outputs"].get(_s(b.get("step"))) or {}).get(_s(b.get("quantity")))
@@ -677,7 +907,15 @@ def check_cegis(step, ctx):
     rows.append(_row("cegis.backed", not bad and bool(backed),
                      t("construction.cegis.unbacked") if not backed else
                      _first(bad) or t("construction.cegis.backed_detail", n=len(backed))))
-    return rows, {"parameters": impl}, "with_solver"
+    return rows, {"parameters": impl,
+                  "backed_parameters": sorted(_s(k) for k in backed),
+                  "unbacked_parameters": sorted(unbacked),
+                  "declared_only_parameters": sorted(declared_only),
+                  "established": {"object": src, "resource_model": "parameters against "
+                                  "quantities other steps certified",
+                                  "dependencies": sorted({_s(b.get("step"))
+                                                          for b in backed.values()}),
+                                  "unproved_bridges": sorted(declared_only)}}, "with_solver"
 
 
 # --- charts --------------------------------------------------------------------------------
@@ -719,7 +957,7 @@ def prepare_charts(step, ctx):
     dom = _box_of(step["domain"])
     ring = tuple(sorted(dom))
     charts = {_s(k): _selectors(v, ring) for k, v in (step.get("charts") or {}).items()}
-    depth = int(step.get("depth", 8))
+    depth = _nat(step.get("depth", 8), "depth")
     leaves, unresolved = [], []
 
     def go(box, d):
@@ -860,7 +1098,7 @@ def prepare_substitution(step, ctx):
     X, Y, N, D, U, E, P, obox, conds = _sub_parts(step)
     terms = bernstein.region_terms(conds) if conds else []
     trees = []
-    depth = int(step.get("depth", 6))
+    depth = _nat(step.get("depth", 6), "depth")
     for name, g in _inclusions(step, ctx, X, Y, U, E, conds):
         ok, tree = (bernstein.nonneg_region(g, obox, terms, depth) if terms
                     else bernstein.nonneg(g, obox, depth))
@@ -885,7 +1123,7 @@ def check_substitution(step, ctx):
     if not good_src:
         return rows, {}, "complete"
     Q = Poly.parse(Y, p["poly"])
-    k = int(step.get("power", P.degree))
+    k = _nat(step.get("power", P.degree), "power")
     pulled = _homog(P, N, D, max(k, P.degree), Y) if k >= P.degree else None
     rows.append(_row("substitution.pullback", pulled is not None and pulled == Q,
                      t("construction.substitution.pullback_detail", k=k)))
@@ -930,6 +1168,7 @@ PREPARERS = {"certificate": prepare_certificate, "charts": prepare_charts,
 
 
 def normal_graphs(raw):
+    _distinct(list(raw or {}), "graph names")
     return {_s(k): graph(v) for k, v in (raw or {}).items()}
 
 
@@ -940,7 +1179,13 @@ def run(graphs_raw, steps, limits=None, base_dir=None, prepare=False):
     certificates, leaves, inclusion trees); `verify` runs with False and the
     steps exactly as the certificate carries them."""
     bases = base_dir if isinstance(base_dir, (list, tuple)) else [base_dir]
-    ctx = {"graphs": normal_graphs(graphs_raw), "outputs": {}, "steps": {},
+    try:
+        graphs = normal_graphs(graphs_raw)
+    except NotAConstruction as e:
+        return list(steps), [{"id": "graphs", "contract": "graphs", "ok": False,
+                              "degree": "relative", "rows": [(str(e), False, "")],
+                              "outputs": {}}]
+    ctx = {"graphs": graphs, "outputs": {}, "steps": {},
            "bases": list(bases), "limits": limits}
     out_steps, report, ids = [], [], set()
     for raw in steps:
@@ -954,6 +1199,7 @@ def run(graphs_raw, steps, limits=None, base_dir=None, prepare=False):
             continue
         ids.add(sid)
         try:
+            validate(raw)
             step = PREPARERS[contract](raw, ctx) if prepare and contract in PREPARERS \
                 else dict(raw)
             ctx["steps"][sid] = step

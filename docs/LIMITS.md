@@ -60,6 +60,11 @@ The ladder, with Ramsey numbers as the example:
   fact about that graph, not a rule for a family, and that the data is your
   theorem's object is yours. Its declared conclusion is a sentence certo
   repeats, not one it checks; the steps are what is checked.
+- A `certificate` step's binding is to the obligation whose FINGERPRINT was
+  recorded; `verify` recomputes the certificate's side and does not re-read
+  the spec file, whose path is a label.
+- `assign` with `resources` checks resources PER RECEIVER; in one graph, the
+  edge-disjointness of the pieces is the `hosting` contract's, with `graph`.
 - `assign` with `resources` certifies a physical assignment and the
   relaxation's bound; when they differ, the gap is **not** certified either way.
 - An LP with a zero objective certifies **feasibility**, not the optimum of any

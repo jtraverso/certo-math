@@ -3593,16 +3593,25 @@ def _verify_construction(cert, limits) -> VerifyReport:
         for label, ok, detail in r["rows"]:
             checks.append(("[{}] {}".format(r["id"], label), ok, detail))
         if r["degree"] == "relative" and r["ok"]:
-            warnings.append(_note("assumed", "verify.construction.relative", step=r["id"]))
+            warnings.append(_note("assumed", "verify.construction.relative", step=r["id"],
+                                  why=(r["outputs"] or {}).get("relative_because") or "-"))
     # THE SUMMARY IS RECOMPUTED, not read: each step's contract, verdict,
     # degree and what it established, as the checks above found them.
     from .engines.construction import _plain
 
-    declared = [{k: s.get(k) for k in ("id", "contract", "ok", "degree", "outputs")}
-                for s in p.get("summary") or []]
-    again = [{"id": r["id"], "contract": r["contract"], "ok": r["ok"],
-              "degree": r["degree"], "outputs": _plain(r["outputs"])} for r in report]
-    checks.append((t("verify.construction.steps"), declared == again, str(len(report))))
+    # A later version may establish MORE per step (0.35.1 added the typed
+    # `established` and the binding's status): every output the summary
+    # declares must be recomputed equal; one it does not declare is new.
+    declared = p.get("summary") or []
+    same = len(declared) == len(report)
+    for d, r in zip(declared, report):
+        again = _plain(r["outputs"])
+        outs = d.get("outputs") if isinstance(d, dict) else None
+        same = same and isinstance(outs, dict) and all(
+            [d.get(k) for k in ("id", "contract", "ok", "degree")]
+            == [r["id"], r["contract"], r["ok"], r["degree"]] for _ in [0]) and all(
+            k in again and again[k] == v for k, v in outs.items())
+    checks.append((t("verify.construction.steps"), same, str(len(report))))
     warnings.append(t("verify.construction.meaning"))
     degree = C.degree_of(report)
     ok = all(c[1] for c in checks)

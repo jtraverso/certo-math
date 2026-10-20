@@ -33,8 +33,22 @@ def _key(x) -> str:
     return str(x)
 
 
+def _injective(values, what):
+    """Text keys, refused when two DIFFERENT values print alike (`1`, `"1"`)."""
+    seen = {}
+    for v in values:
+        k = _key(v)
+        if k in seen and not (seen[k] == v):
+            raise NotAnAssignment(_t("assign.labels_collide", what=what,
+                                     a=repr(seen[k]), b=repr(v)))
+        seen.setdefault(k, v)
+
+
 def normalise(items, allowed, capacities):
     """`(items, allowed, capacities)` with string keys, validated."""
+    _injective(list(items), "items")
+    _injective(list(capacities or {}) + [r for rs in (allowed or {}).values() for r in rs],
+               "receivers")
     items = [_key(i) for i in items]
     if len(set(items)) != len(items):
         raise NotAnAssignment(_t("assign.items_repeat"))

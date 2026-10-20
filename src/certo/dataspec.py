@@ -97,6 +97,10 @@ def _label(value):
         raise NotData(_t("dataspec.float", value=value))
     if isinstance(value, list):
         return [_label(v) for v in value]
+    if isinstance(value, dict):
+        # a construction's steps are dictionaries: a float inside one reached
+        # a contract, where `int()` read 1.9 as 1
+        return {k: _label(v) for k, v in value.items()}
     return value
 
 

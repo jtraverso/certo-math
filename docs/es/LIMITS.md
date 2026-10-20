@@ -62,6 +62,11 @@ La escalera, con números de Ramsey como ejemplo:
   es un hecho sobre ese grafo, no una regla para una familia, y que los datos
   sean el objeto de tu teorema es tuyo. Su conclusión declarada es una frase que
   certo repite, no una que comprueba; lo comprobado son los pasos.
+- La vinculación de un paso `certificate` es con la obligación cuya HUELLA se
+  registró; `verify` recalcula el lado del certificado y no vuelve a leer el
+  archivo del spec, cuya ruta es una etiqueta.
+- `assign` con `resources` comprueba recursos POR RECEPTOR; en un grafo, que
+  las piezas sean disjuntas en aristas es del contrato `hosting`, con `graph`.
 - `assign` con `resources` certifica una asignación física y la cota de la
   relajación; cuando difieren, la brecha **no** queda certificada en ningún sentido.
 - Un LP con objetivo cero certifica **factibilidad**, no el óptimo de ningún

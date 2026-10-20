@@ -6,6 +6,44 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+**The meaning of a construction, checked -- six findings of an external
+review of 0.35.0.** No new commands or kinds; the schema stays 5. New
+optional fields: `occupied`, `occupied_from` (hosting), `declared_only`,
+`required_backing` (cegis); new outputs `established`,
+`assignment_feasible`, `edge_disjoint_realization_verified`,
+`obligation_binding`, `backed_parameters` / `unbacked_parameters` /
+`declared_only_parameters`. A construction certificate of 0.35.0 still reads.
+
+### Fixed
+
+- **`hosting` with a graph counted per host, not per edge**: two names for
+  one base on two hosts, the same triangle reached from two bases, or a base
+  that is another piece's spoke passed. The pieces are now rebuilt and every
+  edge of the graph is used at most once (and not if already `occupied`).
+- **A binding to an obligation was read, not computed**: `same: true` with a
+  null fingerprint tied a valid certificate of A to B. `verify` now
+  recomputes the certificate's fingerprint and requires the obligation's,
+  non-null and equal; a kind that keeps only a core gives
+  `obligation_binding: unsupported` and a relative step.
+- **`glue` accepted an owner that was not the declaring block** (crossed
+  owners passed).
+- **Labels were merged by their text** (`1` and `"1"`: a path read as a
+  triangle) in `ConstructionSpec` and in `AssignmentSpec`; they are refused.
+- **Fields inside a step were not strict**: an unknown field (`targte`) was
+  ignored and a nested float reached `int()` (a target of 1.9 checked as 1).
+  Each contract has a schema; counts are naturals; floats are refused at
+  every depth, in `dataspec` too.
+- **`cegis` let one backed parameter cover for another**: every parameter is
+  now backed or declared unbacked by name.
+
+### New
+
+- Each construction step reports what it `established`, typed (object,
+  coverage kind -- a lift's cover is a triangle transversal, not an edge
+  partition -- verified cost, dependencies, unproved bridges).
+- Forgeries of MEANING in the adversarial battery: the numbers kept, the
+  object changed, the summary recomputed by the forger.
+
 ## [0.35.0] — 2026-10-19
 
 **Contracts across a construction; seven defects of 0.34 fixed; the scope of

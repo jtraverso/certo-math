@@ -96,6 +96,10 @@ STRUCTURAL_BENIGN = {
         'steps.*.embedded.provenance:dropkey', 'steps.*.embedded.provenance:empty',
         'steps.*.inclusion_trees:dup', 'steps.*.inclusion_trees:reversed',
         'steps.*.leaves:reversed', 'steps.*.obligation:dropkey',
+        # a summary that declares LESS is a weaker statement: what it does
+        # declare is recomputed, and a certificate of 0.35.0 lacks what
+        # 0.35.1 added -- so a missing output is not a forgery
+        'summary.*.outputs:dropkey', 'summary.*.outputs:empty',
     },
     # A covering's leaves in another order are the same tiling; a value
     # relabelled everywhere is another box, consistently; an obligation with
@@ -1815,6 +1819,56 @@ def test_a_mus_names_every_clause_it_keeps():
         "original": [[1], [-1], [2]], "mus": [[1], [-1], [2]], "proof": ["0"],
         "mus_indices": [], "witnesses": {}}))
 
+
+
+def test_construction_forgeries_of_meaning_with_a_coherent_summary():
+    """The numbers stay right and the object changes: a base under a second
+    name on the same host, an interior given to the other block, a cover
+    declared closed with an edge removed, a synthesised parameter left
+    unaccounted. The forger recomputes the summary too, so only the
+    contract can catch it -- and does."""
+    import copy
+
+    from certo import construction as C
+    from certo.engines.construction import _plain
+
+    base = _small_construction()
+    assert verify(base, LIM).ok
+
+    def coherent(fn):
+        d = copy.deepcopy(base)
+        p = d["payload"]
+        fn(p)
+        steps, report = C.run(p["graphs"], p["steps"])
+        p["summary"] = [{"id": r["id"], "contract": r["contract"], "ok": True,
+                         "degree": r["degree"], "outputs": _plain(r["outputs"])}
+                        for r in report]
+        return d
+
+    def step(p, sid):
+        return next(s for s in p["steps"] if s["id"] == sid)
+
+    def alias(p):
+        h = step(p, "host")
+        h["capacities"] = {"s": 2}
+        h["items"] = ["ab", "ba"]
+        h["bases"]["ba"] = ["b", "a"]
+        h["allowed"]["ba"] = ["s"]
+        h["assignment"]["ba"] = "s"
+
+    def crossed(p):
+        g = step(p, "glue")
+        g["blocks"]["B2"]["interiors"] = ["j"]
+        g["owners"] = {"i": "B2", "j": "B1"}
+
+    def perforated(p):
+        step(p, "glue")["covers"] = {"c": {"closed": True, "removed": [["a", "b"]]}}
+
+    def typo(p):
+        step(p, "host")["targte"] = 5
+
+    for fn in (alias, crossed, perforated, typo):
+        assert not verify(coherent(fn), LIM).ok, fn.__name__
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

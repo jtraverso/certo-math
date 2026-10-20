@@ -18774,6 +18774,212 @@ def test_0_35_a_construction_certificate_resists_coordinated_edits():
     for fn in (rename, graph, embedded, dropped):
         assert not edit(fn), fn.__name__
 
+
+# --- 0.35.1: the meaning, not only the numbers (an external review of 0.35.0) --
+
+
+def _cs(graphs, steps):
+    from certo import construction as C
+
+    _s, rep = C.run(graphs, steps)
+    return {r["id"]: r for r in rep}
+
+
+def _host(bases, allowed, caps, assignment, **kw):
+    step = {"id": "h", "contract": "hosting", "graph": "G", "items": sorted(bases),
+            "bases": bases, "allowed": allowed, "capacities": caps,
+            "assignment": assignment}
+    step.update(kw)
+    return step
+
+
+def test_0_35_1_hosting_rebuilds_the_pieces_and_each_edge_is_used_once():
+    """F1: per-host bookkeeping is not a packing. Two names for one base on
+    two hosts, the same triangle reached from two bases, a base that is
+    another piece's spoke, reversed ends, and an occupied edge -- each refused
+    by the edges the pieces really use; disjoint pieces still accepted."""
+    G = {"G": [["a", "b"], ["a", "x"], ["b", "x"], ["a", "y"], ["b", "y"],
+               ["a", "c"], ["b", "c"], ["c", "d"], ["c", "x"], ["d", "x"]]}
+    alias = _host({"e1": ["a", "b"], "e2": ["a", "b"]}, {"e1": ["x"], "e2": ["y"]},
+                  {"x": 1, "y": 1}, {"e1": "x", "e2": "y"})
+    reversed_ends = _host({"e1": ["a", "b"], "e2": ["b", "a"]}, {"e1": ["x"], "e2": ["y"]},
+                          {"x": 1, "y": 1}, {"e1": "x", "e2": "y"})
+    same_triangle = _host({"ab": ["a", "b"], "ac": ["a", "c"]}, {"ab": ["c"], "ac": ["b"]},
+                          {"b": 1, "c": 1}, {"ab": "c", "ac": "b"})
+    base_spoke = _host({"ab": ["a", "b"], "cx": ["c", "x"]}, {"ab": ["x"], "cx": ["a"]},
+                       {"x": 1, "a": 1}, {"ab": "x", "cx": "a"})
+    for name, step in (("alias", alias), ("reversed", reversed_ends),
+                       ("same triangle", same_triangle), ("base-spoke", base_spoke)):
+        r = _cs(G, [step])["h"]
+        assert not r["ok"], name
+        assert any("used by two pieces" in row[2] for row in r["rows"] if not row[1]), (name, r["rows"])
+    ok = _host({"ab": ["a", "b"], "cd": ["c", "d"]}, {"ab": ["y"], "cd": ["x"]},
+               {"x": 1, "y": 1}, {"ab": "y", "cd": "x"})
+    r = _cs(G, [ok])["h"]
+    assert r["ok"] and r["outputs"]["edge_disjoint_realization_verified"] is True
+    assert r["outputs"]["assignment_feasible"] is True
+    taken = dict(ok, occupied=[["a", "y"]])
+    r = _cs(G, [taken])["h"]
+    assert not r["ok"] and any("already occupied" in row[2] for row in r["rows"])
+    # without a graph nothing is rebuilt, and the output says so
+    plain = {"id": "h", "contract": "hosting", "items": ["p"], "allowed": {"p": ["H"]},
+             "capacities": {"H": 1}, "assignment": {"p": "H"}}
+    assert _cs({}, [plain])["h"]["outputs"]["edge_disjoint_realization_verified"] is None
+
+
+def test_0_35_1_a_binding_is_a_recomputed_fingerprint():
+    """F2: a valid certificate of A declared to be about B -- with the
+    fingerprint omitted, null, or B's, and `same` set to anything -- is not a
+    verified binding."""
+    import copy
+
+    from certo.certificate import verify
+
+    data, root = _construction("construction_charts.json")
+    _ensure_prereqs(root)
+    r = _run_construction(data, root)
+    base = r.certificate.to_dict()
+    left = _step(base["payload"], "left")
+    assert next(s for s in r.meta["steps"] if s["id"] == "left")["ok"]
+    right_fp = None
+    from certo.obligation import fingerprint
+    from certo.certificate import Certificate
+    right_fp = fingerprint(Certificate.from_dict(_step(base["payload"], "right")["embedded"]))
+
+    def edit(ob):
+        c = copy.deepcopy(base)
+        _step(c["payload"], "left")["obligation"] = ob
+        return verify(c).ok
+
+    assert left["obligation"]["fingerprint"]
+    for ob in ({"path": "otra.py", "same": True, "fingerprint": None},
+               {"path": "otra.py", "same": True},
+               {"path": "otra.py", "same": True, "fingerprint": right_fp},
+               {"path": "chart_left.py", "same": True, "fingerprint": "0" * 64}):
+        assert not edit(ob), ob
+
+
+def test_0_35_1_the_owner_is_the_block_that_declares_the_interior():
+    """F3: crossed owners are refused; the declared ones pass."""
+    g = {"id": "g", "contract": "glue",
+         "blocks": {"A": {"ports": [], "interiors": ["x"]}, "B": {"ports": [], "interiors": ["y"]}},
+         "matching": [], "open": [], "owners": {"x": "B", "y": "A"}}
+    r = _cs({}, [g])["g"]
+    assert not r["ok"] and any("x->B" in row[2] for row in r["rows"])
+    g["owners"] = {"x": "A", "y": "B"}
+    assert _cs({}, [g])["g"]["ok"]
+
+
+def test_0_35_1_labels_that_print_alike_are_refused_not_merged():
+    """F4: 1 and "1" are two vertices, not one -- a path is not a triangle."""
+    from certo import AssignmentSpec, api
+
+    r = _cs({"G": {"vertices": [1, "1", "a", "b"], "edges": [[1, "a"], ["a", "b"], ["b", "1"]]}},
+            [{"id": "h", "contract": "hosting", "items": ["p"], "allowed": {"p": ["H"]},
+              "capacities": {"H": 1}, "assignment": {"p": "H"}}])
+    assert not r["graphs"]["ok"] and "print alike" in r["graphs"]["rows"][0][0]
+    g = {"id": "g", "contract": "glue", "blocks": {"A": {"ports": [1, "1"], "interiors": []}},
+         "matching": [], "open": [1, "1"], "owners": {}}
+    assert not _cs({}, [g])["g"]["ok"]
+    res = api.run("assign", AssignmentSpec(items=[1, "1"], allowed={1: ["h"], "1": ["h"]},
+                                           capacities={"h": 2}))
+    assert res.verdict is Verdict.INCONCLUSIVE and "print alike" in res.detail
+
+
+def test_0_35_1_fields_are_strict_inside_each_contract():
+    """F5, the review's table: a natural is an int; anything else refused;
+    an unknown field refused; an omitted target recorded as not asked."""
+    G = {"G": [["a", "b"], ["a", "x"], ["b", "x"]]}
+
+    def host(**kw):
+        step = _host({"ab": ["a", "b"]}, {"ab": ["x"]}, {"x": 1}, {"ab": "x"})
+        step.update(kw)
+        return _cs(G, [step])["h"]
+
+    assert host(target=2)["ok"] is False                      # read, and 1 < 2
+    assert host(target=1)["ok"] is True
+    for bad in (1.9, True, "3/2", Fraction(3, 2)):
+        r = host(target=bad)
+        assert not r["ok"] and ("not a natural" in r["rows"][0][0]
+                                or "not an exact" in r["rows"][0][0]), (bad, r["rows"])
+    r = host()
+    assert r["ok"] and r["outputs"]["target"] is None
+    r = host(targte=2)
+    assert not r["ok"] and "targte" in r["rows"][0][0]
+    nested = _host({"ab": ["a", "b"]}, {"ab": ["x"]}, {"x": 1}, {"ab": "x"})
+    lift = {"id": "l", "contract": "lift", "parent": "G", "child": "G",
+            "child_packing": [], "child_cover": [["a", "b"]], "package": [],
+            "budget": {"paid_by": "G", "ratoi": 2}}
+    assert not _cs(G, [lift])["l"]["ok"]
+    from certo import dataspec
+    try:
+        dataspec.build("ConstructionSpec", {"graphs": G, "steps": [dict(nested, target=1.9)]})
+    except dataspec.NotData:
+        pass
+    else:
+        raise AssertionError("a nested float was accepted")
+
+
+def test_0_35_1_every_synthesised_parameter_is_accounted_for():
+    """F6: a = 1 backed does not cover b = 100 unmentioned."""
+    from certo import construction as C
+
+    saved = C.CHECKERS["certificate"]
+    C.CHECKERS["certificate"] = lambda step, ctx: (
+        [], {"kind": "synth_optimum", "implementation": {"a": "1", "b": "100"}}, "with_solver")
+    try:
+        host = {"id": "h", "contract": "hosting", "items": ["p"], "allowed": {"p": ["H"]},
+                "capacities": {"H": 1}, "assignment": {"p": "H"}}
+        src = {"id": "s", "contract": "certificate", "embedded": {}}
+
+        def cg(**kw):
+            step = {"id": "cg", "contract": "cegis", "certificate": "s",
+                    "backed_by": {"a": {"step": "h", "quantity": "placed"}}}
+            step.update(kw)
+            return _cs({}, [host, src, step])["cg"]
+
+        r = cg()
+        assert not r["ok"] and any("b" in row[2] for row in r["rows"] if not row[1])
+        r = cg(declared_only=["b"])
+        assert r["ok"]
+        assert r["outputs"]["backed_parameters"] == ["a"]
+        assert r["outputs"]["declared_only_parameters"] == ["b"]
+        assert r["outputs"]["unbacked_parameters"] == []
+        assert not cg(declared_only=["b"], required_backing=["b"])["ok"]
+        assert not cg(declared_only=["b", "zz"])["ok"]
+    finally:
+        C.CHECKERS["certificate"] = saved
+
+
+def test_0_35_1_a_lift_says_what_kind_of_cover_it_established():
+    """8.1: a transversal of the triangles, not a partition of the edges."""
+    data, root = _construction("construction_split.json")
+    _ensure_prereqs(root)
+    r = _run_construction(data, root)
+    est = r.certificate.payload["summary"][2]["outputs"]["established"]
+    assert est["coverage_kind"].startswith("triangle transversal")
+    assert est["dependencies"] == ["lift_t"] and est["verified_cost"] == "3 <= 2 x 3"
+
+
+def test_0_35_1_a_construction_written_by_0_35_0_still_reads():
+    """The summary may lack what 0.35.1 adds; what it does declare is
+    recomputed."""
+    import copy
+
+    from certo.certificate import verify
+
+    data, root = _construction("construction_charts.json")
+    _ensure_prereqs(root)
+    c = _run_construction(data, root).certificate.to_dict()
+    old = copy.deepcopy(c)
+    for s in old["payload"]["summary"]:
+        for k in ("established", "certificate_validity", "obligation_binding"):
+            s["outputs"].pop(k, None)
+    assert verify(old).ok
+    wrong = copy.deepcopy(old)
+    wrong["payload"]["summary"][0]["outputs"]["kind"] = "lp_dual"
+    assert not verify(wrong).ok
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0
