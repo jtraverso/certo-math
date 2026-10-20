@@ -82,11 +82,20 @@ class Result:
     detail: str = ""
     meta: dict = field(default_factory=dict)
 
+    @property
+    def outcome(self) -> dict:
+        """What this result IS, typed (`certo.outcome`): a theorem, a finite
+        case, a feasible point, a synthesised parameter -- not `unsat`."""
+        from .outcome import outcome
+
+        return outcome(self)
+
     def to_dict(self) -> dict:
         return {
             "command": self.command,
             "status": self.status.value,
             "verdict": self.verdict.value,
+            "outcome": self.outcome,
             "engine": self.engine,
             "elapsed_ms": round(self.elapsed_ms, 2),
             "detail": self.detail,

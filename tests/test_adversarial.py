@@ -1715,6 +1715,20 @@ def test_every_kind_is_in_the_battery():
     for d in certs:
         _report(d["kind"], probe(Certificate.from_dict(d),
                                  skip=EXAMPLE_SKIPS.get(d["kind"], ())))
+    # THE NOTE AGREES WITH THE CHECK: a certificate `verify` re-derives with
+    # no solver does not describe itself as needing one (a linear core said
+    # "requires re-solving" while verify added Farkas fractions).
+    from certo.i18n import set_lang
+
+    set_lang("en")
+    try:
+        for d in certs:
+            c = Certificate.from_dict(d)
+            rep = verify(c, LIM)
+            if rep.ok and rep.degree == "complete":
+                assert "re-solv" not in c.note.lower(), (c.kind, c.note)
+    finally:
+        set_lang(None)
 
 
 def test_the_structural_battery_found_these_in_kinds_it_had_not_reached():

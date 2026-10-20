@@ -174,6 +174,28 @@ def farkas(spec, limits: Limits | None = None, nonlinear: bool = False,
                       detail=t("engine.farkas.nonlinear_needed"))
 
     lams, const, strict, is_exact = _search(rows, lim)
+    tightened = {}
+    sorts = _sorts(spec)
+    if lams is None and not nonlinear:
+        # THE REAL RELAXATION HAS NO CERTIFICATE. If some strict rows are
+        # linear over integers, `t < 0` is `t <= -1` there: tighten them and
+        # look again. Written into the certificate, re-checked by `verify`.
+        again = []
+        for i, (name, poly, rel) in enumerate(rows):
+            got = linarith.tighten_integer(poly, sorts) if rel == "<" else None
+            if got is None:
+                again.append((name, poly, rel))
+                continue
+            scale, tight = got
+            tightened[str(i)] = {"original": linarith.serialize_rows(
+                [(name, poly, rel)])[0]["poly"], "scale": scale}
+            again.append((name, tight, "<="))
+        if tightened:
+            lams, const, strict, is_exact = _search(again, lim)
+            if lams is not None:
+                rows = again
+            else:
+                tightened = {}
     ms = (time.perf_counter() - t0) * 1000
 
     if lams is None:
@@ -187,11 +209,14 @@ def farkas(spec, limits: Limits | None = None, nonlinear: bool = False,
                 meta={"rows": len(rows), "degree": degree,
                       "point": {k: v[1] for k, v
                                 in point.payload["assignment"].items()}})
+        detail = t("engine.farkas.none", mode=t("engine.farkas.nonlinear" if nonlinear
+                                                else "engine.farkas.linear"))
+        if any(v == "Int" for v in sorts.values()):
+            # say WHICH system had no certificate: the real relaxation
+            detail = t("engine.farkas.none_relaxation", mode=t(
+                "engine.farkas.nonlinear" if nonlinear else "engine.farkas.linear"))
         return Result("farkas", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
-                      "certo/farkas", ms, None,
-                      detail=t("engine.farkas.none",
-                               mode=t("engine.farkas.nonlinear" if nonlinear
-                                      else "engine.farkas.linear")),
+                      "certo/farkas", ms, None, detail=detail,
                       meta={"rows": len(rows), "degree": degree})
     if not is_exact:
         return Result("farkas", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
@@ -206,8 +231,10 @@ def farkas(spec, limits: Limits | None = None, nonlinear: bool = False,
         rows=linarith.serialize_rows(rows),
         multipliers=[exact.serialize(l) for l in lams],
         constant=exact.serialize(const), strict=strict,
-        nonlinear=nonlinear, base_rows=base, sorts=_sorts(spec),
+        nonlinear=nonlinear, base_rows=base, sorts=sorts,
         vacuous=vacuous, derived=origin, spec_path=str(spec_path))
+    if tightened:
+        cert.payload["integer_tightened"] = tightened
 
     return Result(
         "farkas", Status.UNSAT, Verdict.PROVED, "certo/farkas", ms, cert,
@@ -215,7 +242,9 @@ def farkas(spec, limits: Limits | None = None, nonlinear: bool = False,
                 else t("engine.farkas.vacuous") if vacuous else
                 t("engine.farkas.found", n=len(used),
                   mode=t("engine.farkas.nonlinear" if nonlinear
-                         else "engine.farkas.linear"))),
+                         else "engine.farkas.linear")))
+               + (". " + t("engine.farkas.tightened", n=len(tightened))
+                  if tightened else ""),
         meta={"multipliers": dict(used), "rows": len(rows), "degree": degree,
               "vacuous": vacuous, "infeasible": infeasibility,
               "constant": exact.serialize(const), "strict": strict,

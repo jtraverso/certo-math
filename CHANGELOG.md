@@ -36,8 +36,29 @@ optional fields: `occupied`, `occupied_from` (hosting), `declared_only`,
 - **`cegis` let one backed parameter cover for another**: every parameter is
   now backed or declared unbacked by name.
 
+### Fixed (an external report on 0.35.0)
+
+- **Notes that contradicted the check**: a linear `unsat_core`, verified by
+  Farkas fractions, said "requires re-solving"; an exact LP with a zero
+  objective said "optimality certified". The note is now chosen from the
+  payload's evidence, also for a certificate read back.
+
 ### New
 
+- **`outcome`** on every result (`Result.outcome`, `--json`, MCP): what it IS,
+  typed -- `THEOREM_PROVED`, `FINITE_DOMAIN_COVERED`, `FEASIBLE_POINT`,
+  `INTEGER_OPTIMUM`, `PARAMETER_SYNTHESIZED`, `PHYSICAL_WITNESS_VERIFIED`,
+  `CONSTRUCTION_VERIFIED`, `UNIVERSAL_WITH_IMPORTED_THEOREM` and the rest
+  (`certo.outcome.STATES`) -- read from verdict, command, certificate and
+  metadata, never from prose.
+- **`farkas` over the integers**: a strict row linear over `Int` variables is
+  tightened (`t < 0` as `t <= -1`) when the real relaxation has no
+  certificate, recorded in `integer_tightened` and re-derived by `verify`.
+- **`claim_scope`** in `lp_dual` certificates, recomputed by `verify`.
+- **Typed numbers**: `opt` gives `relaxation`, `integer_solution`,
+  `integer_bound`; an optimised `synth` gives `last_candidate` and
+  `optimization` (`total_rounds`, `improvements`, the searches, the
+  better-value refutation). The old keys stay.
 - Each construction step reports what it `established`, typed (object,
   coverage kind -- a lift's cover is a triangle transversal, not an edge
   partition -- verified cost, dependencies, unproved bridges).

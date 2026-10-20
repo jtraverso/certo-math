@@ -470,6 +470,8 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
     from . import __version__
 
     out: dict[str, Any] = {
+        # what the result IS, typed -- not `unsat` read as success everywhere
+        "outcome": res.outcome,
         # The server's OWN version. After a `pip install` a running server
         # keeps the old code until the client reconnects, and results from
         # two versions mixed silently; now every answer says which one.

@@ -2530,5 +2530,14 @@
   "construction.cegis.unaccounted": "parámetros ni respaldados ni declarados sin respaldo: {which}",
   "construction.cegis.required_missing": "respaldo requerido ausente o declarado fuera: {which}",
   "construction.cegis.accounted_detail": "{b} respaldado(s), {d} declarado(s) sin respaldo",
-  "assign.labels_collide": "{what}: {a} y {b} son etiquetas distintas que se imprimen igual; renombra una"
+  "assign.labels_collide": "{what}: {a} y {b} son etiquetas distintas que se imprimen igual; renombra una",
+  "cert.note.unsat_core.farkas": "El núcleo es LINEAL y lleva sus filas y multiplicadores de Farkas: se verifica multiplicando y sumando fracciones, sin solver.",
+  "cert.note.lp_dual.feasible": "Un punto FACTIBLE en racionales EXACTOS: cada restricción se cumple. El objetivo es cero, así que no se optimizó nada -- es factibilidad, no el óptimo de ningún costo.",
+  "cert.note.lp_dual.bound": "Una COTA exacta: el óptimo de la relajación, certificado por su dual en racionales, acota el óptimo entero; ningún punto entero aquí la alcanza.",
+  "verify.lp.claim_scope": "el alcance que declara el certificado es el que dan sus datos",
+  "engine.farkas.none_relaxation": "no existe un certificado {mode} para la RELAJACIÓN REAL de este sistema, ni con sus filas estrictas enteras ajustadas; puede hacer falta más integralidad (prove decide sobre los enteros)",
+  "engine.farkas.tightened": "Sobre los enteros: {n} fila(s) estricta(s) ajustada(s) (t < 0 leído como t <= -1), registradas en el certificado.",
+  "verify.farkas.tightened": "cada fila ajustada es escala x original + 1 <= 0, desde una fila estricta lineal sobre variables Int",
+  "verify.farkas.tightened_detail": "{n} fila(s), cada una re-derivada",
+  "cli.outcome": "resultado: {state} ({basis})"
 }

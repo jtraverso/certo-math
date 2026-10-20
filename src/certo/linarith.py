@@ -358,3 +358,51 @@ def row_to_z3(poly, rel, sort_of=None):
     for tm in terms[1:]:
         lhs = lhs + tm
     return lhs <= 0 if rel == "<=" else (lhs < 0 if rel == "<" else lhs == 0)
+
+
+
+# ---------------------------------------------------------------------------
+# a strict row over the INTEGERS, tightened
+# ---------------------------------------------------------------------------
+#
+# `b > 2 |- b >= 3` over the integers has no Farkas certificate: the real
+# relaxation admits 2 < b < 3. But a linear form with integer coefficients
+# over integer variables takes integer values, so `t < 0` there IS `t <= -1`.
+# The tightening is a step of the proof, so it is written down: the original
+# row, the scale that made its coefficients integers, and the row it became.
+
+
+def tighten_integer(poly, sorts):
+    """`(scale, tightened)` for a STRICT row `poly < 0` that is linear over
+    integer variables only, or None. `tightened` is `scale * poly + 1`, read
+    `<= 0`, with `scale` the least common denominator."""
+    from math import lcm
+
+    variables = [m for m in poly if m != CONST]
+    if any(len(m) != 1 for m in variables):
+        return None
+    if any(sorts.get(m[0]) != "Int" for m in variables):
+        return None
+    scale = 1
+    for c in poly.values():
+        scale = lcm(scale, Fraction(c).denominator)
+    out = {m: Fraction(c) * scale for m, c in poly.items()}
+    out[CONST] = out.get(CONST, Fraction(0)) + 1
+    return scale, {m: c for m, c in out.items() if c != 0}
+
+
+def check_tightening(original, scale, tightened, sorts) -> bool:
+    """The step recomputed: the original linear over Int variables, `scale`
+    a positive integer making every coefficient integral, and the tightened
+    row exactly `scale * original + 1`."""
+    if not (isinstance(scale, int) and scale >= 1):
+        return False
+    got = tighten_integer(original, sorts)
+    if got is None:
+        return False
+    if any((Fraction(c) * scale).denominator != 1 for c in original.values()):
+        return False
+    want = {m: Fraction(c) * scale for m, c in original.items()}
+    want[CONST] = want.get(CONST, Fraction(0)) + 1
+    want = {m: c for m, c in want.items() if c != 0}
+    return want == {m: Fraction(c) for m, c in tightened.items() if c != 0}

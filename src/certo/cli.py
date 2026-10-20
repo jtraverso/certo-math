@@ -209,6 +209,7 @@ def emit(res: Result, args) -> int:
         print("{}  [{}]".format(head, res.status.value))
         if res.detail:
             print("  " + res.detail)
+        print("  " + t("cli.outcome", state=res.outcome["state"], basis=res.outcome["basis"]))
         from .scope import scope_of
 
         scope = scope_of(res.certificate)

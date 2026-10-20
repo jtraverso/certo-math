@@ -299,11 +299,14 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
                       0.0, None, detail=t("engine.synth.objective_int"))
     base = spec.impl_constraints if spec.impl_constraints is not None else z3.BoolVal(True)
     plain = dataclasses.replace(spec, minimize=None, maximize=None)
-    best, rounds, path = None, 0, []
+    best, rounds, path, searches = None, 0, [], []
     current = plain
     for _ in range(max(1, lim.max_iterations)):
         res = synth(current, lim, on_round)
         rounds += res.meta.get("iterations", 0)
+        searches.append({"iterations": res.meta.get("iterations", 0),
+                         "counterexamples": res.meta.get("counterexamples", 0),
+                         "verdict": res.verdict.value})
         if res.verdict is Verdict.PROVED and res.certificate is not None:
             impl = res.certificate.payload["implementation"]
             subs = [(z3util_const(n, s), z3util_value(s, v)) for n, (s, v) in impl.items()]
@@ -325,6 +328,20 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
                 cert.payload["scope"] = found.certificate.payload["scope"]
             meta = dict(found.meta, value=value, sense=sense, path=path,
                         rounds=rounds)
+            # TWO SCALES, NAMED. `iterations`, `counterexamples` and `trace`
+            # (kept, for readers of 0.34) are the search that FOUND the
+            # optimum; `rounds` is every search together. A consumer logging
+            # `iterations` reported 5 where 19 rounds had run.
+            meta["last_candidate"] = {
+                "iterations": found.meta.get("iterations", 0),
+                "counterexamples": found.meta.get("counterexamples", 0),
+                "trace": "the search that found the optimum, only"}
+            meta["optimization"] = {
+                "total_rounds": rounds, "improvements": len(path), "path": path,
+                "searches": searches,
+                "better_value_refutation": {
+                    "iterations": res.meta.get("iterations", 0),
+                    "counterexamples": res.meta.get("counterexamples", 0)}}
             return Result("synth", Status.SAT, Verdict.PROVED, ENGINE, ms, cert,
                           t("engine.synth.optimum", sense=sense, value=value,
                             steps=len(path), rounds=rounds), meta=meta)

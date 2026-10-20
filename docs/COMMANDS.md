@@ -149,6 +149,15 @@ answer is REFUTED with that point, a `model` certificate, where it used to be
 `unknown_solver`. An integer program is read over the reals: a contradiction
 there is one for its integer points too, and the point offered is integral.
 
+**Strict rows over the integers** *(0.35.1)*. `b > 2 |- b >= 3` with `b`
+an `Int` has no certificate in the real relaxation (2 < b < 3 is real). When
+that search fails, a strict row linear over `Int` variables is scaled to
+integer coefficients and read `t + 1 <= 0`; the certificate records each
+original row and its scale (`integer_tightened`), and `verify` re-derives the
+step from the claim's sorts. When no certificate exists even so, the message
+says it is the REAL RELAXATION that has none, and `prove` decides over the
+integers.
+
 ### `certo induct`
 
 **Question** — Does this hold for every `n ≥ n₀`?
@@ -718,6 +727,15 @@ variables and no integral point meeting the relaxation), `float_candidate`
 "EXACT optimum certified", which a dozen sessions read as the minimum of a
 cost; it now prints **EXACT FEASIBLE point**, and `verify` says the same.
 `same_program` also binds a `farkas_ray` to its program, by the constraints.
+
+**Numbers as objects** *(0.35.1)*. An exact result carries
+`relaxation` (sense, value, why) and, for an integer program,
+`integer_solution` (the integral point, and whether it is optimal) and
+`integer_bound` (the dual bound, rounded when `--round` closes it). The old
+`objective`, `objective_declared` and `bound` stay, and `objective_declared`
+is the RELAXATION's. The certificate carries its `claim_scope`, recomputed by
+`verify`, and a note chosen from what it holds (a feasible point is not
+described as an optimum).
 
 ### `certo mixed`
 
@@ -2236,6 +2254,13 @@ certificate names a MINIMAL set of decisive counterexamples ("these inputs
 force it"), and `verify` checks that it alone leaves no candidate and that
 none of it can be dropped. `--prove-candidate` now works after `minimize` and
 `maximize` too.
+
+**Two scales, named** *(0.35.1)*. In an optimised synthesis
+`iterations`, `counterexamples` and `trace` are the search that FOUND the
+optimum, and `rounds` is every search together. Both are now typed:
+`last_candidate` (that search) and `optimization` (`total_rounds`,
+`improvements`, `path`, every search, and `better_value_refutation`, the
+search that found nothing better).
 
 ### `certo compose`
 

@@ -2530,5 +2530,14 @@
   "construction.cegis.unaccounted": "parameters neither backed nor declared unbacked: {which}",
   "construction.cegis.required_missing": "required backing missing or declared away: {which}",
   "construction.cegis.accounted_detail": "{b} backed, {d} declared unbacked",
-  "assign.labels_collide": "{what}: {a} and {b} are different labels that print alike; rename one"
+  "assign.labels_collide": "{what}: {a} and {b} are different labels that print alike; rename one",
+  "cert.note.unsat_core.farkas": "The core is LINEAR and carries its Farkas rows and multipliers: verified by multiplying and adding fractions, with no solver.",
+  "cert.note.lp_dual.feasible": "A FEASIBLE point in EXACT rationals: every constraint holds. The objective is zero, so nothing was optimised -- this is feasibility, not the optimum of any cost.",
+  "cert.note.lp_dual.bound": "An exact BOUND: the relaxation's optimum, certified by its dual in rationals, bounds the integer optimum; no integral point here meets it.",
+  "verify.lp.claim_scope": "the scope the certificate claims is the one its data gives",
+  "engine.farkas.none_relaxation": "no {mode} certificate exists for the REAL RELAXATION of this system, even with its integer strict rows tightened; integrality may be needed beyond that (prove decides over the integers)",
+  "engine.farkas.tightened": "Over the integers: {n} strict row(s) tightened (t < 0 read as t <= -1), recorded in the certificate.",
+  "verify.farkas.tightened": "every tightened row is scale x original + 1 <= 0, from a strict row linear over Int variables",
+  "verify.farkas.tightened_detail": "{n} row(s), each re-derived",
+  "cli.outcome": "outcome: {state} ({basis})"
 }

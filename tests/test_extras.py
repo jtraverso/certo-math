@@ -18980,6 +18980,159 @@ def test_0_35_1_a_construction_written_by_0_35_0_still_reads():
     wrong["payload"]["summary"][0]["outputs"]["kind"] = "lp_dual"
     assert not verify(wrong).ok
 
+
+# --- 0.35.1: what a certificate SAYS it is, from what it holds -----------------
+
+
+def test_0_35_1_a_note_describes_the_evidence_not_the_kind():
+    """C-FB-01/02: a linear core checked by Farkas said "requires
+    re-solving"; a zero objective said "optimality certified". The note is
+    read from the payload, so it agrees with `solver_free` and with `verify`
+    -- checked over every certificate this suite can make quickly."""
+    import z3
+
+    from certo import LPSpec, Spec, api
+    from certo.certificate import verify
+
+    x = z3.Real("x")
+    s = Spec(title="linear core")
+    s.assume("x_at_least_one", x >= 1)
+    s.claim(x >= 0)
+    core = api.run("prove", s, self_check=True).certificate
+    lp = LPSpec(title="zero")
+    lp.variable("x", 0, 1)
+    lp.objective({"x": 0})
+    zero = api.run("opt", lp).certificate
+    lp2 = LPSpec(sense="max", integer=True)
+    lp2.variable("x", 0, 1)
+    lp2.variable("y", 0, 1)
+    lp2.objective({"x": 1, "y": 1})
+    lp2.constraint({"x": 2, "y": 2}, "<=", 3)
+    bound = api.run("opt", lp2).certificate
+    for c in (core, zero, bound):
+        rep = verify(c)
+        assert rep.ok, rep.detail
+        note = c.note.lower()
+        if rep.degree == "complete":
+            assert "re-solv" not in note, (c.kind, note)
+    assert core.solver_free and "farkas" in core.note.lower()
+    assert "feasible" in zero.note.lower() and "optimality certified" not in zero.note.lower()
+    assert zero.payload["claim_scope"] == "feasible"
+    assert bound.payload["claim_scope"] == "bound" and "bound" in bound.note.lower()
+    # the note follows a certificate read back, and the claim is recomputed
+    import copy
+
+    d = copy.deepcopy(zero.to_dict())
+    d["note_key"] = "cert.note.lp_dual.exact"
+    from certo.certificate import Certificate
+
+    assert "feasible" in Certificate.from_dict(d).note.lower()
+    d["payload"]["claim_scope"] = "optimum"
+    assert not verify(d).ok
+
+
+def test_0_35_1_an_integer_strict_row_is_tightened_and_the_step_is_checked():
+    """C-FB-03: `b > 2 |- b >= 3` over Int has no certificate in the real
+    relaxation; `t < 0` is `t <= -1` there, written down and re-derived."""
+    import copy
+
+    import z3
+
+    from certo import Spec, api
+    from certo.certificate import verify
+
+    b = z3.Int("b")
+    s = Spec(title="integer strict")
+    s.assume("b_gt_two", b > 2)
+    s.claim(b >= 3)
+    r = api.run("farkas", s, self_check="all")
+    assert r.verdict is Verdict.PROVED, r.detail
+    assert r.certificate.payload["integer_tightened"] and verify(r.certificate).ok
+    base = r.certificate.to_dict()
+    for edit in (lambda p: p["sorts"].__setitem__("b", "Real"),
+                 lambda p: next(iter(p["integer_tightened"].values())).__setitem__("scale", 2),
+                 lambda p: p["rows"][0].__setitem__("rel", "<")):
+        d = copy.deepcopy(base)
+        edit(d["payload"])
+        assert not verify(d).ok
+    x = z3.Real("b")
+    s = Spec(title="real strict")
+    s.assume("b_gt_two", x > 2)
+    s.claim(x >= 3)
+    assert api.run("farkas", s).verdict is Verdict.REFUTED     # 2 < b < 3 is real
+    q = z3.Int("q")
+    s = Spec(title="no help")
+    s.assume("h", 2 * q > 1)
+    s.claim(q >= 5)
+    r = api.run("farkas", s)
+    assert r.verdict is not Verdict.PROVED
+
+
+def test_0_35_1_synthesis_statistics_are_named_by_their_scale():
+    """C-FB-04: `iterations` is the search that found the optimum; the
+    optimisation's total is `optimization.total_rounds`."""
+    from certo.engines import cegis
+    from certo.spec import load_spec
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    r = cegis.synth(load_spec(str(root / "examples" / "synth_minimum.py")))
+    m = r.meta
+    assert m["last_candidate"]["iterations"] == m["iterations"]
+    opt = m["optimization"]
+    assert opt["total_rounds"] == m["rounds"] == sum(s["iterations"] for s in opt["searches"])
+    assert opt["improvements"] == len(opt["path"]) and opt["path"][-1] == m["value"]
+    assert opt["searches"][-1]["verdict"] == "unsatisfiable"
+    assert opt["better_value_refutation"]["iterations"] == opt["searches"][-1]["iterations"]
+
+
+def test_0_35_1_an_integer_program_names_its_numbers():
+    """C-FB-05: the relaxation's 3/2 and the integral 1, each its own object."""
+    from certo import LPSpec, api
+
+    lp = LPSpec(sense="max", integer=True)
+    lp.variable("x", 0, 1)
+    lp.variable("y", 0, 1)
+    lp.objective({"x": 1, "y": 1})
+    lp.constraint({"x": 2, "y": 2}, "<=", 3)
+    m = api.run("opt", lp, round=True).meta
+    assert m["relaxation"]["value"] == "3/2"
+    assert m["integer_solution"]["value"] == "1" and m["integer_solution"]["optimal"]
+    assert m["integer_bound"]["value"] == "1"
+    assert m["objective_declared"] == "3/2"            # kept, for older readers
+
+
+def test_0_35_1_every_result_says_what_it_is():
+    """The semantic states: read from verdict, command, certificate and
+    metadata -- never from prose."""
+    import z3
+
+    from certo import LPSpec, Spec, api
+    from certo.outcome import STATES
+
+    x = z3.Real("x")
+    s = Spec(title="t")
+    s.assume("h", x >= 1)
+    s.claim(x >= 0)
+    assert api.run("prove", s).outcome["state"] == "THEOREM_PROVED"
+    s2 = Spec(title="f")
+    s2.assume("h", x >= 1)
+    s2.claim(x >= 2)
+    assert api.run("prove", s2).outcome["state"] == "COUNTEREXAMPLE"
+    lp = LPSpec(title="zero")
+    lp.variable("x", 0, 1)
+    lp.objective({"x": 0})
+    assert api.run("opt", lp).outcome["state"] == "FEASIBLE_POINT"
+    lp.objective({"x": 1})
+    assert api.run("opt", lp).outcome["state"] == "CONTINUOUS_OPTIMUM"
+    lp.constraint({"x": 1}, ">=", 2)
+    assert api.run("opt", lp).outcome["state"] == "INFEASIBLE"
+    data, root = _construction("construction_charts.json")
+    _ensure_prereqs(root)
+    r = _run_construction(data, root)
+    assert r.outcome == {"state": "CONSTRUCTION_VERIFIED", "conclusive": True,
+                         "basis": r.outcome["basis"]}
+    assert r.to_dict()["outcome"]["state"] in STATES
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

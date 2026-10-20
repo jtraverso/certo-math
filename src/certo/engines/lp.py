@@ -625,6 +625,7 @@ def opt(spec, limits: Limits | None = None, use_exact: bool = True,
     res = _opt(spec, limits, use_exact, target, dual_direction, _vectors_only,
                round, cuts, _ray, exact_required, primal)
     _typed_scope(res)
+    _typed_values(res)
     cert = res.certificate
     if cert is not None and cert.kind == "lp_dual":
         p = cert.payload
@@ -657,24 +658,50 @@ def lp_scope(cert) -> str:
     - `float_candidate` -- floating point, NOT citable
     - `infeasible` -- a Farkas ray
     """
-    from .. import exact
+    from ..certificate import lp_claim_scope
 
     if cert is None:
         return "none"
-    p = cert.payload
     if cert.kind == "farkas_ray":
         return "infeasible"
     if cert.kind != "lp_dual":
         return "none"
-    if not p.get("exact"):
-        return "float_candidate"
-    if all(exact.to_fraction(v) == 0 for v in p.get("c") or []):
-        return "feasible"
+    return lp_claim_scope(cert.payload)
+
+
+def _typed_values(res):
+    """Each number of an LP result as the OBJECT it belongs to. In an
+    integer program `objective` is the integral point's value and
+    `objective_declared` the relaxation's -- 1 and 3/2 side by side, one
+    unqualified name each. Kept, and joined by `relaxation`,
+    `integer_solution` and `integer_bound`, each with its sense, value and
+    the reason it holds."""
+    from .. import exact
+
+    cert = res.certificate
+    if cert is None or cert.kind != "lp_dual" or not cert.payload.get("exact"):
+        return res
+    p = cert.payload
+    sense = p.get("sense", "max")
+    flip = -1 if sense == "min" else 1
+    relax = exact.serialize(flip * exact.to_fraction(p["objective"]))
+    res.meta["relaxation"] = {"sense": sense, "value": relax,
+                              "justification": "exact dual: c.x = b.y in rationals"}
     if p.get("integer"):
         io = p.get("integral_objective")
-        if io is None or exact.to_fraction(io) != exact.to_fraction(p.get("objective")):
-            return "bound"
-    return "optimum"
+        rounded = (p.get("rounded") or {}).get("bound")
+        res.meta["integer_solution"] = (
+            None if io is None else
+            {"sense": sense, "value": exact.serialize(flip * exact.to_fraction(io)),
+             "optimal": res.meta.get("scope") == "optimum",
+             "justification": "an integral point, checked feasible"})
+        res.meta["integer_bound"] = (
+            {"sense": sense, "value": rounded,
+             "justification": "the relaxation's dual bound, rounded to an integer"}
+            if rounded is not None else
+            {"sense": sense, "value": relax,
+             "justification": "the relaxation's dual bound"})
+    return res
 
 
 def _typed_scope(res):
@@ -686,6 +713,10 @@ def _typed_scope(res):
     if scope == "bound" and res.meta.get("optimality_certified"):
         scope = "optimum"          # closed by the rounded bound
     res.meta["scope"] = scope
+    if res.certificate is not None and res.certificate.kind == "lp_dual":
+        # the scope travels IN the certificate, where a reader of the file
+        # alone looks, and `verify` recomputes it from the payload
+        res.certificate.payload["claim_scope"] = lp_scope(res.certificate)
     if scope == "feasible":
         res.meta["optimality_certified"] = False
         res.meta["feasible_exact"] = True

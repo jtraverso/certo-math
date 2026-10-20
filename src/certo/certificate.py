@@ -92,10 +92,31 @@ class Certificate:
                 "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             }
 
+    def effective_note_key(self) -> str:
+        """The note that describes THIS certificate's evidence, not its kind's.
+
+        A linear `unsat_core` carries Farkas rows and multipliers and is
+        checked by adding fractions, and its note said "verifying requires
+        re-solving"; an exact LP with a zero objective is a FEASIBLE point,
+        and its note said "optimality certified". The note is chosen from
+        what the payload holds -- the same reading `verify` makes -- so an
+        old certificate is described right when it is read again."""
+        p = self.payload or {}
+        if self.kind == "unsat_core" and p.get("multipliers"):
+            return "cert.note.unsat_core.farkas"
+        if self.kind == "lp_dual" and p.get("exact"):
+            scope = lp_claim_scope(p)
+            if scope == "feasible":
+                return "cert.note.lp_dual.feasible"
+            if scope == "bound":
+                return "cert.note.lp_dual.bound"
+        return self.note_key
+
     @property
     def note(self) -> str:
         """Rendered in the reader's language, not the writer's."""
-        return t(self.note_key, **self.note_args) if self.note_key else ""
+        key = self.effective_note_key()
+        return t(key, **self.note_args) if key else ""
 
     def to_dict(self, copy: bool = True) -> dict:
         """The certificate as plain data -- a COPY. It handed out the payload
@@ -108,7 +129,7 @@ class Certificate:
             "schema": self.schema,
             "kind": self.kind,
             "solver_free": self.solver_free,
-            "note_key": self.note_key,
+            "note_key": self.effective_note_key(),
             "note_args": self.note_args,
             "note": self.note,          # rendered copy, for reading the raw JSON
             "provenance": self.provenance,
@@ -426,6 +447,35 @@ def unsat_core_certificate(core_smt2: str, names: list, dropped: list,
         payload=payload,
         note_key="cert.note.unsat_core",
     )
+
+
+def lp_claim_scope(p) -> str:
+    """What an `lp_dual` payload establishes, read from the payload alone --
+    the engine's `meta["scope"]`, the certificate's `claim_scope` and
+    `verify` all come from here, so they cannot disagree.
+
+    `feasible`: exact and the objective ZERO -- a point, nothing optimised.
+    `bound`: exact, integer, and no integral point meeting the relaxation
+    (unless a rounded bound closes it). `optimum`: exact otherwise.
+    `float_candidate`: floating point."""
+    from . import exact
+
+    if not p.get("exact"):
+        return "float_candidate"
+    if all(exact.to_fraction(v) == 0 for v in p.get("c") or []):
+        return "feasible"
+    if p.get("integer"):
+        io = p.get("integral_objective")
+        if io is None:
+            return "bound"
+        if exact.to_fraction(io) == exact.to_fraction(p.get("objective")):
+            return "optimum"
+        rounded = (p.get("rounded") or {}).get("bound")
+        flip = -1 if p.get("sense") == "min" else 1
+        if rounded is not None and flip * exact.to_fraction(io) == exact.to_fraction(rounded):
+            return "optimum"
+        return "bound"
+    return "optimum"
 
 
 def _declared_values(sense, objective, integral_objective):
@@ -6391,7 +6441,12 @@ def _verify_lp_dual(cert, limits) -> VerifyReport:
     p = cert.payload
     if p.get("exact"):
         return _verify_lp_dual_exact(p)
-    return _verify_lp_dual_float(p)
+    rep = _verify_lp_dual_float(p)
+    if "claim_scope" in p and p["claim_scope"] != "float_candidate":
+        rep.checks.append((t("verify.lp.claim_scope"), False,
+                           "{} / float_candidate".format(p["claim_scope"])))
+        rep.ok = False
+    return rep
 
 
 def _verify_lp_dual_exact(p) -> VerifyReport:
@@ -6609,6 +6664,12 @@ def _verify_lp_dual_exact(p) -> VerifyReport:
     # A rejected certificate gets NO summary of its own: `verify` builds it
     # from the first failed check, the same way for every kind.
     feasible_only = all(v == 0 for v in c)
+    if "claim_scope" in p:
+        # the scope the certificate CLAIMS is the one its own data gives
+        scope_ok = p["claim_scope"] == lp_claim_scope(p)
+        checks.append((t("verify.lp.claim_scope"), scope_ok,
+                       "{} / {}".format(p["claim_scope"], lp_claim_scope(p))))
+        ok = ok and scope_ok
     detail = ("" if not ok
               else t("verify.lp.feasible.detail", rows=len(b))
               if feasible_only
@@ -7634,6 +7695,25 @@ def _verify_farkas(cert, limits) -> VerifyReport:
                    t("verify.farkas.leftover",
                      names=", ".join(" ".join(m) for m in list(leftover)[:3]))))
 
+    tight = p.get("integer_tightened") or {}
+    if tight:
+        # each tightened row is `scale * original + 1 <= 0`, from an original
+        # STRICT row linear over Int variables (the sorts are the claim's)
+        sorts = p.get("sorts") or {}
+        bad = []
+        for i, step in tight.items():
+            try:
+                k = int(i)
+                orig = linarith.parse_rows([{"name": "o", "poly": step["original"],
+                                             "rel": "<"}])[0][1]
+                ok_step = (0 <= k < len(rows) and rows[k][2] == "<="
+                           and linarith.check_tightening(orig, step["scale"], rows[k][1], sorts))
+            except (KeyError, TypeError, ValueError, IndexError):
+                ok_step = False
+            if not ok_step:
+                bad.append(str(i))
+        checks.append((t("verify.farkas.tightened"), not bad,
+                       ", ".join(bad) or t("verify.farkas.tightened_detail", n=len(tight))))
     ok, const, strict = linarith.is_contradiction(rows, lams)
     checks.append((t("verify.farkas.closes"), ok,
                    t("verify.farkas.closing", const=exact.serialize(const),

@@ -414,7 +414,7 @@ CONVERTED = {"HypergraphSpec": {"opt": "to_lp", "mixed": "to_lp",
 #: The modules whose public functions are indexed as the Python API.
 API_MODULES = ("api", "explain", "batch", "tamper", "status_report",
                "discovery", "nosite", "closedform", "scope", "existence",
-               "obligation", "evidence", "hardness")
+               "obligation", "evidence", "hardness", "outcome")
 
 
 def _default_text(f):

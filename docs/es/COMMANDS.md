@@ -149,6 +149,15 @@ es REFUTADO con ese punto, un certificado `model`, donde antes era
 `unknown_solver`. Un programa entero se lee sobre los reales: una contradicción
 ahí lo es también para sus puntos enteros, y el punto ofrecido es entero.
 
+**Filas estrictas sobre los enteros** *(0.35.1)*. `b > 2 |- b >= 3` con
+`b` `Int` no tiene certificado en la relajación real (2 < b < 3 es real).
+Cuando esa búsqueda falla, una fila estricta lineal sobre variables `Int` se
+escala a coeficientes enteros y se lee `t + 1 <= 0`; el certificado registra
+cada fila original y su escala (`integer_tightened`), y `verify` re-deriva el
+paso desde los sorts de la afirmación. Si ni así existe certificado, el
+mensaje dice que es la RELAJACIÓN REAL la que no lo tiene, y `prove` decide
+sobre los enteros.
+
 ### `certo induct`
 
 **Pregunta** — ¿Vale para todo `n ≥ n₀`?
@@ -735,6 +744,15 @@ cero imprimía "EXACT optimum certified", que una docena de sesiones leyó como
 el mínimo de un costo; ahora imprime **EXACT FEASIBLE point**, y `verify` dice
 lo mismo. `same_program` también ata un `farkas_ray` a su programa, por las
 restricciones.
+
+**Números como objetos** *(0.35.1)*. Un resultado exacto lleva
+`relaxation` (sentido, valor, por qué) y, en un programa entero,
+`integer_solution` (el punto entero, y si es óptimo) e `integer_bound` (la
+cota dual, redondeada cuando `--round` la cierra). Las claves `objective`,
+`objective_declared` y `bound` se mantienen, y `objective_declared` es la de la
+RELAJACIÓN. El certificado lleva su `claim_scope`, que `verify` recalcula, y
+una nota elegida por lo que contiene (un punto factible no se describe como
+óptimo).
 
 ### `certo mixed`
 
@@ -2288,6 +2306,13 @@ el óptimo -- el certificado nombra un conjunto MÍNIMO de contraejemplos
 decisivos ("estas entradas lo fuerzan"), y `verify` comprueba que solo ellos
 ya no dejan candidato y que ninguno se puede quitar. `--prove-candidate` ahora
 funciona también tras `minimize` y `maximize`.
+
+**Dos escalas, con nombre** *(0.35.1)*. En una síntesis optimizada
+`iterations`, `counterexamples` y `trace` son la búsqueda que HALLÓ el
+óptimo, y `rounds` todas las búsquedas juntas. Ahora van tipadas:
+`last_candidate` (esa búsqueda) y `optimization` (`total_rounds`,
+`improvements`, `path`, cada búsqueda, y `better_value_refutation`, la que no
+halló nada mejor).
 
 ### `certo compose`
 
