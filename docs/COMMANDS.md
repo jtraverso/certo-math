@@ -2432,6 +2432,7 @@ DIMACS header recounted, an objective raised with its declared value, an
 optimum raised with the chosen list extended. Each is caught; the battery
 keeps it so. `verify --obligation SPEC` also ties a standalone `farkas_ray`
 to your program: the system in its payload against your `A x <= b`.
+Over MCP the same batteries are `verify(..., tamper=true)` *(0.35.1)*, as data.
 
 ### `certo step`
 

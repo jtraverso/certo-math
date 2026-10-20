@@ -36,6 +36,26 @@ optional fields: `occupied`, `occupied_from` (hosting), `declared_only`,
 - **`cegis` let one backed parameter cover for another**: every parameter is
   now backed or declared unbacked by name.
 
+### New (an external report on 0.35.0: FIRE)
+
+- **`core_selector`**, a construction contract: the PEO checked, the maximal
+  bags derived from it, EVERY core of a size evaluated -- `core_found` or
+  `no_core` (each core with the adversary that breaks it). A declared
+  catalogue of bags must be the derived one. Example:
+  `construction_core_selector.json`.
+- **`adversary_reduction`**: a witness map, each witness simplicial and
+  seeing no more than its vertex (`N(w) - {x}` within `N(x)`), checked edge by
+  edge; a selector then asks only the witnesses, for the omissions objective.
+
+### MCP
+
+- `verify(..., tamper=true)`: the forgery batteries (fields, structural,
+  coherent) as data -- `--tamper` was CLI-only.
+- `dsl_guide` lists every `ConstructionSpec` contract with its fields, and
+  `find` indexes them (`contract:core_selector`, ...), derived from the
+  checker's schemas.
+- Every answer carries `outcome`; `compose` returns a construction's steps.
+
 ### Fixed (the 0.35 research sessions)
 
 - **`same_obligation` answered `None`** for `synth_optimum` (and every

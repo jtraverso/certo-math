@@ -15302,7 +15302,8 @@ def test_the_pair_clique_parts_returns_is_refused_by_name():
 #: list of commands never shows -- this is the measured surface.
 FIND_GOLDEN = [
     ("catalogue coverage by one-vertex extensions", ("compose", "ConstructionSpec")),
-    ("resources transported from a child graph to its parent", ("compose", "ConstructionSpec")),
+    ("resources transported from a child graph to its parent",
+     ("compose", "ConstructionSpec", "contract:lift")),
     ("bases on one host must not reuse a spoke", ("assign", "AssignmentSpec.resources")),
     ("is a polynomial nonnegative on a box", "nonneg"),
     ("cota entera redondeada", "opt --round"),
@@ -19207,6 +19208,78 @@ def test_0_35_1_a_covering_can_start_at_declared_cuts():
     assert r.verdict is Verdict.PROVED and verify(r.certificate).ok
     bad = algebra.covering(CoveringSpec(**base, cuts={"x": [3]}))
     assert bad.verdict is Verdict.INCONCLUSIVE and "inside" in bad.detail
+
+
+# --- 0.35.1: a core selector over cores derived from the PEO, and a reduction --
+
+
+def _selector_graph(n=12, k=6):
+    V = [str(i) for i in range(n)]
+    E = [[str(i), str(j)] for i in range(n) for j in range(i + 1, n) if j - i <= k]
+    return V, {"P": E}
+
+
+def test_0_35_1_core_selector_derives_every_core_and_tells_mine_from_all():
+    """"My core fails" against "every core of this regime fails": both
+    decided over cores DERIVED from the PEO's bags; a declared catalogue with
+    one bag omitted does not stand in; a declared core is rechecked."""
+    from certo import construction as C
+
+    V, G = _selector_graph()
+    base = {"id": "s", "contract": "core_selector", "graph": "P", "peo": V,
+            "core_size": 5, "omega_max": 7, "objective": "omissions"}
+
+    def run(**kw):
+        _st, rep = C.run(G, [dict(base, **kw)])
+        return rep[0]
+
+    r = run(threshold=99)
+    best = r["outputs"]["best"]["value"]
+    assert r["ok"] and r["outputs"]["cores"] > 0 and best == 2
+    assert run(threshold=best, claim="core_found")["ok"]
+    assert not run(threshold=best - 1, claim="core_found")["ok"]
+    nc = run(threshold=best - 1, claim="no_core")
+    assert nc["ok"] and nc["outputs"]["verdict"] == "no_core_in_regime"
+    assert nc["outputs"]["witnesses"][0]["adversary"] is not None
+    assert not run(threshold=best, claim="no_core")["ok"]
+    # a selection is a core of the regime, rechecked against every bag
+    core = r["outputs"]["best"]["core"]
+    assert run(threshold=best, selection=core)["ok"]
+    assert not run(threshold=best, selection=["0", "1", "2", "3", "11"])["ok"]
+    # the catalogue a user writes must be the derived one
+    bags, _p = C.peo_bags(set(V), {tuple(sorted(e)) for e in G["P"]}, V)
+    assert run(threshold=99, bags=bags)["ok"]
+    assert not run(threshold=99, bags=bags[1:])["ok"]
+    # a PEO that is not one is refused before anything is enumerated
+    assert not run(threshold=99, peo=list(reversed(V[:6])) + V[6:])["ok"]
+    assert not run(threshold=99, omega_max=6)["ok"]
+
+
+def test_0_35_1_adversary_reduction_is_checked_edge_by_edge():
+    from certo import construction as C
+
+    V, G = _selector_graph()
+    n, k = 12, 6
+    w = {str(x): ("0" if x <= k + 1 else str(n - 1)) for x in range(n)}
+    red = {"id": "r", "contract": "adversary_reduction", "graph": "P", "witness": w}
+    sel = {"id": "s", "contract": "core_selector", "graph": "P", "peo": V, "core_size": 5,
+           "objective": "omissions", "threshold": 2, "claim": "core_found",
+           "adversaries_from": "r"}
+
+    def run(*steps):
+        _st, rep = C.run(G, list(steps))
+        return {x["id"]: x for x in rep}
+
+    out = run(red, sel)
+    assert out["r"]["ok"] and out["s"]["ok"]
+    assert out["s"]["outputs"]["best"]["value"] == 2          # as without it
+    for bad in (dict(w, **{"0": "11"}),                        # sees more than 0
+                dict(w, **{"3": "5"}),                         # 5 is not simplicial
+                {x: y for x, y in w.items() if x != "4"}):     # 4 without a witness
+        assert not run(dict(red, witness=bad))["r"]["ok"]
+    wrong = dict(sel, objective="central_neighbours")
+    assert not run(red, wrong)["s"]["ok"]                      # unsound there
+    assert run(red)["r"]["outputs"]["image"] == ["0", "11"]
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

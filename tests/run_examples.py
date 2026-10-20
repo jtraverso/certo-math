@@ -110,6 +110,7 @@ CASES = [
     ("chart_pullback.py", "nonneg", []),
     ("construction_split.json", "compose", []),
     ("construction_charts.json", "compose", []),
+    ("construction_core_selector.json", "compose", []),
     ("synth_minimum.py", "synth", []),
     ("semigroup_profile.py", "semigroup", []),
     ("synth_prove_identity.py", "synth", ["--prove-candidate"]),

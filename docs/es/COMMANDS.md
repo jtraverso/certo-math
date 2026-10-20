@@ -2485,7 +2485,8 @@ intactos, una cláusula quitada con la cabecera DIMACS recontada, un objetivo
 subido junto con su valor declarado, un óptimo subido con la lista elegida
 extendida. Cada una se detecta; la batería lo mantiene así. `verify
 --obligation SPEC` además ata un `farkas_ray` suelto a tu programa: el sistema
-de su carga contra tu `A x <= b`.
+de su carga contra tu `A x <= b`. Por MCP las mismas baterías son
+`verify(..., tamper=true)` *(0.35.1)*, como datos.
 
 ### `certo step`
 

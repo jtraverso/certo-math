@@ -50,6 +50,7 @@ from itertools import combinations
 from .i18n import t
 
 CONTRACTS = ("lift", "catalogue", "credit", "hosting", "glue", "certificate",
+             "core_selector", "adversary_reduction",
              "cegis", "charts", "substitution")
 
 #: degrees of a step, strongest first
@@ -186,6 +187,11 @@ def _first(xs, k=3):
 
 _EDGES = None
 SCHEMAS = {
+    "core_selector": {"graph": None, "peo": None, "core_size": None, "objective": None,
+                      "threshold": None, "omega_max": None, "claim": None,
+                      "selection": None, "adversaries_from": None, "bags": None},
+    "adversary_reduction": {"graph": None, "witness": None, "domain": None,
+                            "lemma": {"source": None, "hash": None, "statement": None}},
     "lift": {"parent": None, "child": None, "vertex_map": None, "child_packing": None,
              "child_cover": None, "from": None, "cover_added": None,
              "package": ("each", {"triangle": None, "owner": None}),
@@ -1158,9 +1164,223 @@ def check_substitution(step, ctx):
                                                      for n, (a, b) in obox.items()}}, "complete"
 
 
+
+# --- core selector and adversary reduction ------------------------------------------
+#
+# "MY core fails" and "EVERY core of this regime fails" are different
+# statements, and only the second changes a strategy. In a chordal graph every
+# clique lies in a bag {v} U N+(v) of a perfect elimination ordering, so the
+# cores of a size are found by taking subsets of the maximal bags -- the
+# checker derives the bags itself; a catalogue nobody wrote cannot miss one.
+
+def _adj(V, E):
+    adj = {v: set() for v in V}
+    for a, b in E:
+        adj[a].add(b)
+        adj[b].add(a)
+    return adj
+
+
+def _is_clique(vs, adj):
+    vs = list(vs)
+    return all(b in adj[a] for i, a in enumerate(vs) for b in vs[i + 1:])
+
+
+def peo_bags(V, E, peo):
+    """`(maximal bags, problems)`: the PEO checked edge by edge -- each
+    vertex's later neighbours a clique -- and its bags, maximal ones only."""
+    adj = _adj(V, E)
+    order = [_s(v) for v in peo]
+    problems = []
+    if sorted(order) != sorted(V) or len(set(order)) != len(order):
+        problems.append(t("construction.selector.peo_not_order"))
+        return [], problems
+    pos = {v: i for i, v in enumerate(order)}
+    bags = []
+    for v in order:
+        later = sorted(u for u in adj[v] if pos[u] > pos[v])
+        if not _is_clique(later, adj):
+            problems.append(t("construction.selector.peo_not_perfect", v=v))
+        bags.append(frozenset([v] + later))
+    bags = set(bags)
+    maximal = sorted((sorted(b) for b in bags if not any(b < c for c in bags)),
+                     key=lambda b: (-len(b), b))
+    return maximal, problems
+
+
+def _objective(kind, K, adj, V, bags, adversaries=None):
+    """`(value, witness)` of a core `K` -- the adversary that attains it."""
+    K = set(K)
+    if kind == "exterior_clique":
+        best, wit = 0, []
+        for b in bags:
+            rest = sorted(set(b) - K)
+            if len(rest) > best:
+                best, wit = len(rest), rest
+        return best, wit
+    pool = [x for x in sorted(V) if x not in K]
+    if adversaries is not None:
+        pool = adversaries(K)
+    best, wit = None, None
+    for x in pool:
+        if kind == "omissions":
+            val = len(K - adj[x])
+        else:                                    # central_neighbours
+            val = len(K & adj[x])
+        if best is None or val > best:
+            best, wit = val, x
+    return (best or 0), wit
+
+
+def check_core_selector(step, ctx):
+    from itertools import combinations
+
+    rows = []
+    gid = _s(step.get("graph"))
+    if gid not in ctx["graphs"]:
+        rows.append(_row("graph_known", False, gid))
+        return rows, {}, "complete"
+    V, E = ctx["graphs"][gid]
+    adj = _adj(V, E)
+    bags, problems = peo_bags(V, E, step.get("peo") or [])
+    rows.append(_row("selector.peo", not problems, "; ".join(problems[:2]) or
+                     t("construction.selector.peo_detail", n=len(bags),
+                       w=max((len(b) for b in bags), default=0))))
+    if problems:
+        return rows, {}, "complete"
+    if step.get("bags") is not None:
+        # a catalogue the USER wrote is compared with the one derived: one bag
+        # omitted (or one invented) and it does not stand in for the graph
+        mine = {tuple(sorted(_s(v) for v in b)) for b in step["bags"]}
+        theirs = {tuple(b) for b in bags}
+        rows.append(_row("selector.bags", mine == theirs,
+                         t("construction.selector.bags_detail",
+                           missing=_first(["-".join(b) for b in sorted(theirs - mine)]) or "-",
+                           extra=_first(["-".join(b) for b in sorted(mine - theirs)]) or "-")))
+    s = _nat(step["core_size"], "core_size")
+    kind = _s(step.get("objective", "omissions"))
+    if kind not in ("omissions", "central_neighbours", "exterior_clique"):
+        raise NotAConstruction(t("construction.selector.objective", got=kind))
+    T = _q(step["threshold"], "threshold")
+    omega = max((len(b) for b in bags), default=0)
+    if step.get("omega_max") is not None:
+        om = _nat(step["omega_max"], "omega_max")
+        rows.append(_row("selector.regime", omega <= om,
+                         t("construction.selector.regime_detail", w=omega, om=om)))
+    # EVERY core of size s: the s-subsets of the maximal bags, no others
+    cores = sorted({tuple(sorted(c)) for b in bags for c in combinations(b, s)})
+    if len(cores) > 200_000:
+        raise NotAConstruction(t("construction.selector.too_many", n=len(cores)))
+
+    adversaries, src = None, step.get("adversaries_from")
+    if src is not None:
+        # only the reduced adversaries are asked -- sound for `omissions`
+        # alone, where a witness w(x) outside the core omits at least what x
+        # does (the reduction step checked N(w) - {x} within N(x))
+        if kind != "omissions":
+            raise NotAConstruction(t("construction.selector.reduction_objective", got=kind))
+        red = ctx["outputs"].get(_s(src)) or {}
+        if red.get("graph") != gid or not red.get("witnesses"):
+            rows.append(_row("selector.reduction", False, _s(src)))
+            return rows, {}, "complete"
+        wmap = red["witnesses"]
+
+        def adversaries(K):
+            return sorted({(wmap[x] if wmap.get(x) not in K else x)
+                           for x in sorted(V) if x not in K and x in wmap}
+                          | {x for x in V if x not in K and x not in wmap})
+        rows.append(_row("selector.reduction", True,
+                         t("construction.selector.reduction_detail", step=src,
+                           n=len(set(wmap.values())))))
+    values = {K: _objective(kind, K, adj, V, bags, adversaries) for K in cores}
+    good = sorted((K for K, (v, _w) in values.items() if v <= T),
+                  key=lambda K: (values[K][0], K))
+    best = min(values, key=lambda K: (values[K][0], K)) if values else None
+    claim = _s(step.get("claim", "core_found"))
+    sel = step.get("selection")
+    if claim == "core_found":
+        if sel is not None:
+            K = tuple(sorted(_s(v) for v in sel))
+            ok = K in values and values[K][0] <= T
+            rows.append(_row("selector.selection", ok,
+                             t("construction.selector.selection_detail",
+                               core=", ".join(K), v=values.get(K, ("-",))[0], T=T)
+                             if K in values else
+                             t("construction.selector.not_a_core", core=", ".join(K), s=s)))
+        else:
+            rows.append(_row("selector.some_core", bool(good),
+                             t("construction.selector.best", core=", ".join(best or ()),
+                               v=values[best][0] if best else "-", T=T)))
+    elif claim == "no_core":
+        rows.append(_row("selector.no_core", not good,
+                         t("construction.selector.no_core_detail", n=len(cores), T=T,
+                           v=values[best][0] if best else "-")
+                         if not good else t("construction.selector.a_core_passes",
+                                            core=", ".join(good[0]), v=values[good[0]][0])))
+    else:
+        raise NotAConstruction(t("construction.selector.claim", got=claim))
+    out = {"graph": gid, "cores": len(cores), "bags": len(bags), "omega": omega,
+           "objective": kind, "threshold": str(T),
+           "best": {"core": list(best) if best else None,
+                    "value": values[best][0] if best else None},
+           "verdict": "core_found" if good else "no_core_in_regime",
+           "established": {
+               "object": gid, "finite_domain": "every clique of size {} (from {} "
+               "maximal bags of the PEO)".format(s, len(bags)),
+               "coverage_kind": "all cores of the regime, derived -- not listed",
+               "dependencies": [_s(src)] if src is not None else [],
+               "unproved_bridges": ["anything beyond this graph: not a theorem about "
+                                    "the family"]}}
+    if claim == "no_core":
+        # the physical witness that each core fails, kept (first ones)
+        out["witnesses"] = [{"core": list(K), "value": values[K][0],
+                             "adversary": values[K][1]} for K in cores[:20]]
+    return rows, out, "complete"
+
+
+def check_adversary_reduction(step, ctx):
+    rows = []
+    gid = _s(step.get("graph"))
+    if gid not in ctx["graphs"]:
+        rows.append(_row("graph_known", False, gid))
+        return rows, {}, "complete"
+    V, E = ctx["graphs"][gid]
+    adj = _adj(V, E)
+    wmap = {_s(x): _s(w) for x, w in (step.get("witness") or {}).items()}
+    domain = [_s(x) for x in step.get("domain") or sorted(V)]
+    missing = [x for x in domain if x not in wmap]
+    unknown = [x for x in list(wmap) + list(wmap.values()) if x not in V]
+    rows.append(_row("reduction.total", not missing and not unknown,
+                     _first(missing or unknown) or
+                     t("construction.reduction.total_detail", n=len(domain))))
+    not_simplicial = sorted({w for w in wmap.values() if w in V and not _is_clique(adj[w], adj)})
+    rows.append(_row("reduction.simplicial", not not_simplicial,
+                     _first(not_simplicial) or
+                     t("construction.reduction.simplicial_detail",
+                       n=len(set(wmap.values())))))
+    # what makes w(x) a stronger adversary than x, for ANY core avoiding both:
+    # N(w) - {x} within N(x), so the core vertices w sees, x sees too
+    weak = ["{}<-{}".format(x, w) for x, w in sorted(wmap.items())
+            if x in V and w in V and w != x and not (adj[w] - {x}) <= adj[x]]
+    rows.append(_row("reduction.palette", not weak,
+                     _first(weak) or t("construction.reduction.palette_detail")))
+    lemma = step.get("lemma") or {}
+    out = {"graph": gid, "witnesses": dict(sorted(wmap.items())),
+           "image": sorted(set(wmap.values())),
+           "established": {
+               "object": gid, "finite_domain": "every listed exterior vertex",
+               "coverage_kind": "the witness map, checked on this graph",
+               "dependencies": [],
+               "unproved_bridges": ([_s(lemma.get("source"))] if lemma.get("source")
+                                    else [])}}
+    return rows, out, "complete"
+
+
 # --- the whole ----------------------------------------------------------------------------------
 
-CHECKERS = {"lift": check_lift, "catalogue": check_catalogue, "credit": check_credit,
+CHECKERS = {"core_selector": check_core_selector,
+            "adversary_reduction": check_adversary_reduction,
+            "lift": check_lift, "catalogue": check_catalogue, "credit": check_credit,
             "hosting": check_hosting, "glue": check_glue, "certificate": check_certificate,
             "cegis": check_cegis, "charts": check_charts, "substitution": check_substitution}
 PREPARERS = {"certificate": prepare_certificate, "charts": prepare_charts,
@@ -1217,6 +1437,40 @@ def run(graphs_raw, steps, limits=None, base_dir=None, prepare=False):
                        "rows": rows, "outputs": outputs})
         out_steps.append(step)
     return out_steps, report
+
+
+#: one line per contract, for `dsl_guide` and `find`; the fields come from
+#: SCHEMAS, so a field added there is described everywhere
+SUMMARY = {
+    "lift": "resources carried from a child graph to its parent; the final packing and cover rebuilt and checked",
+    "catalogue": "every one-vertex extension of every representative mapped by an isomorphism or excluded by a forbidden induced subgraph",
+    "credit": "a joint rational credit: owners partitioning the bases, every local state declared and covered, one cut distribution, the sum exact",
+    "hosting": "bases on hosts within capacity, no resource twice on a host, and with a graph every piece rebuilt with each edge used once",
+    "glue": "blocks joined at ports: each port used once, each interior one owner, no perforated cover taken for closed, a joint value only from a global witness",
+    "certificate": "another certificate embedded, verified again, and bound to its obligation by a recomputed fingerprint",
+    "cegis": "every synthesised parameter backed by a quantity another step certified, or declared unbacked by name",
+    "charts": "an atlas: selectors whose union covers a box, leaves recomputed, each chart's sign certificates tied to it",
+    "substitution": "a change of coordinates with a denominator: pull-back, denominator sign, inverse and inclusion checked",
+    "core_selector": "every core of a size derived from a PEO's maximal bags and evaluated: some core meets the threshold, or none does",
+    "adversary_reduction": "a witness map, each witness simplicial and seeing no more than its vertex, so a selector asks only the witnesses",
+}
+
+
+def describe(contract) -> str:
+    """`contract: summary. Fields: ...` -- from SUMMARY and SCHEMAS."""
+    def fields(schema, prefix=""):
+        out = []
+        for k, sub in schema.items():
+            if isinstance(sub, dict):
+                out.append("{}{}{{{}}}".format(prefix, k, ", ".join(fields(sub))))
+            elif isinstance(sub, tuple):
+                out.append("{}{}[{{{}}}]".format(prefix, k, ", ".join(fields(sub[1]))))
+            else:
+                out.append(prefix + k)
+        return out
+
+    return "{}: {}. Fields: {}".format(contract, SUMMARY.get(contract, ""),
+                                       ", ".join(fields(SCHEMAS.get(contract, {}))))
 
 
 def degree_of(report) -> str:

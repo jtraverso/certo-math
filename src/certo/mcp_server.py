@@ -2677,9 +2677,16 @@ async def commands() -> dict:
     "use this before taking a result as settled."))
 @_guard
 async def verify(certificate_path: str, timeout_ms: int = 60_000,
-                 obligation: str | None = None) -> dict:
+                 obligation: str | None = None, tamper: bool = False,
+                 tamper_all: bool = False) -> dict:
     """`obligation`, a spec path: is the certificate about the obligation it
-    states? Added to the checks; a certificate of another one is not ok."""
+    states? Added to the checks; a certificate of another one is not ok.
+
+    `tamper`: the forgery battery, as `verify --tamper` -- each field mutated,
+    the structural forgeries, the coherent ones -- and which of them `verify`
+    caught. A REPORT: an uncaught field carries no claim or is not checked,
+    and only a reader can tell which. `tamper_all` probes the fields excused
+    as descriptive too."""
     from .certificate import Certificate
     from .certificate import verify as vc
 
@@ -2715,7 +2722,27 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000,
     fp = _obl.fingerprint(cert)
     if fp:
         extra["obligation"] = fp
+    if tamper or tamper_all:
+        extra["tamper"] = await _off(_tamper_report, cert, _limits(timeout_ms),
+                                     tamper_all)
     return dict(rep.to_dict(), card=_card.card_of(cert, rep), **extra)
+
+
+def _tamper_report(cert, limits, every):
+    """The three batteries `verify --tamper` prints, as data."""
+    from . import tamper as T
+
+    out = T.probe(cert, limits, excuse=not every)
+    if not out["original_ok"]:
+        return {"original_ok": False, "detail": out.get("detail", "")}
+    st = T.probe_structural(cert, limits)
+    co = T.probe_coherent(cert, limits)
+    return {"original_ok": True, "kind": out["kind"],
+            "fields": {"caught": out["caught"], "uncaught": out["uncaught"],
+                       "excused": out["excused"], "unshaped": out["unshaped"]},
+            "structural": {"caught": len(st["caught"]), "survived": st["survived"][:40]},
+            "coherent": {"caught": len(co.get("caught") or []),
+                         "survived": (co.get("survived") or [])[:40]}}
 
 
 @mcp.tool(description=(

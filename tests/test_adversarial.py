@@ -100,6 +100,10 @@ STRUCTURAL_BENIGN = {
         # declare is recomputed, and a certificate of 0.35.0 lacks what
         # 0.35.1 added -- so a missing output is not a forgery
         'summary.*.outputs:dropkey', 'summary.*.outputs:empty',
+        # a path's power read backwards is also a perfect elimination
+        # ordering, with the same bags: another valid PEO, the same cores
+        'graphs.P.*:reversed', 'graphs.P:dup', 'graphs.P:reversed',
+        'steps.*.peo:reversed',
     },
     # A covering's leaves in another order are the same tiling; a value
     # relabelled everywhere is another box, consistently; an obligation with
@@ -1591,6 +1595,8 @@ EXAMPLE_FIXTURES = [
     ("variable_range.py", "range", ("--var", "a")),
     # certificates embedded, an atlas and a change of coordinates
     ("construction_charts.json", "compose", ()),
+    # a core selector over cores DERIVED from a PEO, and a reduction
+    ("construction_core_selector.json", "compose", ()),
 ]
 
 

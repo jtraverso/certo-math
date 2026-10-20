@@ -736,6 +736,29 @@ def test_farkas_takes_a_linear_program_over_mcp_and_returns_the_point():
     assert out["verdict"] == "refuted" and "a" in out["point"], out
 
 
+
+def test_a_construction_and_the_forgery_battery_over_mcp():
+    """0.35.1: `compose` takes a ConstructionSpec, its answer says what it
+    IS, and `verify` runs the forgery battery a model could not reach."""
+    src = LINES([
+        "from certo import ConstructionSpec",
+        "def spec():",
+        "    return ConstructionSpec(graphs={'G': [['a', 'b'], ['a', 's'], ['b', 's']]},",
+        "        steps=[{'id': 'h', 'contract': 'hosting', 'graph': 'G',",
+        "                'bases': {'ab': ['a', 'b']}, 'items': ['ab'],",
+        "                'allowed': {'ab': ['s']}, 'capacities': {'s': 1},",
+        "                'assignment': {'ab': 's'}, 'target': 1}],",
+        "        conclusion='one triangle, hosted')",
+    ])
+    out = run(call("compose", {"spec_source": src}))
+    assert out["verdict"] == "proved", out
+    assert out["outcome"]["state"] == "CONSTRUCTION_VERIFIED"
+    assert out["steps"][0]["contract"] == "hosting"
+    path = out["certificate"]["path"]
+    rep = run(call("verify", {"certificate_path": path, "tamper": True}))
+    assert rep["ok"] and rep["tamper"]["original_ok"]
+    assert rep["tamper"]["fields"]["caught"]
+
 #: CLI options a tool does not take, each with why. A new CLI option on a
 #: command with a tool fails the parity test until it is added to the tool or
 #: here: `opt --gap` -- the fractional against the integral optimum -- was a
@@ -758,7 +781,7 @@ CLI_ONLY = {
     "report": {"certificate", "coverage", "stderr_file"},
     "repro": {"no_ledger"},
     "shrink": {"no_geng"}, "sweep": {"no_geng", "worst"},  # binary, printing
-    "verify": {"jobs", "md", "tamper", "tamper_all",
+    "verify": {"jobs", "md",
                "elaborate"},             # elaborate: runs a local Lean toolchain
 }
 

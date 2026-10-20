@@ -335,6 +335,22 @@ def entries() -> list:
                                        if k == kind or (isinstance(k, tuple) and kind in k)),
                     "use": "certo verify CERT.json",
                     "text": " ".join([kind.replace("_", " "), note])})
+    # THE CONTRACTS OF A CONSTRUCTION: a model writing a ConstructionSpec
+    # needs each contract's fields, and they live in a dict, not a dataclass
+    from . import construction as _C
+
+    for contract in _C.CONTRACTS:
+        desc = _C.describe(contract)
+        out.append({"id": "contract:" + contract, "type": "contract",
+                    "summary": _C.SUMMARY.get(contract, contract),
+                    "commands": ["compose"], "spec": "ConstructionSpec",
+                    "use": '{{"id": "...", "contract": "{}", ...}} in ConstructionSpec.steps'
+                    .format(contract),
+                    # the name and the summary only: the field names ("packing",
+                    # "triangle") made `lift` outrank PackingSpec for a packing
+                    "text": " ".join([contract.replace("_", " "),
+                                      _C.SUMMARY.get(contract, "")]),
+                    "fields": desc})
     return out
 
 
@@ -839,6 +855,12 @@ def guide_appendix() -> str:
                         f["field"], f["default"] if f["default"] is not None else "(required)",
                         "  # " + f["summary"][:80] if f["summary"] and not
                         f["summary"].endswith(" of " + e["id"]) else ""))
+    lines.append("")
+    lines.append("## ConstructionSpec contracts (derived from the checker's schemas)")
+    from . import construction as _C
+
+    for contract in _C.CONTRACTS:
+        lines.append("  " + _C.describe(contract))
     lines.append("")
     lines.append("## Every command's flags (derived from the parser)")
     for e in docs:
