@@ -6,6 +6,8 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.37.0] — 2026-10-23
+
 The bugs the 0.36 sessions reported, a DRUP checker that finishes, and one
 answer to "does this prove my claim". No new commands and no new kinds; the
 schema stays 5. New optional fields: `NonnegSpec.degree`; new outputs `claim`
