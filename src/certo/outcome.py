@@ -31,6 +31,8 @@ certificate and typed metadata -- nothing is parsed from text -- as
     ALGEBRAIC_CONDITION_DERIVED  a resultant: necessary for a common root
     REFUTED                   the claim is false, with its witness
     SATISFIABLE               an object exists, and is exhibited
+    UNCHECKED                 a certificate written whose check did not finish:
+                              `verify` with more time decides
     INCONCLUSIVE              no answer -- of any kind
 """
 from __future__ import annotations
@@ -42,7 +44,7 @@ STATES = (
     "CONTINUOUS_OPTIMUM", "INTEGER_OPTIMUM", "BOUND_ONLY", "FEASIBLE_POINT",
     "INFEASIBLE", "TARGET_MET", "PHYSICAL_WITNESS_VERIFIED",
     "CONSTRUCTION_VERIFIED", "ALGEBRAIC_CONDITION_DERIVED", "REFUTED",
-    "SATISFIABLE", "INCONCLUSIVE",
+    "SATISFIABLE", "UNCHECKED", "INCONCLUSIVE",
 )
 
 
@@ -52,6 +54,8 @@ def _state(res):
     cert = res.certificate
     kind = getattr(cert, "kind", None)
     meta = res.meta or {}
+    if v == "inconclusive" and meta.get("proof_state") == "unchecked" and cert is not None:
+        return "UNCHECKED", "the certificate is written; its check stopped on the clock"
     if v == "inconclusive":
         return "INCONCLUSIVE", "no answer: " + str(getattr(res.status, "value", res.status))
     if kind == "construction":
@@ -110,4 +114,5 @@ def _state(res):
 
 def outcome(res) -> dict:
     state, basis = _state(res)
-    return {"state": state, "conclusive": state != "INCONCLUSIVE", "basis": basis}
+    return {"state": state, "conclusive": state not in ("INCONCLUSIVE", "UNCHECKED"),
+            "basis": basis}

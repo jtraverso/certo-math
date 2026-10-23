@@ -2678,7 +2678,8 @@ async def commands() -> dict:
 @_guard
 async def verify(certificate_path: str, timeout_ms: int = 60_000,
                  obligation: str | None = None, tamper: bool = False,
-                 tamper_all: bool = False) -> dict:
+                 tamper_all: bool = False, expect: list[str] | None = None,
+                 complete: bool = False) -> dict:
     """`obligation`, a spec path: is the certificate about the obligation it
     states? Added to the checks; a certificate of another one is not ok.
 
@@ -2686,7 +2687,14 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000,
     the structural forgeries, the coherent ones -- and which of them `verify`
     caught. A REPORT: an uncaught field carries no claim or is not checked,
     and only a reader can tell which. `tamper_all` probes the fields excused
-    as descriptive too."""
+    as descriptive too.
+
+    `expect`, evidence classes (universal, sign, identity, lp_optimum,
+    optimum, finite, counterexample, ...), and `complete` (no solver, nothing
+    assumed): with `obligation`, they make `claim` -- the one answer to "does
+    this prove MY claim", `proves_claim` true, false (with `reasons`) or null
+    when no obligation was given."""
+    from . import claim as _claim
     from .certificate import Certificate
     from .certificate import verify as vc
 
@@ -2698,7 +2706,9 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000,
         return await _off(store.verify_archive, str(p), 1, timeout_ms)
     ref = str(p) if member is None else "{}#{}".format(p, member)
     cert = Certificate.from_dict(store.read_json(ref))
+    wanted = _claim.check_expect(expect)
     rep = await _off(vc, cert, _limits(timeout_ms))
+    valid = rep.ok
     # rep.to_dict() and not a hand-built subset: this used to drop `warnings`,
     # which is where every "this says less than it looks like" lives -- a
     # bridge that is asserted rather than derived, a vacuous proof, a sweep
@@ -2708,6 +2718,7 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000,
     from . import obligation as _obl
 
     extra = {}
+    same = None
     if obligation:
         from .i18n import t as _t
         from .spec import load_spec
@@ -2719,6 +2730,11 @@ async def verify(certificate_path: str, timeout_ms: int = 60_000,
         if same["same"] is not True:
             rep.ok = False
             rep.detail = _t("cli.verify.obligation_differs", path=str(f))
+    if obligation or wanted or complete:
+        extra["claim"] = _claim.view(cert, rep, valid, same=same, expect=wanted,
+                                     complete=complete)
+        if extra["claim"]["proves_claim"] is False:
+            rep.ok = False
     fp = _obl.fingerprint(cert)
     if fp:
         extra["obligation"] = fp
@@ -2951,6 +2967,9 @@ def main(argv=None) -> None:
     import sys
 
     argv = sys.argv[1:] if argv is None else argv
+    from .exact import unbounded_digits
+
+    unbounded_digits()       # the server's own process: exact numbers of any size
     _watch_parent()
     if "--compact" in argv or os.environ.get("CERTO_MCP_COMPACT"):
         compact()

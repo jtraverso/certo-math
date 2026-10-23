@@ -42,6 +42,7 @@ hypotheses the core did not need are not a difference.
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 from fractions import Fraction
@@ -83,6 +84,21 @@ def _poly_key(p) -> list:
                         for v, k in sorted(zip(p.vars, e)) if k) or "1"
         out.append([mono, str(Fraction(c))])
     return sorted(out)
+
+
+def _claim_text(v) -> str:
+    """A claim as `_differences` shows it: a polynomial key, or -- an atlas,
+    a parametric bound -- `[relation, key]`, whose relation is said first.
+    0.36 read the pair as a key and raised instead of naming the change."""
+    if v is None:
+        return t("obligation.inconsistent")
+    if isinstance(v, list) and len(v) == 2 and (v[0] is None or isinstance(v[0], str)):
+        rel, key = v
+        if key is None:
+            return t("obligation.no_claim")
+        body = _poly_text(key) if isinstance(key, list) else _short(key)
+        return "{} {}".format(rel, body) if rel else body
+    return _poly_text(v) if isinstance(v, list) else _short(v)
 
 
 def _poly_text(key) -> str:
@@ -190,8 +206,22 @@ def _of_cert(cert) -> dict:
                 "substitutions": [[s["var"], s["upper"]] for s in p.get("steps") or []],
                 "conclude": p["conclude"]}
     if fam == "parametric":
-        return {"parameters": {n: _fraction(v) for n, v in p["parameters"].items()},
-                "objective": p["objective"], "constraints": p["constraints"]}
+        out = {"parameters": {n: _fraction(v) for n, v in p["parameters"].items()},
+               "objective": p["objective"], "constraints": p["constraints"]}
+        if _LEGACY.get():
+            return out
+        # 0.36 compared only the three above: a certificate of a minimisation,
+        # of another region or box, or of no claim at all, was "the same"
+        claim = p.get("claim") or None
+        out.update({
+            "sense": p.get("sense", "max"),
+            "witness": "primal" if p.get("witness") == "primal" else "dual",
+            "free": sorted(p.get("free") or []),
+            "region": dict(p.get("region") or {}),
+            "box": None if p.get("box") is None else
+            {n: [_fraction(lo), _fraction(hi)] for n, (lo, hi) in p["box"].items()},
+            "claim": None if claim is None else [claim.get("relation"), claim.get("target")]})
+        return out
     if fam == "nonneg":
         vs = tuple(p["parameters"])
         return {"variables": sorted(vs),
@@ -230,10 +260,8 @@ def _of_cert(cert) -> dict:
 
 
 def _canon_smt2(text):
-    """An SMT-LIB formula in a form two processes agree on: parsed back here
-    and printed again. The writer numbers its `let`s by z3's internal ids, so
-    the same formula built twice printed `$x18` once and `$x11` the next time;
-    parsed in ONE context, equal formulas are one term and print alike."""
+    """An SMT-LIB formula in a form two processes -- and two calls in one
+    process -- agree on: parsed back here and printed by `_canon_term`."""
     import z3
 
     if text is None:
@@ -242,10 +270,83 @@ def _canon_smt2(text):
     return _one(fs[0] if len(fs) == 1 else z3.And(*fs))
 
 
-def _one(f) -> str:
-    from . import z3util
+#: 0.36 canonicalised by printing through z3, which names its `let`s by
+#: internal ids. Equal formulas printed alike only while one of them was
+#: alive to be shared; freed, the ids were recycled and the same contract
+#: read as another (a false "differs", reported in use). Set only by
+#: `fingerprints`, to recompute what a 0.36 construction recorded.
+_LEGACY = contextvars.ContextVar("certo_obligation_legacy", default=False)
 
-    return z3util.smt2(f)
+
+def _one(f) -> str:
+    if _LEGACY.get():
+        from . import z3util
+
+        return z3util.smt2(f)
+    return _canon_term(f)
+
+
+def _canon_term(f) -> str:
+    """The formula as a DAG with its shared subterms named `$1, $2, ...` in
+    the order a left-to-right traversal completes them: nothing in it comes
+    from z3's ids, so the same formula prints alike whenever it is built.
+    The uninterpreted symbols are declared first, sorted, so `x` Int and
+    `x` Real differ."""
+    import z3
+
+    def kids(e):
+        if z3.is_quantifier(e):
+            return [e.body()]
+        if z3.is_app(e):
+            return e.children()
+        return []
+
+    count = {f.get_id(): 1}
+    seen, post = {f.get_id()}, []
+    stack = [(f, kids(f), 0)]
+    while stack:
+        e, ks, j = stack[-1]
+        if j < len(ks):
+            stack[-1] = (e, ks, j + 1)
+            c = ks[j]
+            ci = c.get_id()
+            count[ci] = count.get(ci, 0) + 1
+            if ci not in seen:
+                seen.add(ci)
+                stack.append((c, kids(c), 0))
+        else:
+            stack.pop()
+            post.append(e)
+    decls, text, lets = set(), {}, []
+    for e in post:
+        ks = kids(e)
+        if z3.is_var(e):
+            s = "(:var {})".format(z3.get_var_index(e))
+        elif z3.is_quantifier(e):
+            bound = " ".join("({} {})".format(e.var_name(i), e.var_sort(i).sexpr())
+                             for i in range(e.num_vars()))
+            s = "({} ({}) {})".format("forall" if e.is_forall() else
+                                      "exists" if e.is_exists() else "lambda",
+                                      bound, text[ks[0].get_id()])
+        else:
+            d = e.decl()
+            if d.kind() == z3.Z3_OP_UNINTERPRETED:
+                decls.add(d.sexpr())
+            if not ks:
+                s = e.sexpr()
+            else:
+                op = d.name()
+                if d.params():
+                    op = "(_ {} {})".format(op, " ".join(str(x) for x in d.params()))
+                s = "({} {})".format(op, " ".join(text[k.get_id()] for k in ks))
+        if ks and count[e.get_id()] > 1:
+            lets.append("(${} {})".format(len(lets) + 1, s))
+            s = "${}".format(len(lets))
+        text[e.get_id()] = s
+    body = text[f.get_id()]
+    if lets:
+        body = "(let* ({}) {})".format(" ".join(lets), body)
+    return " ".join(sorted(decls) + [body])
 
 
 def _cert_formulas(cert) -> dict:
@@ -361,11 +462,14 @@ def _of_spec(spec, family, cert=None) -> dict:
                     "objective": spec.objective.serialize()}
         from .engines.algebra import _ser
 
-        return {"parameters": params,
-                "objective": {v: _ser(spec, c) for v, c in spec.objective.items()},
-                "constraints": [[str(n), {v: _ser(spec, c) for v, c in row.items()},
-                                 sense, _ser(spec, rhs)]
-                                for n, row, sense, rhs in spec.constraints]}
+        out = {"parameters": params,
+               "objective": {v: _ser(spec, c) for v, c in spec.objective.items()},
+               "constraints": [[str(n), {v: _ser(spec, c) for v, c in row.items()},
+                                sense, _ser(spec, rhs)]
+                               for n, row, sense, rhs in spec.constraints]}
+        if _LEGACY.get():
+            return out
+        return dict(out, **_parametric_scope(spec, cert))
     if family == "resultant":
         from .engines.algebra import _poly
 
@@ -515,6 +619,56 @@ def fingerprint(obj, family=None) -> str | None:
     return _digest(fam, _of_spec(obj, fam))
 
 
+def fingerprints(cert) -> set:
+    """Every digest this certificate's obligation may have been recorded
+    under: today's, and -- for the formula families -- the one 0.36 printed
+    through z3 (see `_LEGACY`). A construction written by 0.36 recorded the
+    latter; it is still read."""
+    out = {fingerprint(cert)} - {None}
+    tok = _LEGACY.set(True)
+    try:
+        out |= {fingerprint(cert)} - {None}
+    except Exception:  # noqa: BLE001 -- the legacy printer is only a fallback
+        pass
+    finally:
+        _LEGACY.reset(tok)
+    return out
+
+
+def _parametric_scope(spec, cert) -> dict:
+    """What a ParametricSpec claims beyond its program, as the engine writes
+    it into the certificate: the sense, which witness, the free columns, the
+    region and the box it is claimed on, and the target."""
+    from . import parametric as PM
+    from .polynomials import Poly
+
+    ring = tuple(spec.parameters)
+
+    def P(x):
+        if isinstance(x, Poly):
+            return x
+        if isinstance(x, (int, Fraction)):
+            return Poly.const(ring, x)
+        return Poly.from_z3(x, ring)
+
+    minimising = getattr(spec, "sense", "max") == "min"
+    box = PM._box_of(spec, ring)
+    pieces = cert is not None and cert.payload.get("witness") == "pieces"
+    claim = getattr(spec, "claim", None)
+    return {
+        "sense": "min" if minimising else "max",
+        "witness": "primal" if getattr(spec, "primal", None) is not None else "dual",
+        "free": sorted(str(v) for v in (getattr(spec, "free", None) or [])),
+        # a box cut into pieces is certified on the whole box: no region is
+        # written, and none is needed for the claim to hold where one was meant
+        "region": {} if pieces else {str(n): P(g).serialize()
+                                     for n, g in (getattr(spec, "region", None) or [])},
+        "box": None if box is None else
+        {n: [_fraction(lo), _fraction(hi)] for n, (lo, hi) in box.items()},
+        "claim": None if claim is None else
+        [">=" if minimising else "<=", P(claim).serialize()]}
+
+
 def _obligations(obls):
     """`[(name, relation, expr)]` from a CoveringSpec's obligations, given as
     `[(name, expr)]` (read `expr > 0`) or `[(name, relation, expr)]`."""
@@ -589,9 +743,7 @@ def _differences(fam, mine, theirs) -> list:
                 out.append(t("obligation.rows", what=key, which=shown, n=len(idx)))
             continue
         if key in ("claim", "poly"):
-            out.append(t("obligation.claim",
-                         cert=t("obligation.inconsistent") if a is None else _poly_text(a),
-                         spec=t("obligation.inconsistent") if b is None else _poly_text(b)))
+            out.append(t("obligation.claim", cert=_claim_text(a), spec=_claim_text(b)))
             continue
         out.append(t("obligation.part", what=key, cert=_short(a), spec=_short(b)))
     return out

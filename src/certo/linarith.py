@@ -29,6 +29,7 @@ from itertools import combinations
 import z3
 
 from .exact import to_fraction
+from .i18n import t as _t
 
 # A polynomial is {monomial: coefficient}, where a monomial is a sorted tuple
 # of variable names with repetition: () is the constant, ("x",) is x,
@@ -69,7 +70,16 @@ def polynomial(e) -> dict:
     that named neither the depth nor the sum. The same polynomial written with
     `z3.Sum` was read; now the shape of the term does not matter.
     """
+    if not isinstance(e, z3.ExprRef):
+        # a sympy expression used to fail deep in the walk, as
+        # `'Add' object has no attribute 'get_id'`
+        raise TypeError(_t("linarith.not_a_term", type=_type_name(e)))
     return _polynomial(e, {})
+
+
+def _type_name(e) -> str:
+    k = type(e)
+    return "{}.{}".format(k.__module__.split(".")[0], k.__name__)
 
 
 def _flatten(e, is_op):

@@ -51,6 +51,13 @@ class CNF:
         for l in flat:
             if l == 0:
                 raise ValueError("0 no es un literal valido")
+            if abs(int(l)) > self.nvars:
+                # A literal of a variable nobody declared: the solver saw a
+                # formula over 0 variables and called it satisfiable, and the
+                # self-check caught it only at the end.
+                raise ValueError("literal {} names variable {}, but only {} are "
+                                 "declared: allocate it with cnf.var(name)".format(
+                                     l, abs(int(l)), self.nvars))
             if -l in seen:
                 return self  # tautologia: no aporta nada
             if l not in seen:

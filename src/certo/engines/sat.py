@@ -151,6 +151,16 @@ def cases(spec, limits: Limits | None = None, backend: str = DEFAULT_BACKEND,
             reports["drat-trim"] = drup.check_with_drat_trim(
                 dimacs, proof,
                 timeout_s=max(1.0, lim.timeout_ms / 1000)).to_dict()
+        if not rep.ok and rep.timed_out:
+            # The clock stopped the check, nothing refuted it: the proof is
+            # kept, so `verify` with more time can finish what this did not.
+            # 0.36 returned `error` and threw the certificate away.
+            cert = drat_certificate(dimacs, list(proof), cnf.nvars, len(cnf.clauses))
+            return Result(
+                "cases", Status.TIMEOUT, Verdict.INCONCLUSIVE, engine, ms(), cert,
+                detail=t("engine.cases.unchecked", lines=len(proof), detail=rep.detail),
+                meta={**base_meta, "proof_lines": len(proof), "proof_check": reports,
+                      "proof_state": "unchecked", "solve_ms": round(solve_ms, 1)})
         if not rep.ok:
             return Result(
                 "cases", Status.UNKNOWN_SOLVER, Verdict.ERROR, engine, ms(), None,

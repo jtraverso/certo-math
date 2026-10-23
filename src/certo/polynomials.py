@@ -144,9 +144,12 @@ class Poly:
 
     @classmethod
     def from_z3(cls, expr, variables):
-        """A z3 arithmetic term, through the same parser `farkas` uses."""
+        """A z3 arithmetic term, through the same parser `farkas` uses. A
+        sympy expression is read too, by `from_sympy`: the ring is known."""
         from .linarith import polynomial
 
+        if type(expr).__module__.split(".")[0] == "sympy":
+            return cls.from_sympy(expr, variables)
         poly = polynomial(expr)
         out = {}
         for mono, coef in poly.items():
@@ -156,6 +159,31 @@ class Poly:
             key = tuple(e)
             out[key] = out.get(key, Fraction(0)) + coef
         return cls(variables, out)
+
+    @classmethod
+    def from_sympy(cls, expr, variables):
+        """A sympy expression or `sympy.Poly` over `variables`, by name. Only
+        EXACT coefficients: a sympy Float is refused rather than read as the
+        rational nearest it, and a symbol outside the ring is named."""
+        import sympy
+
+        names = [str(v) for v in variables]
+        gens = sympy.symbols(names)
+        if isinstance(expr, sympy.Poly):
+            expr = expr.as_expr()
+        expr = sympy.sympify(expr)
+        extra = sorted(str(v) for v in expr.free_symbols if str(v) not in names)
+        if extra:
+            raise ValueError(t("poly.sympy_symbols", names=", ".join(extra),
+                                ring=", ".join(names)))
+        P = sympy.Poly(expr.subs({sympy.Symbol(n): g for n, g in zip(names, gens)}),
+                       *gens)
+        out = {}
+        for mono, c in P.terms():
+            if not c.is_Rational:
+                raise ValueError(t("poly.sympy_inexact", coef=str(c)))
+            out[tuple(mono)] = Fraction(int(c.p), int(c.q))
+        return cls(tuple(variables), out)
 
     # --- arithmetic -------------------------------------------------------
 

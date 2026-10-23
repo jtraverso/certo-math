@@ -16,7 +16,10 @@ Para instancias grandes, usa un binario externo (cadical, kissat) con
 `--solver-binary`: lee DIMACS y escribe DRAT con la misma numeracion.
 
 Implementacion: dos literales vigilados, aprendizaje 1UIP, VSIDS con decaimiento,
-reinicios geometricos.
+reinicios geometricos, y (0.37) reduccion de la base de aprendidas por LBD:
+cada tanto se borra la mitad menos util, y cada borrado va a la prueba como
+`d ...`. Sin eso la formula solo crecia, y resolver y verificar el palomar de
+9 costaban lo mismo: minutos.
 """
 from __future__ import annotations
 
@@ -57,6 +60,9 @@ class Cdcl:
         self.var_inc = 1.0
         self.conflicts = self.decisions = self.propagations = 0
         self.ok = True
+        self.learnts: list = []                  # indices de aprendidas vivas
+        self.lbd: dict = {}
+        self.deleted = 0
 
         for c in clauses:
             if not self._add_original(c):
@@ -86,7 +92,33 @@ class Cdcl:
         self.clauses.append(list(cl))
         ci = len(self.clauses) - 1
         self._watch(ci)
+        self.learnts.append(ci)
+        self.lbd[ci] = len({self.level[abs(l)] for l in cl})
         return ci
+
+    def _reduce(self):
+        """Borra la mitad de las aprendidas de LBD > 2 que no son razon de
+        nada, las de peor LBD primero, y lo anota en la prueba."""
+        clauses, value, reason = self.clauses, self.value, self.reason
+        live, cand = [], []
+        for ci in self.learnts:
+            c = clauses[ci]
+            if c is None:
+                continue
+            live.append(ci)
+            v = abs(c[0])
+            locked = value[v] != 0 and reason[v] == ci
+            if self.lbd[ci] > 2 and not locked:
+                cand.append(ci)
+        cand.sort(key=lambda ci: (self.lbd[ci], len(clauses[ci])), reverse=True)
+        gone = set(cand[:len(cand) // 2])
+        for ci in gone:
+            if self.emit_proof:
+                self.proof.append("d " + " ".join(map(str, clauses[ci])) + " 0")
+            clauses[ci] = None           # sus vigilancias se caen al pasar
+            del self.lbd[ci]
+        self.deleted += len(gone)
+        self.learnts = [ci for ci in live if ci not in gone]
 
     def _log(self, cl):
         if self.emit_proof:
@@ -112,26 +144,33 @@ class Cdcl:
         return True
 
     def _propagate(self):
+        value, clauses, watches = self.value, self.clauses, self.watches
         while self.qhead < len(self.trail):
             p = self.trail[self.qhead]
             self.qhead += 1
             self.propagations += 1
-            ws = self.watches.get(-p, [])
+            ws = watches.get(-p, [])
             keep, i = [], 0
             while i < len(ws):
                 ci = ws[i]
                 i += 1
-                c = self.clauses[ci]
+                c = clauses[ci]
+                if c is None:
+                    continue                 # borrada por `_reduce`
                 if c[0] == -p:
                     c[0], c[1] = c[1], c[0]
-                if self._lit_value(c[0]) == 1:
+                l0 = c[0]
+                x = value[l0 if l0 > 0 else -l0]
+                if (x if l0 > 0 else -x) == 1:
                     keep.append(ci)
                     continue
                 found = False
                 for k in range(2, len(c)):
-                    if self._lit_value(c[k]) != -1:
-                        c[1], c[k] = c[k], c[1]
-                        self.watches.setdefault(c[1], []).append(ci)
+                    lk = c[k]
+                    x = value[lk if lk > 0 else -lk]
+                    if (x if lk > 0 else -x) != -1:
+                        c[1], c[k] = lk, c[1]
+                        watches.setdefault(lk, []).append(ci)
                         found = True
                         break
                 if found:
@@ -230,6 +269,7 @@ class Cdcl:
                               "contradiccion entre clausulas unitarias de entrada")
 
         restart_limit, restart_base = 100, 100
+        reduce_at, reduce_step = 2000, 2000
         while True:
             confl = self._propagate()
             if confl is not None:
@@ -248,6 +288,10 @@ class Cdcl:
                     ci = self._add_learnt(learnt)
                     self._enqueue(learnt[0], ci)
                 self.var_inc /= 0.95
+                if self.conflicts >= reduce_at:
+                    reduce_step += 300
+                    reduce_at = self.conflicts + reduce_step
+                    self._reduce()
                 if self.conflicts >= max_conflicts:
                     return CdclResult(UNKNOWN, None, None, self.conflicts,
                                       self.decisions, self.propagations,

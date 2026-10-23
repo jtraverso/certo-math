@@ -1819,6 +1819,14 @@ class NonnegSpec:
     # what is certified. The orientation, the denominator and its proof
     # travel in the certificate; a D that changes sign or vanishes is refused.
     clear_denominators: bool = False
+    # THE PROOF'S DEGREE, apart from the polynomial's: an int for every
+    # variable, or {name: int}. Bernstein coefficients at a raised degree
+    # enclose the polynomial more tightly -- sometimes all >= 0 where its own
+    # degree had one negative, without halving the box. Never below what the
+    # polynomial and the region's terms need: those are always used, and
+    # the result names the degree it ran at (`meta["bernstein_degrees"]`).
+    # Closed boxes only: an open end is the shift test, which has no degree.
+    degree: object = None
 
 
 @dataclass

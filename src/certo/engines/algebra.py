@@ -558,7 +558,13 @@ def linear_system(spec, limits: Limits | None = None,
                   detail=detail,
                   meta={"status": out["status"], "rank": out["rank"],
                         "rows": rows, "columns": cols,
-                        "kernel_dimension": len(out["kernel"]),
+                        # the NULLITY, columns - rank -- of A, whatever b is.
+                        # It was the length of the basis returned, and an
+                        # inconsistent system returns none: A = [[1,0],[1,0]],
+                        # b = (0,1) reported 0 for a kernel spanned by (0,1).
+                        # (Over Z the kernel lattice has the same rank.)
+                        "kernel_dimension": cols - out["rank"],
+                        "kernel_basis_returned": len(out["kernel"]),
                         "domain": out["domain"],
                         "solution": out["solution"]})
 
@@ -1011,15 +1017,27 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
             "shift")
     depth = max(0, int(spec.subdivide or 0))
     terms = bernstein.region_terms(conditions) if conditions else []
-    ok, tree = (bernstein.nonneg_region(poly, box, terms, depth) if terms
-                else bernstein.nonneg(poly, box, depth))
+    try:
+        degrees = _proof_degrees(getattr(spec, "degree", None), ring)
+    except (ValueError, TypeError) as e:
+        return refuse(e)
+    # Every condition and every pairwise product is a term, whatever its
+    # degree: the proof runs at the largest degree any of them needs, and
+    # says which, so no guard is dropped for being of higher degree than the
+    # polynomial.
+    used = bernstein._region_degrees(poly, terms, degrees)
+    run_meta = {"bernstein_degrees": dict(zip(ring, used)),
+                "region_terms": [n for n, _g in terms]}
+    ok, tree = (bernstein.nonneg_region(poly, box, terms, depth, degrees) if terms
+                else bernstein.nonneg(poly, box, depth, degrees))
     if ok:
         cert = polynomial_nonneg_certificate(
             dict(payload, holds=True, tree=tree)).stamp(spec_path or None)
         return Result("nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG,
                       ms(), cert, detail=t("nonneg.proved", poly=str(poly) or "0",
                                            box=_box_text(box) or t("nonneg.constant"),
-                                           region=_region_text(conditions)))
+                                           region=_region_text(conditions)),
+                      meta=run_meta)
 
     # A point where it fails: the corners of a grid on the box, finest last,
     # inside the region. A NEGATIVE corner coefficient is such a point, and
@@ -1064,7 +1082,27 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     return Result("nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                   ENGINE_NONNEG, ms(), None,
                   detail=t("nonneg.unknown", depth=depth) + (" " + where if where else ""),
-                  meta={"diagnose": hint})
+                  meta=dict(run_meta, diagnose=hint))
+
+
+def _proof_degrees(degree, ring):
+    """`NonnegSpec.degree` as one int per variable of `ring`, or None."""
+    if degree is None:
+        return None
+    if isinstance(degree, bool):
+        raise TypeError(t("nonneg.degree_type"))
+    if isinstance(degree, int):
+        out = {n: degree for n in ring}
+    elif isinstance(degree, dict):
+        extra = sorted(str(n) for n in degree if n not in ring)
+        if extra:
+            raise ValueError(t("nonneg.degree_names", names=", ".join(extra)))
+        out = {n: int(degree.get(n, 0)) for n in ring}
+    else:
+        raise TypeError(t("nonneg.degree_type"))
+    if any(v < 0 or v > 200 for v in out.values()):
+        raise ValueError(t("nonneg.degree_range"))
+    return tuple(out[n] for n in ring)
 
 
 def _with_method(res, method):

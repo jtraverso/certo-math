@@ -6,6 +6,65 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+The bugs the 0.36 sessions reported, a DRUP checker that finishes, and one
+answer to "does this prove my claim". No new commands and no new kinds; the
+schema stays 5. New optional fields: `NonnegSpec.degree`; new outputs `claim`
+(`verify`), `bernstein_degrees` and `region_terms` (`nonneg`), outcome
+`UNCHECKED`, `ignored_deletions` in a proof check.
+
+### Fixed
+
+- **`synth` with `minimize=-k`** was proved and then refused by `verify`: the
+  value was printed `(- 1)` and compared with the numeral `-1` unsimplified.
+- **`same_obligation` refused a correct synthesis or model contract** now and
+  then: the canonical form was z3's printer, which names its `let`s by
+  internal ids, and those are recycled once a term is freed. Formulas are now
+  printed as a DAG numbered by its own traversal. A construction written by
+  0.36 still reads: its recorded digest is recomputed both ways.
+- **`same_obligation` of a `ParametricSpec`** compared parameters, objective
+  and constraints only: a bound for a maximisation bound a minimisation spec.
+  Sense, witness (dual or primal), free columns, region, box and the claim are
+  now compared.
+- **An `AtlasSpec` whose claim differed** raised `ValueError` instead of
+  naming the difference.
+- **`CNF.add` accepted a literal of an undeclared variable**, which DIMACS then
+  read as another formula. Refused, naming `cnf.var`.
+- **`linear_system`'s `kernel_dimension`** was the size of the basis returned
+  (0 for an inconsistent system); it is now `columns - rank`, with
+  `kernel_basis_returned` beside it.
+- **`cases` threw an UNSAT proof away when its check ran out of time** and
+  answered `error`. The certificate is kept: `INCONCLUSIVE`, outcome
+  `UNCHECKED`, and the detail says how long would finish it.
+- **`verify` stopped by the clock** said "which the failures above refute":
+  nothing was refuted.
+- **A DRUP proof cut mid-line** passed with a shorter last lemma; a line that
+  does not end in `0` is refused.
+- **Exact numbers over 4300 digits**: Python's int/str cap stopped writing and
+  reading them. The command line and the MCP server lift it in their own
+  process; `certo.exact.unbounded_digits()` does it for a host.
+- **A sympy expression** failed as `'Add' object has no attribute 'get_id'`.
+  It is read exactly where the ring is known (`Poly.from_sympy`); elsewhere a
+  `TypeError` names the type.
+
+### Changed
+
+- **The DRUP checker** watches two literals and checks backwards, the core
+  only. The built-in CDCL halves its learnt clauses by LBD past 2000
+  conflicts and logs each deletion. 9 pigeons in 8 holes: solved in about 50 s
+  (was 180) and checked in about 80 (0.36 had not finished in 600). A
+  deletion of a clause that forced a level-0 value is ignored, as in
+  drat-trim, and counted.
+- The optimum of a synthesis says it is optimal **for the constraints as
+  written**, not a constant of the problem they model.
+
+### Added
+
+- **`verify --obligation SPEC --expect CLASS --complete`**, and `expect`,
+  `complete` in the MCP `verify`: `claim`, with `proves_claim` true, false
+  with its reasons, or null when no obligation was given.
+- **`NonnegSpec.degree`**: the Bernstein test at a degree above the
+  polynomial's. The result names the degrees used and every region term.
+
 ## [0.36.0] — 2026-10-20
 
 **Results say what they are, and a construction checks what it means.** A

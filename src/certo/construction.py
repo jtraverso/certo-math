@@ -860,7 +860,8 @@ def check_certificate(step, ctx):
                                         kind=cert.kind, path=ob.get("path"))
             degree = "relative"
         else:
-            bound = want is not None and mine == want
+            # a 0.36 construction recorded the digest z3's printer gave
+            bound = want is not None and (mine == want or want in O.fingerprints(cert))
             out["obligation_binding"] = "verified" if bound else "differs"
             rows.append(_row("certificate.obligation", bound,
                              t("construction.certificate.obligation_detail", path=ob.get("path"),

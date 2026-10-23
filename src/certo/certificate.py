@@ -6981,7 +6981,8 @@ def _verify_synth_optimum(cert, limits) -> VerifyReport:
         base = parse(p["base_smt2"])
         eq = list(z3.parse_smt2_string(p["value_smt2"], decls=decls))[0]
         obj, val = eq.arg(0), eq.arg(1)
-        ok_val = (z3.is_eq(eq) and val.eq(z3.IntVal(p["value"]))
+        # the value is printed as `(- 1)`, a negation, not the numeral -1
+        ok_val = (z3.is_eq(eq) and z3.simplify(val).eq(z3.IntVal(p["value"]))
                   and p.get("sense") in ("min", "max"))
         fix = [_const(z3, n, s) == _value(z3, s, v)
                for n, (s, v) in found.payload["implementation"].items()]

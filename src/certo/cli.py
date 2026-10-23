@@ -352,6 +352,11 @@ def _self_check(res, args):
         return None
     from . import clock
 
+    if res.meta.get("proof_state") == "unchecked":
+        # The engine's own check already stopped on the clock: the same check
+        # again would stop again, and be reported as a bug in certo.
+        res.meta["self_check"] = "skipped: the proof's check did not finish"
+        return None
     if clock.expired():
         # The run is out of time: re-checking now would only be killed by the
         # backstop. Said, not hidden -- `certo verify` checks it later.
@@ -2472,6 +2477,7 @@ def _obligation_check(cert, rep, path):
                 why="{}: {}".format(type(e).__name__, e)), file=sys.stderr)
         return 3
     out = obligation.same_obligation(cert, spec)
+    _obligation_check.last = out
     if out["same"] is None:
         print("; ".join(out["differences"]), file=sys.stderr)
         return 3
@@ -2523,11 +2529,27 @@ def cmd_verify(args):
     if getattr(args, "elaborate", False):
         os.environ["CERTO_LEAN_ELABORATE"] = "1"
 
+    from . import claim as _claim
+
+    try:
+        expect = _claim.check_expect(getattr(args, "expect", None))
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     rep = verify_cert(cert, limits_from(args), source=args.spec or None)
+    valid = rep.ok
+    _obligation_check.last = None
     if getattr(args, "obligation", None):
         refused = _obligation_check(cert, rep, args.obligation)
         if refused is not None:
             return refused
+    view = None
+    if getattr(args, "obligation", None) or expect or getattr(args, "complete", False):
+        # the one answer to "does this prove MY claim" (certo/claim.py)
+        view = _claim.view(cert, rep, valid, same=_obligation_check.last,
+                           expect=expect, complete=getattr(args, "complete", False))
+        if view["proves_claim"] is False:
+            rep.ok = False
     if getattr(args, "md", False):
         _print_explained(cert, md=True)
         return 0 if rep.ok else 1
@@ -2547,6 +2569,8 @@ def cmd_verify(args):
         fp = _obl.fingerprint(cert)
         if fp:
             out["obligation"] = fp
+        if view is not None:
+            out["claim"] = view
         print(json.dumps(out, indent=2, ensure_ascii=False))
     elif getattr(args, "oneline", False):
         pend = len(((cert.payload or {}).get("card") or {}).get("pending") or [])
@@ -2572,12 +2596,18 @@ def cmd_verify(args):
             # The detail describes what the certificate SAYS about itself.
             # After a failure, a bare trailing summary reads as an
             # endorsement of the thing the checks above just refuted.
+            # Stopped by the clock, nothing was refuted: "the failures above
+            # refute" said of an unfinished check was the wrong sentence.
             print("  " + (rep.detail if rep.ok
+                          else t("cli.verify.unfinished", detail=rep.detail)
+                          if getattr(rep, "timed_out", False)
                           else t("cli.verify.despite", detail=rep.detail)))
         from . import card as _card
 
         for line in _card.lines(_card.card_of(cert, rep)):
             print("  " + line)
+        if view is not None:
+            print("  " + _claim.line(view))
         if rep.ok:
             _print_explained(cert)
     return 0 if rep.ok else 1
@@ -3788,6 +3818,14 @@ def build_parser():
                          "engine reads it: an ideal, a nonneg, a cover, a CNF, "
                          "an LP or a proof by `prove`. Names what differs. A "
                          "valid certificate of `0 = 0` is not one of your claim")
+    sp.add_argument("--expect", metavar="CLASS[,CLASS]",
+                    help="refuse unless the certificate is evidence of one of "
+                         "these classes (universal, sign, identity, "
+                         "lp_optimum, optimum, finite, counterexample, ...): a "
+                         "valid counterexample is not a proof of your claim")
+    sp.add_argument("--complete", action="store_true",
+                    help="refuse unless every step was re-derived by certo's "
+                         "own arithmetic: no solver, nothing assumed")
     sp.add_argument("--elaborate", action="store_true",
                     help="for a lean_binding: run Lean again on the bound "
                          "declaration and refuse a type that changed (minutes: "
@@ -3910,6 +3948,11 @@ def main(argv=None) -> int:
     # The command line as THIS call received it -- not `sys.argv`, which is
     # the host's when certo runs in-process (a test, the API, `promote`).
     args._argv = list(sys.argv[1:] if argv is None else argv)
+    if argv is None:
+        # the process is certo's: exact numbers of any size (see exact.py)
+        from .exact import unbounded_digits
+
+        unbounded_digits()
 
     # One flag, one process-wide setting: every `load_spec` in every
     # engine reads it, so a command added later cannot forget to.

@@ -1553,6 +1553,14 @@ It may still hold; the detail says where to cut.
     NonnegSpec(poly=Fraction(3, 10) - x, box={"x": (0, Fraction(1, 2))},
                region=[("below_root", Fraction(3, 40) - x**2)])
 
+**The proof's degree** *(0.37)*. `degree=60`, or `{"x": 60}`, runs the
+Bernstein test at a degree above the polynomial's: the coefficients enclose
+it more tightly, and `(x - 1/2)^2 + 1/100` on `[0, 1]`, inconclusive at its
+own degree without halving, is proved at 60. No condition of the region is
+dropped for being of higher degree than the polynomial: every condition and
+every pairwise product is used, at the largest degree any of them needs, and
+the result names both (`meta["bernstein_degrees"]`, `meta["region_terms"]`).
+
 "P >= 0 on a box" used to be disguised as an LP with a zero dual. The region
 is also how an ALGEBRAIC endpoint is written exactly: `[0, sqrt(3/40)]` is the
 box `[0, 1/2]` with `3/40 - x^2 >= 0`, instead of a rational cut nearby and
@@ -1829,6 +1837,20 @@ large instances: `certo cases spec.py --solver-binary /path/to/cadical`.
 
 You do not have to trust that CDCL. A malformed proof is rejected by the DRUP
 checker and you get `ERROR`, not `PROVED`. **The checker audits the solver.**
+
+*(0.37)* The checker watches two literals per clause and goes BACKWARDS: it
+replays the proof to the contradiction, marks the clauses that contradiction
+rests on, and checks only those lemmas, last first -- what drat-trim does.
+The CDCL halves its learnt clauses past 2000 conflicts and writes each
+deletion into the proof. The pigeonhole proof of 9 pigeons in 8 holes, which
+0.36 could not check in ten minutes, is now solved in about one minute and
+checked in about one and a half. A
+proof line that does not end in `0` is refused as truncated.
+
+When the solver answers UNSAT but the check runs out of time, the result is
+`INCONCLUSIVE` with outcome `UNCHECKED`, and the certificate is **kept**: the
+detail says how long would finish it, at the rate measured, and `certo verify
+CERT --timeout-ms N` decides. 0.36 answered `error` and kept nothing.
 
 ### `certo shrink`
 
@@ -2421,6 +2443,17 @@ certificate IS: a proof, a refutation, an identity, a sign on a domain, a
 counterexample, a witness, a FEASIBLE object (a bound, not the optimum), an
 LP optimum, an optimum, a relaxation bound, a finite check, a synthesis, a
 composition ... (`evidence` in the JSON and the MCP).
+
+**Does it prove MY claim?** *(0.37)* `verify CERT --obligation SPEC --expect
+sign --complete` answers in one line, and as `claim` in `verify --json` and
+the MCP `verify` (`expect=[...]`, `complete=true`): valid, about the
+obligation the spec states, evidence of one of the classes expected (`--expect
+universal,sign`), and -- with `--complete` -- re-derived by certo's own
+arithmetic, no solver and nothing assumed. `proves_claim` is `true`, `false`
+with the `reasons`, or `null` when no obligation was given: valid on its own
+terms only. A counterexample certified correctly is `counterexample` evidence,
+and is not a proof of the claim it refutes; an LP optimum is `lp_optimum`,
+not `proved`. Exit 1 when it is `false`.
 
 `--spec` that matches by hash and sits elsewhere than the recorded path is a
 relocation, said as such, not a warning that the spec is gone.

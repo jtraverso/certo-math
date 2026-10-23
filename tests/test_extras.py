@@ -19281,6 +19281,310 @@ def test_0_35_1_adversary_reduction_is_checked_edge_by_edge():
     assert not run(red, wrong)["s"]["ok"]                      # unsound there
     assert run(red)["r"]["outputs"]["image"] == ["0", "11"]
 
+
+# --- 0.37: what the 0.36 sessions found ------------------------------------------
+
+
+def _php(n):
+    from certo.cnf import CNF
+
+    cnf = CNF()
+    p = [[cnf.var("p%d_%d" % (i, j)) for j in range(n)] for i in range(n + 1)]
+    for i in range(n + 1):
+        cnf.add(p[i])
+    for j in range(n):
+        for a in range(n + 1):
+            for b in range(a + 1, n + 1):
+                cnf.add([-p[a][j], -p[b][j]])
+    return cnf
+
+
+def test_0_37_a_negative_objective_verifies():
+    """`minimize=-k` was proved and then refused by `verify`: the value was
+    printed `(- 1)` and compared with the numeral -1 unsimplified."""
+    import z3
+
+    from certo import api
+    from certo.spec import SynthSpec
+
+    k, x = z3.Int("k"), z3.Real("x")
+    s = SynthSpec(impl_vars=[k], input_vars=[x], impl_constraints=z3.And(k >= 0, k <= 1),
+                  behavior=z3.And(x >= 0, x <= 1), correctness=x * x >= 0, minimize=-k)
+    r = api.run("synth", s)
+    assert r.certificate.kind == "synth_optimum" and r.certificate.payload["value"] == -1
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    bent = _roundtrip(r.certificate)
+    bent.payload["value"] = -2
+    assert not verify(bent, LIM).ok
+
+
+def test_0_37_a_formula_prints_alike_whatever_z3_numbered():
+    """The canonical form named its `let`s by z3's ids: equal formulas, built
+    apart, compared unequal once the ids were recycled. Shared subterms are
+    now numbered by the traversal, and a 0.36 digest is still accepted."""
+    import gc
+
+    import z3
+
+    from certo import obligation as O
+    from certo import z3util
+
+    x, y, k = z3.Real("x"), z3.Real("y"), z3.Int("k")
+
+    def build():
+        e = (x * x + 3 * x * y - y) ** 2 + z3.ToReal(k) / 7
+        f = e * e - 2 * e + 1
+        return z3.And(f * f >= 0, f * e + e <= 7, z3.Implies(k > 3, f * x <= e))
+
+    a = O._canon_smt2(z3util.smt2(build()))
+    junk = [z3.Real("j%d" % i) * i + 1 for i in range(3000)]
+    del junk
+    gc.collect()
+    b = O._canon_smt2(z3util.smt2(build()))
+    assert a == b and "$1" in a and "?x" not in a
+    assert O._canon_smt2(z3util.smt2(build())) != O._canon_smt2(
+        z3util.smt2(z3.And(build(), x > 0)))
+    # x as an Int is another formula
+    assert O._canon_smt2(z3util.smt2(z3.Real("v") > 0)) != \
+        O._canon_smt2(z3util.smt2(z3.Int("v") > 0))
+
+
+def test_0_37_a_parametric_binding_reads_the_whole_claim():
+    """sense, witness, free, region, box and claim were not compared: a
+    certificate of a maximisation bound a minimisation spec."""
+    import dataclasses
+
+    from certo import api
+    from certo.obligation import same_obligation
+    from certo.spec import load_spec
+
+    s = load_spec("examples/parametric_bound.py")
+    c = api.run("parametric", s).certificate
+    assert same_obligation(c, s)["same"]
+    assert same_obligation(c, dataclasses.replace(s, sense="min"))["same"] is False
+    assert same_obligation(c, dataclasses.replace(s, claim=7))["same"] is False
+    assert same_obligation(c, dataclasses.replace(s, free=["x"]))["same"] is False
+
+
+def test_0_37_an_atlas_claim_that_differs_is_named_not_raised():
+    import dataclasses
+    import sys as _sys
+
+    _sys.path.insert(0, "examples")
+    import parametric_atlas as E
+
+    from certo import api
+    from certo.obligation import same_obligation
+
+    s = E.spec()
+    c = api.run("atlas", s).certificate
+    for claim, said in ((E.ONE.scaled(2), "<= 2"), ((">=", E.ONE), ">= 1"), (None, None)):
+        out = same_obligation(c, dataclasses.replace(s, claim=claim))
+        assert out["same"] is False
+        if said:
+            assert said in out["differences"][0]
+
+
+def test_0_37_a_literal_of_an_undeclared_variable_is_refused():
+    from certo.cnf import CNF
+
+    cnf = CNF()
+    a = cnf.var("a")
+    cnf.add([a])
+    try:
+        cnf.add([a, 2])
+    except ValueError as e:
+        assert "cnf.var" in str(e)
+    else:
+        raise AssertionError("an undeclared variable was accepted")
+    assert CNF.from_dimacs("p cnf 3 1\n1 -3 0\n").clauses == [[1, -3]]
+
+
+def test_0_37_kernel_dimension_is_columns_minus_rank():
+    from certo.engines import algebra
+    from certo.spec import LinearSystemSpec
+
+    for domain in ("rational", "integer"):
+        r = algebra.linear_system(LinearSystemSpec(matrix=[[1, 0], [1, 0]], rhs=[0, 1],
+                                                   domain=domain))
+        assert r.meta["kernel_dimension"] == 1, (domain, r.meta)
+
+
+def test_0_37_sympy_is_read_exactly_or_named():
+    import sympy
+
+    from certo import api
+    from certo.linarith import polynomial
+    from certo.spec import NonnegSpec
+
+    x = sympy.symbols("x")
+    for p in (sympy.Poly(x ** 2 + 1, x), x ** 2 + sympy.Rational(1, 3)):
+        assert api.run("nonneg", NonnegSpec(poly=p, box={"x": (0, 1)})).verdict.value == "proved"
+    r = api.run("nonneg", NonnegSpec(poly=sympy.Float(0.5) * x, box={"x": (0, 1)}))
+    assert r.verdict.value == "inconclusive" and "Rational" in r.detail
+    try:
+        polynomial(x)
+    except TypeError as e:
+        assert "sympy" in str(e) and "z3" in str(e)
+    else:
+        raise AssertionError("a sympy symbol was walked as a z3 term")
+
+
+def test_0_37_the_drup_checker_goes_backwards_and_stays_sound():
+    """Watched literals, the core only, deletions honoured or -- for a clause
+    that forced a level-0 value -- ignored. Every valid proof passes, and no
+    proof of a formula weakened to satisfiable does."""
+    import random
+
+    from pysat.solvers import Solver
+
+    from certo import drup
+    from certo.cnf import CNF
+    from certo.engines.sat import _run_internal
+
+    rnd = random.Random(3)
+    seen = 0
+    for _ in range(60):
+        nv = rnd.randint(15, 45)
+        F = [[rnd.choice([1, -1]) * rnd.randint(1, nv) for _ in range(3)]
+             for _ in range(int(nv * 4.8))]
+        cnf = CNF.from_dimacs("p cnf {} {}\n".format(nv, len(F))
+                              + "".join(" ".join(map(str, c)) + " 0\n" for c in F))
+        st, _m, proof, _e, _i = _run_internal(cnf, LIM)
+        if st != "unsat":
+            continue
+        seen += 1
+        assert drup.check(F, proof).ok
+        G = list(F)
+        while True:
+            G.pop(rnd.randrange(len(G)))
+            with Solver(name="g4", bootstrap_with=G) as s:
+                if s.solve():
+                    break
+        assert not drup.check(G, proof).ok
+    assert seen >= 20
+    # a proof cut mid-line is refused, not read as a shorter lemma
+    rep = drup.check([[1], [-1, 2], [-2]], ["2"])
+    assert not rep.ok and "0" in rep.detail
+    # a duplicated literal is one literal: [3, 6, 2, 3] is falsified by units
+    assert drup.check([[-2], [-6], [-3], [3, 6, 2, 3]], []).ok
+
+
+def test_0_37_a_bigger_proof_with_deletions():
+    from certo import drup
+    from certo.engines.sat import _run_internal
+
+    # past 2000 conflicts the solver halves its learnt clauses, and says so
+    cnf = _php(7)
+    st, _m, proof, _e, _i = _run_internal(cnf, Limits(timeout_ms=120_000))
+    assert st == "unsat" and any(l.startswith("d ") for l in proof)
+    rep = drup.check(cnf.clauses, proof, timeout_s=120)
+    assert rep.ok and rep.deletions > 0
+
+
+def test_0_37_cases_keeps_a_proof_whose_check_stopped_on_the_clock():
+    """0.36 answered `error` and threw the proof away."""
+    from certo import drup
+    from certo.cnf import CNFSpec
+    from certo.engines import sat
+    from certo.outcome import outcome
+
+    real = drup.check
+    drup.check = lambda *a, **k: drup.DratReport(False, "drup-python", 3, detail="stopped",
+                                                 timed_out=True, total_steps=9)
+    try:
+        r = sat.cases(CNFSpec(cnf=_php(3)), LIM, cross_check=False)
+    finally:
+        drup.check = real
+    assert r.verdict.value == "inconclusive" and r.certificate.kind == "drat"
+    assert r.meta["proof_state"] == "unchecked"
+    assert outcome(r) == {"state": "UNCHECKED", "conclusive": False,
+                          "basis": outcome(r)["basis"]}
+    assert verify(_roundtrip(r.certificate), LIM).ok        # with time, it is a proof
+
+
+def test_0_37_a_timed_out_check_says_how_long_would_do():
+    from certo import drup
+
+    cnf = _php(6)
+    from certo.engines.sat import _run_internal
+
+    _st, _m, proof, _e, _i = _run_internal(cnf, Limits(timeout_ms=120_000))
+    rep = drup.check(cnf.clauses, proof, timeout_s=0.0)
+    assert rep.timed_out and not rep.ok and "--timeout-ms" in rep.detail
+
+
+def test_0_37_one_answer_to_does_this_prove_my_claim():
+    import z3
+
+    from certo import api, claim
+    from certo.certificate import verify as vc
+    from certo.obligation import same_obligation
+    from certo.spec import NonnegSpec
+
+    x = z3.Real("x")
+    good = NonnegSpec(poly=x * x + 1, box={"x": (0, 1)})
+    bad = NonnegSpec(poly=x - Fraction(1, 2), box={"x": (0, 1)})
+    cg, cb = api.run("nonneg", good).certificate, api.run("nonneg", bad).certificate
+
+    def view(c, s, **kw):
+        rep = vc(c, LIM)
+        same = same_obligation(c, s) if s is not None else None
+        return claim.view(c, rep, rep.ok, same=same, **kw)
+
+    assert view(cg, good, expect=["sign"], complete=True)["proves_claim"] is True
+    # a counterexample, correctly certified, is not a proof of the claim
+    v = view(cb, bad, expect=["sign"])
+    assert v["valid"] and v["proves_claim"] is False and v["evidence"] == "counterexample"
+    assert view(cg, bad)["proves_claim"] is False                  # another obligation
+    assert view(cg, None)["proves_claim"] is None                  # not asked
+    assert view(cg, good, expect=["universal"])["proves_claim"] is False
+    try:
+        claim.check_expect("sign,nonsense")
+    except ValueError as e:
+        assert "nonsense" in str(e)
+    else:
+        raise AssertionError("an unknown evidence class was accepted")
+
+
+def test_0_37_a_proof_degree_apart_from_the_polynomial():
+    import z3
+
+    from certo import api
+    from certo.spec import NonnegSpec
+
+    x, y = z3.Reals("x y")
+    p = (x - Fraction(1, 2)) ** 2 + Fraction(1, 100)
+    assert api.run("nonneg", NonnegSpec(poly=p, box={"x": (0, 1)},
+                                        subdivide=0)).verdict.value == "inconclusive"
+    r = api.run("nonneg", NonnegSpec(poly=p, box={"x": (0, 1)}, subdivide=0, degree=60))
+    assert r.verdict.value == "proved" and r.meta["bernstein_degrees"] == {"x": 60}
+    assert verify(_roundtrip(r.certificate), LIM).ok
+    # a guard of higher degree than the polynomial is used, with its product
+    r = api.run("nonneg", NonnegSpec(poly=x - y + Fraction(1, 10),
+                                     box={"x": (0, 1), "y": (0, 1)},
+                                     region=[("g", x * x - y)], subdivide=0))
+    assert r.verdict.value == "proved"
+    assert r.meta["region_terms"] == ["g", "g*g"] and r.meta["bernstein_degrees"]["x"] == 4
+    assert "outside the box" in api.run("nonneg", NonnegSpec(
+        poly=p, box={"x": (0, 1)}, degree={"z": 2})).detail
+
+
+def test_0_37_exact_numbers_of_any_size_in_certo_s_own_process():
+    import sys
+
+    from certo.exact import unbounded_digits
+
+    if not hasattr(sys, "get_int_max_str_digits"):
+        return
+    old = sys.get_int_max_str_digits()
+    try:
+        unbounded_digits()
+        assert len(str(10 ** 5000)) == 5001
+    finally:
+        sys.set_int_max_str_digits(old)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

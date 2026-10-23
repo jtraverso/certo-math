@@ -26,6 +26,19 @@ DENOM_LADDER = (1, 2, 3, 4, 6, 8, 12, 24, 60, 120, 360, 720,
                 10**3, 10**4, 10**5, 10**6)
 
 
+def unbounded_digits() -> None:
+    """Lift Python's 4300-digit cap on int <-> str conversion (3.11+), for
+    THIS process. An exact witness passes it easily -- a reported one had
+    4696-digit weights -- and then a certificate could be computed but not
+    written, nor read back. The command line and the MCP server own their
+    process and call this; a library leaves the host's setting alone, and a
+    host that needs it calls this too."""
+    import sys
+
+    if hasattr(sys, "set_int_max_str_digits"):
+        sys.set_int_max_str_digits(0)
+
+
 def to_fraction(v) -> Fraction:
     """Cualquier numero -> Fraction exacta. Los float se toman tal cual."""
     if isinstance(v, Fraction):
