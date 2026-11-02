@@ -134,6 +134,17 @@ class SynthSpec:
     # by hand (a corner with T/x > 5/3 was outside the real problem). Read,
     # not certified: it is in `meta`, not in the certificate.
     original: object = None
+    # AN EXTERNAL DOMAIN VERIFIER: a program that knows the REAL problem,
+    # which the formulas only model. Called on every candidate the model
+    # accepts, with `{impl name: value}` (int, Fraction, bool); it answers
+    # valid -- True, None, {"valid": True} -- or invalid -- False, or
+    # {"valid": False, "counterexample": {input: value}, "reason": "..."}.
+    # A rejected candidate is excluded and the search goes on, the
+    # counterexample (when given) learnt too. Each call's input, result and
+    # the verifier's version are hashed into the trace and the certificate;
+    # `verify` does not re-run the program, and says so.
+    domain_verifier: object = None
+    domain_verifier_version: str = ""
 
     # THE BEST ONE, not just one: an integer expression over `impl_vars` to
     # minimise (or maximise). `synth` keeps asking for a better candidate
@@ -1182,6 +1193,52 @@ class InductSpec:
     bridge: str = ""                 # how a finite check becomes P(k)
     describe: str = ""               # the conclusion, in words
     title: str = ""
+    # THE DEFINITIONS, for a sequence given by a recurrence: `facts(k)` is a
+    # list of formulas true at EVERY k (`a(k + 1) == a(k) + 2 * k + 1`), and
+    # `initial` the ones about fixed indices (`a(0) == 0`). They are the
+    # theorem's hypotheses: the step is linked with `facts(k)` and
+    # `facts(k + 1)` as premises, a base case at kb with `initial` and
+    # `facts(j)` for j = k0..kb -- and every verification says so.
+    facts: object = None             # callable(k) -> [formula]
+    initial: list = field(default_factory=list)
+
+
+@dataclass
+class StrengthenSpec:
+    """P(k) holds but is not INDUCTIVE: find Q(k) in a template that makes
+    P(k) and Q(k) inductive, then prove THAT by induction.
+
+        StrengthenSpec(
+            k=k, k0=0,
+            prop=lambda k: b(k) >= 0,                  # P(k)
+            facts=lambda k: [a(k + 1) == a(k) + 1,     # true at every k
+                             b(k + 1) == b(k) + a(k)],
+            initial=[a(0) == 0, b(0) == 0],
+            template=lambda c, k: c[0] * a(k) + c[1] >= 0,   # Q_c(k)
+            coefficients=2, bounds=(-4, 4),
+        )
+
+    CEGIS over the template's integer coefficients: a candidate Q is tested
+    on the base cases k0..base_upto and on the step; a failure is a point --
+    the index and the values there -- and the coefficients are asked to work
+    at it. Found: the result is an `induction` certificate of P(k) and Q(k),
+    with the strengthening named in it and `verify` checking that P'(k)
+    implies P(k). None in the template: inconclusive, `template_too_small`
+    -- the template is what was too small, not P.
+    """
+
+    k: object                        # the induction variable, a z3 Int
+    k0: int
+    prop: object                     # callable(k) -> formula: P(k)
+    template: object                 # callable(c, k) -> formula: Q_c(k)
+    coefficients: int = 1            # how many integer coefficients c
+    bounds: tuple = (-10, 10)        # each coefficient's range
+    facts: object = None             # callable(k) -> [formula], at every k
+    initial: list = field(default_factory=list)
+    base_upto: object = None         # defaults to k0
+    step_from: object = None         # defaults to k0
+    describe: str = ""
+    title: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -1442,6 +1499,17 @@ class ParametricSpec:
     box: dict = None
     subdivide: int = 0               # how many times a box may be halved
     dual_degree: int = 1
+    # A FAMILY OF BASES: the program is FEASIBLE on the whole box, with one
+    # witness per piece. Each piece is a dict:
+    #   {"box": {name: (lo, hi)} -- default the whole box,
+    #    "region": [(name, g)]   -- its frontier conditions g >= 0,
+    #    "basis": [names]        -- variables (and rows whose slack is basic);
+    #                               certo solves the tight rows exactly, or
+    #    "primal": {var: expr}}  -- the formulas, rational functions allowed.
+    # The pieces must cover the box: their boxes tile it, and pieces sharing
+    # a box are told apart by frontiers, `g` in some and `-g` in the others.
+    # `claim` then bounds the optimum on every piece (from below for a max).
+    pieces: list = None
 
 
 @dataclass
@@ -1837,6 +1905,27 @@ class NonnegSpec:
     # the result names the degree it ran at (`meta["bernstein_degrees"]`).
     # Closed boxes only: an open end is the shift test, which has no degree.
     degree: object = None
+    # A WITNESS FOUND ELSEWHERE, checked and never searched (closed boxes):
+    #   multipliers  {term: lambda} -- constants on the region's conditions
+    #                and their products, named "g", "g*h", "g*h*k" (any
+    #                order). certo checks every lambda >= 0 and certifies the
+    #                remainder poly - sum(lambda * term) by Bernstein, halving
+    #                up to `subdivide` times.
+    #   witness      a Bernstein tree or FOREST from another tool, or a path
+    #                to its JSON: `nonneg_leaves`' shape ({"leaves": [{"box",
+    #                "degrees", "region", "coefficients"?}]}), certo's own
+    #                {"tree": ...}, or a `polynomial_nonneg` certificate. Its
+    #                polynomial, parameters, box and region, when it states
+    #                them, must be this spec's; the leaves must tile the box;
+    #                every leaf is recomputed, and coefficients it carries are
+    #                compared, not believed.
+    multipliers: dict = None
+    witness: object = None
+    # PRODUCTS OF CONDITIONS beyond pairs, built on demand: when constant
+    # multipliers of the conditions and their pairwise products fail,
+    # products of 3 .. `products` factors of the ACTIVE conditions (those not
+    # already >= 0 on the box) are added and the multipliers looked for again.
+    products: int = 2
 
 
 @dataclass

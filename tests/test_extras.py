@@ -11698,7 +11698,10 @@ def test_the_log_carries_sizes_and_never_the_callers_mathematics():
     for leak in ("sigma_secret", "Kneser", "witness", "v0,v1", "detail"):
         assert leak not in blob, leak
     assert set(e) == {"ts", "command", "status", "engine", "source", "shape",
-                      "why", "certo"}
+                      "why", "reason", "certo"}
+    # `reason` is a word from certo's fixed list (0.39), never the caller's
+    from certo.why import CODES
+    assert e["reason"] is None or e["reason"] in CODES
     # `why` is a catalogue KEY or nothing -- never the sentence, which here is
     # the caller's own and matches no key
     from certo.i18n import _catalogue
@@ -14833,8 +14836,13 @@ def test_coverage_travels_only_when_asked_and_never_its_path():
     cov = json.loads((pathlib.Path(asked["folder"]) / "coverage.json")
                      .read_text(encoding="utf-8"))
     assert "path" not in cov
+    # 0.39: the MAP travels too -- reasons, catalogue keys, versions, sizes;
+    # still counts and certo's own words, never the caller's.
     assert set(cov) <= {"lines", "by_command", "by_status", "first", "last",
-                        "full"}
+                        "full", "by_reason", "by_why", "by_version", "map"}
+    for reasons in (cov.get("map") or {}).values():
+        for cell in reasons.values():
+            assert set(cell) == {"count", "shape"}
 
 
 def test_the_report_module_cannot_send_anything():
@@ -19851,6 +19859,327 @@ def test_0_38_counterexamples_against_the_original_domain():
     r = api.run("synth", s)
     where = r.meta["counterexamples_in_original"]
     assert where["outside"] >= 1 and "OUTSIDE" in r.detail
+
+
+def test_0_39_an_undecided_link_is_inconclusive_not_invalid():
+    """`entails` read z3's `unknown` as False: a composed proof whose link
+    could not be decided was INVALID. Now it is left open."""
+    import z3
+
+    from certo import certificate as C
+    from certo.engines import induct as ind
+    from certo.spec import InductSpec, Spec
+
+    k = z3.Int("k")
+    step = Spec()
+    step.assume("ge", k >= 0)
+    step.assume("P", k * k >= 0)
+    step.claim((k + 1) * (k + 1) >= 0)
+
+    def base(j):
+        s = Spec()
+        s.claim(z3.IntVal(j) * j >= 0)
+        return s
+
+    cert = ind.induct(InductSpec(k0=0, base_upto=1, base=base, step=step)).certificate
+    assert C.verify(cert).verification == "valid"
+    real = C.entailment
+    try:
+        C.entailment = lambda neg, obl, lim: (None, "canceled")
+        rep = C.verify(cert)
+    finally:
+        C.entailment = real
+    assert not rep.ok and rep.verification == "inconclusive", rep.to_dict()
+    assert "canceled" in rep.reason
+    assert C.entails(z3.BoolVal(False), [z3.BoolVal(True)], None) is True
+
+
+def test_0_39_a_nested_inconclusive_report_leaves_its_parent_open():
+    from certo import certificate as C
+
+    sub = C.VerifyReport(False, "x", True, checks=[("c", False, "")],
+                         timed_out=True)
+    token = C._OPEN.set([])
+    try:
+        got = C._sub_check("lemma", sub, "")
+        opened = list(C._OPEN.get())
+    finally:
+        C._OPEN.reset(token)
+    assert got == ("lemma", False, "") and opened == [("lemma", "timeout")]
+
+
+def test_0_39_the_build_records_what_it_built():
+    from certo import buildinfo
+
+    info = buildinfo.build_info()
+    assert info["source"] in ("build", "checkout", "unknown")
+    assert set(info) == {"source", "commit", "clean", "built"}
+    text = buildinfo.describe({"source": "build", "commit": "a" * 40,
+                               "clean": True, "built": "2026-11-02T10:00:00Z"})
+    assert text.startswith("aaaaaaa") and "2026-11-02" in text
+    assert "UNCOMMITTED" in buildinfo.describe({"source": "build", "commit": "b" * 40,
+                                                "clean": False, "built": None})
+    root = pathlib.Path(__file__).resolve().parent.parent
+    setup = (root / "setup.py").read_text(encoding="utf-8")
+    assert "_build.json" in setup and "make_release_tree" in setup
+
+
+def test_0_39_every_inconclusive_result_says_why():
+    from fractions import Fraction
+
+    import z3
+
+    from certo import api
+    from certo.spec import NonnegSpec
+    from certo.status import Result, Status, Verdict
+    from certo.why import CODES, classify
+
+    x = z3.Real("x")
+    r = api.run("nonneg", NonnegSpec(poly=(x - Fraction(1, 2)) ** 2,
+                                     box={"x": (0, 1)}, subdivide=0))
+    assert r.why == "negative_coefficient" and r.to_dict()["why"] == r.why
+    assert set(r.meta["phases_ms"]) >= {"construction", "search"}
+    assert classify(Result("x", Status.TIMEOUT, Verdict.INCONCLUSIVE, "e", 0)) == "clock"
+    assert classify(Result("x", Status.UNSAT, Verdict.PROVED, "e", 0)) is None
+    for st in (Status.RESOURCE_EXHAUSTED, Status.OUT_OF_THEORY,
+               Status.UNKNOWN_SOLVER, Status.EXPLORED):
+        assert classify(Result("x", st, Verdict.INCONCLUSIVE, "e", 0)) in CODES
+    from certo.outcome import reading
+
+    assert reading(r)["why"] == "negative_coefficient"
+
+
+def test_0_39_the_coverage_map_is_command_reason_and_size():
+    import tempfile
+
+    from certo import coverage, report
+
+    p = pathlib.Path(tempfile.mkdtemp(prefix="certo_cov39_")) / "c.jsonl"
+    lines = [
+        {"command": "cases", "status": "unknown_solver", "why": "engine.cases.badproof",
+         "shape": {"vars": 10}, "certo": "0.37.0"},
+        {"command": "cases", "status": "unknown_solver", "why": "engine.cases.badproof",
+         "shape": {"vars": 900}, "certo": "0.37.0"},
+        {"command": "prove", "status": "timeout", "certo": "0.39.0",
+         "reason": "clock"},
+    ]
+    p.write_text("\n".join(json.dumps(e) for e in lines) + "\n", encoding="utf-8")
+    s = coverage.summary(p)
+    assert s["map"]["cases"]["unchecked"]["count"] == 2
+    assert s["map"]["cases"]["unchecked"]["shape"]["vars"] == (10, 900)
+    assert s["by_reason"] == {"unchecked": 2, "clock": 1}
+    text = report.coverage_map_lines(s)
+    assert text[0].split()[:3] == ["2", "cases", "unchecked"]
+
+
+def test_0_39_nonneg_supplied_multipliers_are_checked_not_searched():
+    from fractions import Fraction
+
+    import z3
+
+    from certo import api, verify
+    from certo.spec import NonnegSpec
+
+    x = z3.Real("x")
+    g = Fraction(1, 4) - x * x
+    ok = api.run("nonneg", NonnegSpec(poly=g, box={"x": (0, 1)}, region=[("g", g)],
+                                      multipliers={"g": 1}))
+    assert ok.verdict is Verdict.PROVED and verify(ok.certificate).ok
+    assert ok.meta["supplied"] == "multipliers"
+    short = api.run("nonneg", NonnegSpec(poly=g, box={"x": (0, 1)}, region=[("g", g)],
+                                         multipliers={"g": Fraction(1, 2)}, subdivide=3))
+    assert short.verdict is Verdict.INCONCLUSIVE and short.why == "negative_coefficient"
+    for bad in ({"h": 1}, {"g": -1}):
+        r = api.run("nonneg", NonnegSpec(poly=g, box={"x": (0, 1)},
+                                         region=[("g", g)], multipliers=bad))
+        assert r.status is Status.OUT_OF_THEORY, r.detail
+
+
+def test_0_39_products_of_three_conditions_on_demand():
+    from fractions import Fraction
+
+    import z3
+
+    from certo import api, verify
+    from certo.spec import NonnegSpec
+
+    x = z3.Real("x")
+    a, b, c = x - Fraction(1, 4), Fraction(3, 4) - x, x - Fraction(1, 2)
+    kw = dict(poly=a * b * c, box={"x": (0, 1)},
+              region=[("a", a), ("b", b), ("c", c)], subdivide=0)
+    assert api.run("nonneg", NonnegSpec(**kw)).verdict is Verdict.INCONCLUSIVE
+    r = api.run("nonneg", NonnegSpec(products=3, **kw))
+    assert r.verdict is Verdict.PROVED and r.meta["products"] == 3
+    assert verify(r.certificate).ok
+    # a product named in any order is the same term; seven factors are refused
+    from certo import bernstein
+    from certo.polynomials import Poly
+
+    terms = dict(bernstein.region_terms([("a", Poly.from_z3(a, ("x",))),
+                                         ("b", Poly.from_z3(b, ("x",)))]))
+    assert bernstein.term_named(terms, "b*a*a") == bernstein.term_named(terms, "a*a*b")
+    assert bernstein.term_named(terms, "*".join("a" * 7)) is None
+
+
+def test_0_39_an_external_bernstein_forest_imported_and_rechecked():
+    from fractions import Fraction
+
+    import z3
+
+    from certo import api, nonneg_leaves, verify
+    from certo.spec import NonnegSpec
+
+    x = z3.Real("x")
+    poly = x ** 3 - x + Fraction(1, 2)
+    made = api.run("nonneg", NonnegSpec(poly=poly, box={"x": (0, 1)}, subdivide=8))
+    forest = nonneg_leaves(made.certificate)
+    got = api.run("nonneg", NonnegSpec(poly=poly, box={"x": (0, 1)},
+                                       witness=json.dumps(forest)))
+    assert got.verdict is Verdict.PROVED and got.meta["supplied"] == "witness"
+    assert verify(got.certificate).ok
+    other = api.run("nonneg", NonnegSpec(poly=poly + 1, box={"x": (0, 1)},
+                                         witness=forest))
+    assert other.status is Status.OUT_OF_THEORY and "polynomial" in other.detail
+    gap = dict(forest, leaves=forest["leaves"][:-1])
+    assert api.run("nonneg", NonnegSpec(poly=poly, box={"x": (0, 1)},
+                                        witness=gap)).status is Status.OUT_OF_THEORY
+    forest["leaves"][0]["coefficients"] = {"0": "99"}
+    told = api.run("nonneg", NonnegSpec(poly=poly, box={"x": (0, 1)}, witness=forest))
+    assert told.verdict is Verdict.PROVED
+    assert told.meta["coefficients_disagreeing"] == 1
+
+
+def test_0_39_a_forest_becomes_a_tree_or_is_refused():
+    from fractions import Fraction as F
+
+    from certo import bernstein
+
+    box = {"x": (F(0), F(1)), "y": (F(0), F(1))}
+    q = [({"x": (F(0), F(1, 2)), "y": (F(0), F(1))}, "L"),
+         ({"x": (F(1, 2), F(1)), "y": (F(0), F(1, 3))}, "R1"),
+         ({"x": (F(1, 2), F(1)), "y": (F(1, 3), F(1))}, "R2")]
+    tree = bernstein.forest_tree(box, q)
+    assert tree[0] == "x" and tree[1] == "L" and tree[2][:3] == ["y", "R1", "R2"]
+    assert tree[2][3] == "1/3"
+    overlap = q + [({"x": (F(0), F(1, 2)), "y": (F(0), F(1, 2))}, "X")]
+    try:
+        bernstein.forest_tree(box, overlap)
+        raise AssertionError("an overlap was accepted")
+    except bernstein.NotAWitness:
+        pass
+
+
+def test_0_39_a_domain_verifier_rejects_candidates_the_model_accepts():
+    import z3
+
+    from certo import api, verify
+    from certo.spec import SynthSpec
+
+    g, x = z3.Ints("g x")
+    seen = []
+
+    def bench(c):
+        seen.append(c["g"])
+        return {"valid": False, "reason": "bench"} if c["g"] < 3 else True
+
+    bench.version = "b1"
+    base = dict(impl_vars=[g], input_vars=[x], behavior=z3.And(x >= 0, x <= 5),
+                correctness=g * x >= x)
+    r = api.run("synth", SynthSpec(impl_constraints=z3.And(g >= 0, g <= 10),
+                                   domain_verifier=bench, **base))
+    assert str(r.meta["implementation"]["g"]) == "3" and seen[-1] == 3
+    log = r.meta["domain_verifier"]["log"]
+    assert all(len(e["input_sha256"]) == 64 and e["version"] == "b1" for e in log)
+    rep = verify(r.certificate)
+    assert rep.ok and any("domain verifier" in str(w) for w in rep.warnings)
+    none = api.run("synth", SynthSpec(impl_constraints=z3.And(g >= 0, g <= 2),
+                                      domain_verifier=bench, **base))
+    assert none.verdict is Verdict.UNSATISFIABLE
+    rep = verify(none.certificate)
+    assert rep.ok and rep.degree == "relative"
+    d = none.certificate.to_dict()
+    d["payload"].pop("domain_rejected")
+    assert not verify(d).ok
+
+
+def test_0_39_cegis_finds_the_strengthening_that_makes_p_inductive():
+    import z3
+
+    from certo import StrengthenSpec, api, verify, z3util
+
+    k = z3.Int("k")
+    a = z3.Function("a", z3.IntSort(), z3.IntSort())
+    b = z3.Function("b", z3.IntSort(), z3.IntSort())
+    common = dict(k=k, k0=0, prop=lambda k: b(k) >= 0,
+                  facts=lambda k: [a(k + 1) == a(k) + 1, b(k + 1) == b(k) + a(k)],
+                  initial=[a(0) == 0, b(0) == 0], bounds=(-3, 3))
+    r = api.run("induct", StrengthenSpec(
+        template=lambda c, k: c[0] * a(k) + c[1] >= 0, coefficients=2, **common))
+    assert r.verdict is Verdict.PROVED and r.meta["strengthening"] == "a(k) >= 0"
+    rep = verify(r.certificate)
+    assert rep.ok, rep.to_dict()
+    d = r.certificate.to_dict()
+    d["payload"]["strengthened"]["prop_smt2"] = z3util.smt2(b(k) >= 1)
+    assert not verify(d).ok
+    d = r.certificate.to_dict()
+    d["payload"]["facts_smt2"] = z3util.smt2(z3.BoolVal(False))
+    assert not verify(d).ok
+    small = api.run("induct", StrengthenSpec(
+        template=lambda c, k: c[0] * b(k) >= 0, coefficients=1, **common))
+    assert small.verdict is Verdict.INCONCLUSIVE and small.why == "template_too_small"
+
+
+def test_0_39_a_family_of_bases_covers_the_parameter_box():
+    from fractions import Fraction
+
+    from certo import ParametricSpec, api, verify
+    from certo.polynomials import Poly
+
+    R = ("t",)
+    t = Poly.var(R, "t")
+    K = lambda c: Poly.const(R, c)  # noqa: E731
+    half = K(Fraction(1, 2))
+    cons = [("e1", {"x": K(1), "y": K(1)}, "==", K(1)),
+            ("r2", {"x": K(1)}, ">=", t - half)]
+
+    def run(pieces, **kw):
+        return api.run("parametric", ParametricSpec(
+            parameters={"t": 0}, objective={"x": K(1)}, constraints=cons,
+            box={"t": (0, 1)}, pieces=pieces, **kw))
+
+    lo = {"basis": ["y", "r2"], "region": [("f", half - t)]}
+    hi = {"basis": ["x", "y"], "region": [("f", t - half)]}
+    r = run([lo, hi], claim=t - half)
+    assert r.verdict is Verdict.PROVED and r.meta["frontiers"] == 1
+    assert verify(r.certificate).ok and verify(r.certificate).degree == "complete"
+    by_box = run([{"basis": ["y", "r2"], "box": {"t": (0, Fraction(1, 2))}},
+                  {"basis": ["x", "y"], "box": {"t": (Fraction(1, 2), 1)}}])
+    assert by_box.verdict is Verdict.PROVED
+    assert run([lo]).status is Status.OUT_OF_THEORY          # half uncovered
+    wrong = run([{"basis": ["y", "r2"]}])                    # one basis, everywhere
+    assert wrong.verdict is Verdict.INCONCLUSIVE
+    assert wrong.why in ("negative_point", "negative_coefficient")
+    d = r.certificate.to_dict()
+    d["payload"]["cover"] = {"piece": 0}
+    assert not verify(d).ok
+    d = r.certificate.to_dict()
+    d["payload"]["pieces"][1]["numerators"]["x"] = {"0": "1"}
+    assert not verify(d).ok
+
+
+def test_0_39_bareiss_solves_a_basis_exactly():
+    from certo.pfamily import bareiss_det, basis_solution
+    from certo.polynomials import Poly, as_poly
+
+    R = ("t",)
+    t = Poly.var(R, "t")
+    one = Poly.const(R, 1)
+    assert bareiss_det([[t, one], [one, t]]) == t * t - one
+    rows = [("e1", {"x": one, "y": one}, "==", one),
+            ("e2", {"x": one, "y": t.scaled(-1)}, "==", Poly(R))]
+    D, N = basis_solution(R, rows, ["x", "y"], lambda v: as_poly(R, v))
+    # x = t / (1 + t), y = 1 / (1 + t), over one denominator
+    assert N["x"] * (one + t) == t * D and N["y"] * (one + t) == D
 
 
 if __name__ == "__main__":

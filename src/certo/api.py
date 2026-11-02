@@ -230,6 +230,7 @@ def _check(res, limits, every=False) -> None:
     # The engine's time stays in `elapsed_ms`; the check's is its own, so a
     # caller timing `api.run(self_check="all")` can tell them apart.
     res.meta["self_check_ms"] = round((_time.perf_counter() - t0) * 1000, 2)
+    res.meta.setdefault("phases_ms", {})["self_check"] = res.meta["self_check_ms"]
     res.meta["self_check"] = "ok" if report.ok else "FAILED"
     if not report.ok:
         raise SelfCheckFailed(res, report)

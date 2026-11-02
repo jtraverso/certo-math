@@ -161,7 +161,7 @@ ALSO = {"PackingSpec": "opt", "DomainSpec": "sweep",
 #: Spec types a command takes BESIDES its own. `farkas` reads a linear
 #: program as hypotheses with the claim False: is it infeasible, and why?
 ALSO_TAKES = {"farkas": ("LPSpec", "PackingSpec"), "solve": ("DivisibilitySpec",),
-              "compose": ("ConstructionSpec",)}
+              "compose": ("ConstructionSpec",), "induct": ("StrengthenSpec",)}
 
 
 def command_for(spec) -> str | None:
@@ -289,7 +289,7 @@ KIND_OF = {
     # artefact when its budget runs out instead of only a status report.
     "mixed": ("mixed_design", "branch_bound", "branch_frontier"), "order": "asymptotic", "bounds": "ball",
     "ideal": "ideal", "eliminate": "resultant",
-    "parametric": "parametric_bound", "peak": "integer_peak",
+    "parametric": ("parametric_bound", "parametric_family"), "peak": "integer_peak",
         # `--parametric` asks the same question about a family.
     "reduce": ("symmetry_reduction", "parametric_symmetry"),
     # `question="inertia"` or `"psd"` is a symmetric rational matrix, and a

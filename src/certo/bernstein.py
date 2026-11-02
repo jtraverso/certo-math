@@ -354,13 +354,18 @@ def _out_of_time_if_expired():
         raise OutOfTime()
 
 
-def product_name(n1, n2):
-    """The name of the product of two conditions, the SAME whichever order
-    they were declared in: the product commutes, and its name must too. 0.34
+def product_name(*names):
+    """The name of a product of conditions, the SAME whichever order they
+    were declared in: the product commutes, and its name must too. 0.34
     named `g2*g10` in the order of the spec and the verifier, which reads the
     conditions sorted, looked for `g10*g2` -- a valid certificate refused by
-    its own checker."""
-    return "*".join(sorted((str(n1), str(n2))))
+    its own checker. Two factors or more (0.39: `g*h*k`)."""
+    return "*".join(sorted(str(n) for n in names))
+
+
+#: The most factors a product term may have. A certificate naming more is
+#: refused: the product is computed on demand, and its size is the reader's.
+MAX_FACTORS = 6
 
 
 def condition_names(region):
@@ -390,14 +395,41 @@ def region_terms(region):
 
 
 def term_named(terms, name):
-    """`terms[name]`, reading a product named in either order -- a certificate
-    written by 0.34 with the conditions out of order still names its terms."""
+    """`terms[name]`, reading a product named in any order -- a certificate
+    written by 0.34 with the conditions out of order still names its terms.
+    A product of three or more conditions (0.39) is built here, from the
+    conditions themselves, never read from anywhere."""
     if name in terms:
         return terms[name]
-    parts = name.split("*")
+    parts = str(name).split("*")
     if len(parts) == 2:
-        return terms.get(product_name(*parts))
+        got = terms.get(product_name(*parts))
+        if got is not None:
+            return got
+    if 2 <= len(parts) <= MAX_FACTORS and all(p in terms and "*" not in p
+                                               for p in parts):
+        out = terms[parts[0]]
+        for p in parts[1:]:
+            out = out * terms[p]
+        return out
     return None
+
+
+def higher_products(conditions, order, active):
+    """Products of `order` factors (repetition allowed) of the ACTIVE
+    conditions, as `(name, poly)` -- built on demand when pairs were not
+    enough. A condition non-negative on the whole box cuts nothing, and
+    leaving it out is what keeps the count small."""
+    from itertools import combinations_with_replacement
+
+    by = dict(conditions)
+    out = []
+    for combo in combinations_with_replacement(sorted(active), order):
+        g = by[combo[0]]
+        for n in combo[1:]:
+            g = g * by[n]
+        out.append((product_name(*combo), g))
+    return out
 
 
 def _region_degrees(poly, terms, degrees):
@@ -414,6 +446,12 @@ def nonneg_region(poly, box, terms, depth=0, degrees=None):
     ok, tree = nonneg(poly, box, depth, degrees)
     if ok or not terms:
         return ok, tree
+    return region_multipliers(poly, box, terms, degrees)
+
+
+def region_multipliers(poly, box, terms, degrees=None):
+    """`(ok, leaf)`: constant multipliers of `terms` on the whole box, found
+    by a linear program and then checked."""
     from fractions import Fraction
 
     from .simplex import SimplexLimit, minimise
@@ -442,7 +480,7 @@ def _region_leaf_holds(poly, box, leaf, terms):
 
     try:
         d = tuple(int(x) for x in leaf["deg"])
-        if len(d) != len(poly.vars):
+        if len(d) != len(poly.vars) or any(x < 0 for x in d):
             return False
         rest = poly
         for name, v in (leaf.get("region") or {}).items():
@@ -551,3 +589,133 @@ def product_map(a_coeffs, da, k):
             row = out.setdefault(gamma, {})
             row[alpha] = row.get(alpha, Fraction(0)) + w
     return out
+
+
+# --- a witness found elsewhere ---------------------------------------------
+
+
+class NotAWitness(ValueError):
+    """An imported witness that cannot be read, or is about something else."""
+
+
+def with_multipliers(poly, box, terms, multipliers, depth=0, degrees=None):
+    """SUPPLIED multipliers, checked and not searched: `(ok, tree, why)`.
+
+    Every multiplier must name a known term (a condition, or a product of
+    conditions) and be >= 0; the remainder `poly - sum(lambda * term)` is
+    then certified by Bernstein, halving where needed, and every leaf of the
+    tree carries the same multipliers -- which `check` re-derives leaf by
+    leaf. `why` names what failed: a term, a sign, or the remainder.
+    """
+    from fractions import Fraction
+
+    mult = {}
+    rest = poly
+    for name, v in sorted((multipliers or {}).items()):
+        try:
+            lam = Fraction(v)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return False, None, ("value", str(name))
+        term = term_named(terms, str(name))
+        if term is None:
+            return False, None, ("term", str(name))
+        if lam < 0:
+            return False, None, ("sign", str(name))
+        if lam:
+            mult[str(name)] = lam
+            rest = rest - term.scaled(lam)
+    ok, tree = nonneg(rest, box, depth, degrees)
+    if not ok:
+        return False, None, ("remainder", str(depth))
+    if not mult:
+        return True, tree, None
+    own = degrees_of(rest) if rest.terms else tuple(0 for _ in poly.vars)
+    region = {n: str(v) for n, v in mult.items()}
+
+    def regionize(t):
+        if isinstance(t, list):
+            return [t[0], regionize(t[1]), regionize(t[2])] + list(t[3:])
+        deg = list(t["deg"]) if isinstance(t, dict) and "deg" in t else list(own)
+        return {"deg": deg, "region": dict(region)}
+
+    return True, regionize(tree), None
+
+
+def _leaf_box(raw, ring):
+    from fractions import Fraction
+
+    if set(raw) != set(ring):
+        raise NotAWitness("a leaf's box names {} -- the ring is {}".format(
+            sorted(raw), list(ring)))
+    out = {}
+    for n in ring:
+        lo, hi = raw[n]
+        out[n] = (Fraction(lo), Fraction(hi))
+        if not out[n][0] < out[n][1]:
+            raise NotAWitness("a leaf's interval for {} is empty: [{}, {}]".format(
+                n, lo, hi))
+    return out
+
+
+def forest_tree(box, leaves, max_depth=64):
+    """A FOREST -- leaf boxes and what each carries -- as certo's tree.
+
+    `leaves` is `[(box, leaf)]`. The leaves must tile `box`: each split is a
+    cut that no leaf crosses, found by a sweep, so a tiling made by
+    subdividing (every Bernstein forest is one) becomes a tree whose leaves
+    are exactly the given boxes. Two leaves overlapping, a gap, a leaf
+    outside the box, or a tiling no sequence of cuts produces, is refused by
+    name: a tree is what `verify` checks, and covering is then its shape.
+    """
+    def inside(b, outer):
+        return all(outer[n][0] <= b[n][0] and b[n][1] <= outer[n][1] for n in outer)
+
+    for b, _leaf in leaves:
+        if not inside(b, box):
+            raise NotAWitness("a leaf lies outside the box: {}".format(
+                {n: [str(lo), str(hi)] for n, (lo, hi) in b.items()}))
+
+    def rec(b, items, depth):
+        if not items:
+            raise NotAWitness("a gap: no leaf covers {}".format(
+                {n: [str(lo), str(hi)] for n, (lo, hi) in b.items()}))
+        if len(items) == 1:
+            lb, leaf = items[0]
+            if lb != b:
+                raise NotAWitness("a gap beside the leaf {}".format(
+                    {n: [str(lo), str(hi)] for n, (lo, hi) in lb.items()}))
+            return leaf
+        if depth <= 0:
+            raise NotAWitness("the forest is deeper than {} cuts".format(max_depth))
+        for name in b:
+            lo, hi = b[name]
+            mid = (lo + hi) / 2
+            order = sorted(items, key=lambda it: it[0][name][0])
+            cuts, reach = [], None
+            for lb, _leaf in order:
+                c = lb[name][0]
+                if reach is not None and c > lo and reach <= c:
+                    cuts.append(c)
+                reach = lb[name][1] if reach is None else max(reach, lb[name][1])
+            if not cuts:
+                continue
+            c = mid if mid in cuts else cuts[0]
+            left = [it for it in items if it[0][name][1] <= c]
+            right = [it for it in items if it[0][name][0] >= c]
+            if len(left) + len(right) != len(items):
+                continue
+            lb_, rb_ = halves(b, name, c)
+            node = [name, rec(lb_, left, depth - 1), rec(rb_, right, depth - 1)]
+            return node if c == mid else node + [str(c)]
+        raise NotAWitness("leaves that overlap, or a tiling no sequence of cuts "
+                          "makes, inside {}".format(
+                              {n: [str(lo), str(hi)] for n, (lo, hi) in b.items()}))
+
+    return rec(dict(box), list(leaves), max_depth)
+
+
+def coefficient_list(poly, box, degrees):
+    """The Bernstein coefficients as `{"i,j,...": value}` -- the shape an
+    imported witness's own coefficients are compared in."""
+    return {",".join(str(i) for i in idx): v
+            for idx, v in coefficients(poly, box, degrees).items()}

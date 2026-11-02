@@ -136,6 +136,33 @@ el certificado como `false` frente a `null`.
 | `semigroup` `normal` | -- | siempre `null`: un testigo refuta la normalidad, nada aquí la afirma |
 | `hilbert` `is_minimal_generating_set` | decidido: no es el sistema minimal, y por qué | no se pudo decidir |
 
+## Por qué no es una respuesta *(0.39)*
+
+Todo resultado no concluyente trae `why`, una palabra de una lista fija -- en
+`Result.why`, en el JSON (`why`, y `reading.why`), y en la línea `por qué:` de
+la CLI -- para que un programa sepa qué hacer sin interpretar una frase
+escrita para personas:
+
+| `why` | qué significa | qué probar |
+|---|---|---|
+| `clock` | se acabó el tiempo | más tiempo |
+| `resource` | un límite distinto del tiempo: conflictos, nodos, memoria | un presupuesto mayor, una instancia menor |
+| `negative_coefficient` | un coeficiente quedó negativo con la profundidad y el grado permitidos: no hay certificado de ESTA forma, nada refutado | subdividir, subir el grado, agregar un multiplicador o una región |
+| `negative_point` | este testigo falla en un punto racional (un residuo es negativo ahí) | otro testigo ahí: una pieza, una base, un dual |
+| `physical_counterexample` | un contraejemplo del problema real: en el dominio original, o del verificador de dominio | el modelo o el candidato |
+| `template_too_small` | nada en la plantilla o el dominio acotado que se buscó | una plantilla mayor, cotas más amplias |
+| `rounding` | una respuesta en punto flotante que no se pudo confirmar exactamente | una ruta exacta (`opt --exact-required`) |
+| `solver_unknown` | el solver se rindió (aritmética no lineal, cuantificadores) | otra formulación |
+| `out_of_theory` | fuera de lo que este comando maneja | el comando que nombra el mensaje |
+| `unchecked` | se halló una demostración y su comprobación no terminó | `certo verify` con más tiempo |
+
+Un motor que lo sabe lo fija; si no, se lee de la clave del mensaje en el
+catálogo, y por último del estado -- así nunca falta en un resultado no
+concluyente. `meta["phases_ms"]` dice en qué se fue el tiempo -- construcción,
+búsqueda, extracción, comprobación, autochequeo -- donde el motor las mide
+(`nonneg`, `parametric`, `synth`, `cases`, el fortalecimiento); una fase nunca
+se estima.
+
 ## Alcance: sobre qué es concluyente una respuesta
 
 Un veredicto concluyente lo es **sobre lo que se preguntó**, que no siempre es

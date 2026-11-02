@@ -113,6 +113,28 @@ STRUCTURAL_BENIGN = {
     # A graph with an edge less is another graph, and the roles may well be
     # transported on it too: `verify --obligation SPEC` ties it to yours.
     'role_transport': {'edges:short'},
+    # A family's rows repeated or reordered are the same program; a row
+    # dropped, or a number rewritten everywhere, is ANOTHER program, still
+    # feasible on the pieces carried -- the certificate is about what it
+    # carries, and `verify --obligation SPEC` (family `pfamily`) is what ties
+    # it to the program you meant, row by row.
+    'parametric_family': {'constraints:dup', 'constraints:reversed',
+                          'constraints:short', 'constraints.*:dup',
+                          '=2:coherent',
+                          # a basis is a SET: listed in another order it is
+                          # the same basis, whose claims are all re-checked
+                          'pieces.*.basis:reversed',
+                          # Bernstein coefficients at a higher degree enclose
+                          # no less: as `polynomial_nonneg`'s `tree.deg:beyond`
+                          'pieces.*.trees.claim.deg:beyond',
+                          'pieces.*.trees.var:x.deg:beyond',
+                          'pieces.*.trees.var:y.deg:beyond',
+                          'pieces.*.trees.row:r2.deg:beyond',
+                          # what a piece may omit is SUPPORT, recomputed when
+                          # absent: a tree (the own degree is tried), the
+                          # basis (then only the formulas are claimed); a
+                          # missing formula or box is refused by name
+                          'pieces.*:dropkey'},
     'conditioned_cover': {'=1:coherent', 'leaves:reversed',
                           'obligations.F.poly:dropkey', 'obligations.U.poly:empty'},
     # the evaluations are the search's trace; the ends are what is checked
@@ -1561,6 +1583,7 @@ PREREQUISITES = {
 #: a kind added later without one fails `test_every_kind_is_in_the_battery`.
 EXAMPLE_FIXTURES = [
     ("assignment_hall.py", "assign", ()),
+    ("parametric_family.py", "parametric", ()),
     ("bisect_constant.py", "bisect", ()),
     ("synth_constant.py", "synth", ()),
     ("synth_none.py", "synth", ()),

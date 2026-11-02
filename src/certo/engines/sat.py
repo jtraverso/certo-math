@@ -103,10 +103,28 @@ def _run_pysat(cnf, lim, name):
 
 def cases(spec, limits: Limits | None = None, backend: str = DEFAULT_BACKEND,
           check_proof: bool = True, cross_check: bool = True) -> Result:
+    """The CNF decided, with `meta["phases_ms"]`: construction (the DIMACS
+    text), search (the solver) and check (the proof re-checked)."""
+    marks = {"start": time.perf_counter()}
+    res = _cases(spec, limits, backend, check_proof, cross_check, marks)
+    end = time.perf_counter()
+    ph, last = {}, marks["start"]
+    for name in ("construction", "search"):
+        if name in marks:
+            ph[name] = round((marks[name] - last) * 1000, 2)
+            last = marks[name]
+    if "search" in marks:
+        ph["check"] = round((end - last) * 1000, 2)
+    res.meta["phases_ms"] = ph
+    return res
+
+
+def _cases(spec, limits, backend, check_proof, cross_check, marks) -> Result:
     lim = limits or Limits()
     cnf = spec.cnf if hasattr(spec, "cnf") else spec
     dimacs = cnf.to_dimacs()
     t0 = time.perf_counter()
+    marks["construction"] = t0
 
     if backend.startswith("binary:"):
         status, model, proof, engine, info = _run_binary(cnf, lim, backend[7:])
@@ -117,6 +135,7 @@ def cases(spec, limits: Limits | None = None, backend: str = DEFAULT_BACKEND,
     else:
         raise ValueError(t("engine.cases.unknown_backend", backend=backend))
 
+    marks["search"] = time.perf_counter()
     base_meta = {"vars": cnf.nvars, "clauses": len(cnf.clauses), **info}
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
 

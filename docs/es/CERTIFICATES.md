@@ -25,7 +25,7 @@ certificado en concreto: *"verificado sin solver"*, *"comprobado contando, sin
 solver"*, *"reejecutando el spec, no confiando en sus respuestas"*. La tabla de
 abajo es el mapa; la cabecera es el territorio.
 
-## Los sesenta y seis tipos
+## Los sesenta y siete tipos
 
 | Tipo | Qué atestigua | ¿Sin solver? |
 |---|---|---|
@@ -70,6 +70,7 @@ abajo es el mapa; la cabecera es el territorio.
 | `assignment` | la asignación más grande de ítems a receptores, y un conjunto de Hall que muestra que no hay una mayor; con `resources`, una asignación FÍSICA al lado (ningún recurso dos veces en un receptor) y las colisiones de la relajación nombradas | **sí**, asignaciones, cargas y la cota de Hall contadas |
 | `pinned_value` | `cp_r(G)` entre dos cotas certificadas -- iguales, o el rango | **sí**, ambas mitades re-verificadas y atadas a una lista de aristas |
 | `parametric_atlas` | una cota paramétrica en todo un dominio, a partir de N certificados en N cajas | **sí**, cada pieza re-verificada y el cubrimiento recalculado |
+| `parametric_family` | un programa paramétrico FACTIBLE en toda una caja: una familia de bases, un testigo `N(t)/D(t)` por pieza, las piezas cubriendo la caja por cortes de caja y fronteras | **sí**, `A N = D d` multiplicado, cada signo por Bernstein, la cobertura recorrida |
 | `symmetric_inertia` | la inercia de una matriz simétrica racional, PSD, y un vector que refuta PSD | **sí**, dos productos racionales: `S A Sᵀ = D`, `S S⁻¹ = I` |
 | `affine_semigroup` | puntiagudo, pertenencia al cono, al grupo y al semigrupo, refutación de normalidad, base de Hilbert propuesta | **sí**, las negativas rehaciendo la búsqueda acotada |
 | `capacity_profile` | una función afín a trozos de una capacidad: cota, alcance y cobertura en un intervalo | **sí**, una comprobación LP exacta por tramo |

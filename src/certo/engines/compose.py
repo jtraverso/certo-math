@@ -33,7 +33,7 @@ import z3
 
 from .. import z3util
 from ..certificate import (Certificate, obligations_of, proof_certificate,
-                           verify as verify_cert, entails)
+                           verify as verify_cert, entailment, entails)
 from ..i18n import t
 from ..limits import Limits
 from ..spec import Spec
@@ -167,7 +167,14 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
             # Refuse to emit what we could not link ourselves. A certificate
             # whose link fails verification should never have been written.
             obl = obligations_of(sub)
-            if not obl or not entails(z3.Not(phi), obl, lim):
+            got, why = (entailment(z3.Not(phi), obl, lim) if obl
+                        else (False, ""))
+            if got is None:
+                # Not decided is not refuted: the link may hold.
+                return _fail(t("engine.compose.link_unknown", name=lem.name,
+                               reason=why), t0,
+                             meta={"failed_lemma": lem.name, "reason": why})
+            if not got:
                 return _fail(t("engine.compose.link_failed", name=lem.name), t0,
                              meta={"failed_lemma": lem.name})
             derived, bridge = True, ""
@@ -182,6 +189,11 @@ def compose(spec, limits: Limits | None = None, spec_path: str = "",
 
             sub = store.read_json(path)
             rep = verify_cert(Certificate.from_dict(sub), lim)
+            if not rep.ok and rep.verification == "inconclusive":
+                return _fail(t("engine.compose.cert_unchecked", name=lem.name,
+                               reason=rep.reason), t0,
+                             meta={"failed_lemma": lem.name,
+                                   "reason": rep.reason})
             if not rep.ok:
                 return _fail(t("engine.compose.cert_invalid", name=lem.name,
                                detail=rep.detail), t0,

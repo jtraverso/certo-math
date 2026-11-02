@@ -1329,13 +1329,16 @@ async def number(n: int, question: str = "prime",
 async def induct(spec_path: str | None = None, spec_source: str | None = None,
                  timeout_ms: int = 60_000) -> dict:
     from .engines import induct as ind
-    from .spec import InductSpec, load_spec
+    from .spec import InductSpec, StrengthenSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
-    sp = await _off(load_spec, f, InductSpec)
+    sp = await _off(load_spec, f)
+    if not isinstance(sp, (InductSpec, StrengthenSpec)):
+        raise TypeError("induct wants an InductSpec or a StrengthenSpec, got "
+                        + type(sp).__name__)
     res = await _off(ind.induct, sp, _limits(timeout_ms), str(f))
     out = _emit(res, spec_file=f)
-    for k in ("base_cases", "step_from", "bridges"):
+    for k in ("base_cases", "step_from", "bridges", "strengthening"):
         out[k] = res.meta.get(k)
     return out
 
@@ -2442,15 +2445,26 @@ async def pin(spec_path: str | None = None, spec_source: str | None = None,
     "(and constant multipliers of the region's conditions); REFUTED carries a "
     "point of the box inside the region with the exact negative value. A "
     "region also writes an algebraic endpoint exactly: [0, sqrt(3/40)] is the "
-    "box [0, 1/2] with 3/40 - x^2 >= 0. Solver-free."))
+    "box [0, 1/2] with 3/40 - x^2 >= 0. Solver-free. A witness found "
+    "ELSEWHERE is checked, not searched: `witness_path` (a Bernstein tree or "
+    "forest as JSON, bound to this spec's polynomial, box and region) or "
+    "`multipliers` ({\"g\": \"1/2\", \"g*h*k\": 1}, products of conditions "
+    "named with *). The spec's `products=3` builds triples of the active "
+    "conditions when pairs are not enough."))
 @_guard
 async def nonneg(spec_path: str | None = None, spec_source: str | None = None,
-                 timeout_ms: int = 60_000) -> dict:
+                 timeout_ms: int = 60_000, witness_path: str | None = None,
+                 multipliers: dict | None = None) -> dict:
     from .engines import algebra
     from .spec import NonnegSpec, load_spec
 
     f = _spec_file(spec_path, spec_source)
     spec = load_spec(str(f), NonnegSpec)
+    if witness_path:
+        # An external Bernstein tree or forest, checked against THIS spec.
+        spec.witness = str(_resolve(witness_path))
+    if multipliers:
+        spec.multipliers = dict(multipliers)
     res = await _off(algebra.nonneg, spec, _limits(timeout_ms), str(f))
     return _emit(res, spec_file=f)
 

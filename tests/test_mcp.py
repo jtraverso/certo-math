@@ -791,6 +791,8 @@ RENAMED = {
     ("shrink", "no_keep_filters"): "keep_filters",
     ("sweep", "cert_all"): "cert_mode", ("sweep", "cert_none"): "cert_mode",
     ("status", "verify"): "verify_all",
+    # a path on the MCP side, like `spec_path`: the server confines it
+    ("nonneg", "witness"): "witness_path",
 }
 
 

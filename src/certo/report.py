@@ -403,12 +403,33 @@ def coverage_sentence(s) -> str:
 
 
 def _coverage_summary() -> dict:
-    """Sizes and counts only. The file's own path is left out: it names a user."""
+    """Sizes and counts only. The file's own path is left out: it names a user.
+
+    THE MAP is `command -> reason -> {count, shape: {size: [min, max]}}`: which
+    questions certo could not settle, what kind of gap each was, and how big
+    they were -- the thing the backlog is ranked from, from a user's machine.
+    Message keys (`by_why`) are certo's own catalogue, never the caller's text.
+    """
     from . import coverage
 
     s = coverage.summary()
     return {k: s.get(k) for k in ("lines", "by_command", "by_status",
+                                  "by_reason", "by_why", "by_version", "map",
                                   "first", "last", "full")}
+
+
+def coverage_map_lines(s) -> list:
+    """The map as text: one line per (command, reason), largest first."""
+    rows = []
+    for cmd, reasons in (s.get("map") or {}).items():
+        for reason, cell in reasons.items():
+            sizes = ", ".join("{} {}..{}".format(k, lo, hi) if lo != hi
+                              else "{} {}".format(k, lo)
+                              for k, (lo, hi) in sorted(cell["shape"].items()))
+            rows.append((cell["count"], cmd, reason, sizes))
+    rows.sort(key=lambda r: (-r[0], r[1], r[2]))
+    return ["{:>6}  {:<12} {:<24} {}".format(n, cmd, reason, sizes).rstrip()
+            for n, cmd, reason, sizes in rows]
 
 
 def _stamp() -> str:

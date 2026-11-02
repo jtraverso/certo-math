@@ -899,7 +899,7 @@
   "farkas": "farkas_linear.py",
   "farkas --nonlinear": "farkas_nonlinear.py",
   "ideal": "ideal_inconsistent.py",
-  "induct": "induct_sum.py",
+  "induct": "induct_strengthen.py",
   "lint": "lint_vacuous_regime.py",
   "matrix": "integer_matrix.py",
   "mixed": "mixed_design.py",
@@ -913,7 +913,7 @@
   "opt --gap": "walkthrough.py",
   "opt --round": "opt_clique_cuts.py",
   "order": "order_decay.py",
-  "parametric": "parametric_bound.py",
+  "parametric": "parametric_family.py",
   "peak": "peak_residues.py",
   "pin": "pin_fano.py",
   "profile": "capacity_profile.py",
@@ -934,7 +934,7 @@
   "sweep": "calibrate_density.py",
   "sweep --n-range": "sweep_range_nested.py",
   "sweep --witnesses": "setfamily_sweep.py",
-  "synth": "synth_constant.py",
+  "synth": "synth_domain_verifier.py",
   "synth --prove-candidate": "synth_template.py"
  }
 }

@@ -162,6 +162,32 @@ feasible` at the same time. Each is right about something different, and
 A cover, a design or a packing found and checked is now `OBJECT_EXHIBITED`
 -- an object you have, not shown optimal -- rather than `THEOREM_PROVED`.
 
+## Why it is not an answer *(0.39)*
+
+Every inconclusive result carries `why`, one word from a fixed list -- in
+`Result.why`, in the JSON (`why`, and `reading.why`), and in the CLI's
+`why:` line -- so a program can tell what to do next without parsing a
+sentence written for people:
+
+| `why` | what it means | what to try |
+|---|---|---|
+| `clock` | the time budget ran out | more time |
+| `resource` | a bound other than time: conflicts, nodes, memory | a larger budget, a smaller instance |
+| `negative_coefficient` | a coefficient stayed negative at the depth and degree allowed: no certificate of THIS shape, nothing refuted | subdivide, raise the degree, add a multiplier or a region |
+| `negative_point` | this witness fails at a rational point (a residual is negative there) | another witness there: a piece, a basis, a dual |
+| `physical_counterexample` | a counterexample of the real problem: in the original domain, or from the domain verifier | the model or the candidate |
+| `template_too_small` | nothing in the template or bounded domain searched | a larger template, wider bounds |
+| `rounding` | a floating answer that could not be confirmed exactly | an exact route (`opt --exact-required`) |
+| `solver_unknown` | the solver gave up (nonlinear arithmetic, quantifiers) | another formulation |
+| `out_of_theory` | outside what this command handles | the command the message names |
+| `unchecked` | a proof was found and its check did not finish | `certo verify` with more time |
+
+An engine that knows sets it; otherwise it is read off the message's catalogue
+key, and last off the status -- so it is never missing on an inconclusive
+result. `meta["phases_ms"]` says where the time went -- construction, search,
+extraction, check, self_check -- where the engine measures them (`nonneg`,
+`parametric`, `synth`, `cases`, the strengthening); a phase is never estimated.
+
 ## Scope: what a conclusive answer is about
 
 A conclusive verdict is conclusive **about what was asked**, which is not

@@ -615,6 +615,13 @@ CHECKS = [
 ]
 
 
+def _build() -> dict:
+    from . import __version__
+    from .buildinfo import build_info
+
+    return dict(build_info(), version=__version__)
+
+
 def report() -> dict:
     """Run every probe. Returns rows plus a count of what is missing."""
     rows, missing_required = [], 0
@@ -644,6 +651,8 @@ def report() -> dict:
         # certo is doing on their machine, and writing a file is one of those
         # things.
         "coverage": dict(coverage.summary(), enabled=coverage.enabled()),
+        # WHICH certo answered: the commit, a clean tree, the build date.
+        "build": _build(),
         "missing_required": missing_required,
         "numerics": caps["flint"] or caps["mpmath"],
         "sat_external": caps["cadical"] or caps["kissat"],

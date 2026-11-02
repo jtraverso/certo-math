@@ -83,6 +83,13 @@ class Result:
     meta: dict = field(default_factory=dict)
 
     @property
+    def why(self):
+        """`clock`, `negative_coefficient`, ... or None (`certo.why`)."""
+        from .why import classify
+
+        return classify(self)
+
+    @property
     def outcome(self) -> dict:
         """What this result IS, typed (`certo.outcome`): a theorem, a finite
         case, a feasible point, a synthesised parameter -- not `unsat`."""
@@ -99,6 +106,9 @@ class Result:
             "engine": self.engine,
             "elapsed_ms": round(self.elapsed_ms, 2),
             "detail": self.detail,
+            # WHY it is not an answer, from a fixed list (`certo.why`);
+            # None when it is one.
+            "why": self.why,
             "meta": self.meta,
             "certificate": self.certificate.to_dict() if self.certificate else None,
         }

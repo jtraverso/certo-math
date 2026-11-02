@@ -150,5 +150,6 @@ def reading(res) -> dict:
     return {"solver_status": getattr(res.status, "value", str(res.status)),
             "verification": {"ok": "valid", "FAILED": "invalid"}.get(sc, "not_run"),
             "conclusion": o["state"], "conclusive": o["conclusive"],
+            "why": getattr(res, "why", None),
             "evidence": ev["class"] if ev else None,
             "scope": scope_of(res.certificate)}

@@ -194,6 +194,27 @@ start at 0 because `step_from` says so. When the goal mentions more than one
 integer, name the index with `InductSpec(k=...)`; otherwise certo says it
 cannot tell which one it is, and writes nothing.
 
+**A sequence given by a recurrence** *(0.39)*. `InductSpec(facts=lambda k:
+[...], initial=[...])`: `facts(k)` holds at every k (`a(k+1) == a(k) + 1`),
+`initial` at fixed indices (`a(0) == 0`). They are the theorem's HYPOTHESES:
+the step is linked with `facts(k)` and `facts(k+1)` as premises, a base case
+at kb with `initial` and `facts(j)` for j = k0..kb, the certificate keeps
+both (`facts_smt2`, `initial_smt2`), and every verification checks they are
+consistent and says the statement is conditional on them.
+
+**Not inductive as stated: the strengthening, by CEGIS** *(0.39)*.
+`StrengthenSpec(k, k0, prop, template, coefficients, bounds, facts, initial)`
+under the same command. A true `P(k)` that does not carry over -- the step's
+hypothesis admits states no run reaches -- is strengthened with
+`Q_c(k) = template(c, k)`: CEGIS over the integer coefficients `c`, each
+failed candidate leaving a point (the index and the sequence's values there,
+grounded from the model) that the next must satisfy. Found: `P(k) and Q(k)`
+goes through `induct`, and the certificate records the strengthening
+(`strengthened`), with `verify` checking that what was proved implies `P(k)`.
+None in the template: INCONCLUSIVE, `why: template_too_small` -- the
+template, not P. `examples/induct_strengthen.py` finds `a(k) >= 0` for
+`b(k) >= 0` in three rounds.
+
 ---
 
 ## Is my setup sane?
@@ -484,6 +505,13 @@ its path printed. Locally, and still never sent.
 directory (`%LOCALAPPDATA%\certo\reports`, `~/.local/share/certo/reports`),
 not the working directory -- which is often somebody else's workspace.
 
+**The coverage map** *(0.39)*. `certo report --coverage` prints the map:
+one line per command and REASON (the `why` code below), with how many and
+the sizes seen (`vars 30..1635002`), largest first; `--json` gives the same,
+plus `by_reason`, `by_why` (certo's own message keys) and `by_version`. Only
+commands, reasons, counts and sizes -- no names, values, paths or specs --
+which is what makes it safe to paste into an issue.
+
 ### `certo doctor`
 
 **Question** — Can this install do what I need?
@@ -530,6 +558,12 @@ that `.mcp.json` becomes this machine's.
 The `cbc` row matters with PuLP 4, which no longer bundles CBC. Without
 `pulp[cbc]`, integer solves fall to HiGHS if it is installed and are refused
 otherwise, and `pulp` alone never said so.
+
+**Which certo** *(0.39)*. The build writes `certo/_build.json` -- the commit,
+whether the tree was clean, the build date -- so `certo --version` and
+`doctor` say `commit 32f0068, clean tree, built 2026-11-02` for an installed
+wheel, where they used to say "not a checkout". A checkout is read from git
+at run time; `certo.build_info()` returns the record.
 
 ---
 
@@ -1493,6 +1527,24 @@ the box and verifies every piece on its own leaf. With `claim=T` the statement
 of the whole is `opt ≤ T` on the box; where no leaf can reach it, the boxes
 that fail are named and nothing is certified.
 
+**Feasible on the whole box: a family of bases** *(0.39)*. `pieces=[...]`
+instead of a dual or a primal: each piece a dict with `"basis"` (variables,
+and rows whose slack is basic) or `"primal"` (formulas, rational functions
+allowed), and optionally `"box"` (default the whole box) and `"region"` (its
+frontier conditions). From a basis certo solves the tight rows exactly --
+Cramer's rule with Bareiss' fraction-free elimination, one common
+denominator -- and checks, piece by piece: `A(t) N(t) = D(t) d(t)` on the
+tight rows as a polynomial identity, `D` of one sign on the piece's box, and
+`N >= 0` and every slack `>= 0` on the piece's region (Bernstein, with the
+region's multipliers). The basis is itself a claim: a column outside it is
+zero, a row outside it is tight. The pieces must COVER the box: their boxes
+tile it, and pieces sharing a box are told apart by frontiers -- `g >= 0` in
+some and `-g >= 0` in the others -- so the cover is a tree of box cuts and
+frontier cuts that `verify` walks, and nothing about a frontier has to be
+solved. `claim=T` adds the objective at each piece's witness against `T`.
+Certificate `parametric_family`, solver-free; `verify --obligation SPEC`
+compares the program row by row. `examples/parametric_family.py`.
+
 ### `certo atlas`
 
 **Question** — Each box is certified. Does the bound hold on the whole domain
@@ -1614,6 +1666,32 @@ out of order; a certificate written then still reads), and a condition's name
 may not contain `*`. The run honours `--timeout` inside the Bernstein tensor
 and the multipliers' simplex -- 0.34 ran for minutes past it. A CONSTANT needs
 no box: its sign is read.
+
+**A witness found elsewhere, checked here** *(0.39)*. Several sessions found
+their multipliers with an external LP and rebuilt the certificate by hand.
+
+* `multipliers={"g": "1/2", "g*h": 3, "g*h*k": 1}` -- constants on the
+  conditions and their products (up to six factors, named with `*` in any
+  order). certo checks each is a known term and `>= 0`, and certifies the
+  remainder `poly - sum(lambda * term)` by Bernstein, halving up to
+  `subdivide` times. Nothing is searched; what fails is said -- an unknown
+  term, a negative multiplier, or a remainder with a negative coefficient
+  (`why: negative_coefficient`). CLI `--multipliers JSON`, MCP `multipliers`.
+* `witness=` -- an external Bernstein tree or FOREST, or a path to its JSON:
+  the shape `nonneg_leaves` writes (`{"leaves": [{"box", "degrees", "region",
+  "coefficients"?}]}`), certo's own `{"tree": ...}`, or a `polynomial_nonneg`
+  certificate. Bound to THIS obligation first: a polynomial, ring, box or
+  region it states must be the spec's, or it is refused naming what differs.
+  The leaves must tile the box -- a forest becomes certo's tree by cuts no
+  leaf crosses, and an overlap, a gap or a leaf outside is refused -- and
+  every leaf is recomputed. Coefficients the witness carries are compared and
+  the disagreements counted (`meta["coefficients_disagreeing"]`); certo's
+  arithmetic decides. CLI `--witness FILE`, MCP `witness_path`.
+* `products=3` -- when the conditions and their pairwise products are not
+  enough, products of three (up to `products`) factors of the ACTIVE
+  conditions -- those not already `>= 0` on the box -- are built and the
+  multipliers looked for again. `verify` builds a product term from the
+  conditions themselves. `examples/nonneg_multipliers.py`.
 
 ### `certo assign`
 
@@ -2310,6 +2388,20 @@ optimum, and `rounds` is every search together. Both are now typed:
 `improvements`, `path`, every search, and `better_value_refutation`, the
 search that found nothing better).
 
+**A domain verifier: the real problem, as a program** *(0.39)*.
+`SynthSpec(domain_verifier=fn, domain_verifier_version="...")`: `fn` is
+called on every candidate the MODEL accepts, with `{impl name: value}` (int,
+Fraction, bool), and answers valid (`True`, `None`, `{"valid": True}`) or
+invalid (`False`, or `{"valid": False, "counterexample": {...}, "reason":
+...}`). A rejected candidate is excluded and the search goes on; a
+counterexample given is learnt as well. Every call's input hash, result hash
+and the verifier's version join the trace (`meta["domain_verifier"]`). Found:
+the `cegis` certificate records the last call, and `verify` says it was not
+re-run. None: the `cegis_none` refutation carries the rejected candidates as
+exclusions, so it is RELATIVE to the verifier's answers -- and says so. A
+verifier that raises is inconclusive, never a refutation.
+`examples/synth_domain_verifier.py`.
+
 ### `certo compose`
 
 **Question** — How do I assemble my lemmas into one proof?
@@ -2500,6 +2592,12 @@ name that differs only in case from a file already in the folder --
 one file and the second certificate would replace the first. Writing over a
 certificate of ANOTHER obligation is said on stderr, and done: re-running an
 edited spec does exactly that.
+
+**Inconclusive links** *(0.39)*. A composed proof, an induction or a binding
+whose link z3 answered `unknown` to was INVALID: `entails` read `unknown` as
+False. Now `certo.certificate.entailment` returns `(True | False | None,
+reason)`, a link left open is `inconclusive` with z3's reason, and a nested
+certificate that could not be re-checked leaves its parent open, not failed.
 
 ### `certo step`
 

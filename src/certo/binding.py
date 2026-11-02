@@ -216,9 +216,12 @@ def check(payload, limits=None) -> dict:
     """
     import z3
 
-    from .certificate import entails
+    from .certificate import entailment
 
     needed = z3.And(*z3.parse_smt2_string(payload["needed_smt2"]))
     provided = z3.And(*z3.parse_smt2_string(payload["provides_smt2"]))
-    got = entails(provided, [needed], limits)
-    return {"covers": bool(got), "agrees": bool(got) == bool(payload["covers"])}
+    got, why = entailment(provided, [needed], limits)
+    if got is None:
+        # Undecided: neither agreement nor disagreement was shown.
+        return {"covers": None, "agrees": False, "undecided": why}
+    return {"covers": got, "agrees": got == bool(payload["covers"])}

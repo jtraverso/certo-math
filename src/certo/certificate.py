@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -393,6 +394,40 @@ class VerifyReport:
         }
 
 
+# CHECKS LEFT OPEN by a nested verification or an undecided entailment, for
+# the report `verify` is building. A sub-certificate that could not be
+# re-checked in time, or a link z3 answered `unknown` to, failed the parent
+# as INVALID; nothing was found wrong. Each `verify` call opens its own list,
+# so a nested one never leaks into its parent.
+_OPEN = ContextVar("certo_verify_open", default=None)
+
+
+def _open(name, reason) -> None:
+    acc = _OPEN.get()
+    if acc is not None:
+        acc.append((name, reason or "unknown"))
+
+
+def _sub_check(name, rep, detail):
+    """`(name, rep.ok, detail)` -- and the check left open, not failed, when
+    the nested report is inconclusive."""
+    # Only a VerifyReport has three answers; a DRAT report's own timeout is
+    # read by its verifier, which sets `timed_out` itself.
+    if not rep.ok and getattr(rep, "verification", None) == "inconclusive":
+        _open(name, rep.reason)
+    return (name, rep.ok, detail)
+
+
+def _entailed(name, negated, obligations, limits) -> bool:
+    """`entails`, with an undecided answer left open under `name`."""
+    if not obligations:
+        return False
+    got, why = entailment(negated, obligations, limits)
+    if got is None:
+        _open(name, why)
+    return got is True
+
+
 def same_program(cert, spec) -> dict:
     """Is this LP certificate about THIS program? `{"same", "differences"}`.
 
@@ -671,6 +706,22 @@ def lp_dual_certificate(sense, objective, dual, A, b, c, names,
         solver_free=True,
         payload=payload,
         note_key="cert.note.lp_dual.exact" if is_exact else "cert.note.lp_dual.float",
+    )
+
+
+def parametric_family_certificate(parameters, box, sense, objective,
+                                  constraints, free, region, claim, pieces,
+                                  cover, title="") -> Certificate:
+    """The program is FEASIBLE at every parameter in the box: on each piece a
+    witness `N / D` from its basis, and the pieces the leaves of a tree of
+    box cuts and frontier cuts -- so they cover the box by construction."""
+    return Certificate(
+        kind="parametric_family", solver_free=True,
+        payload={"parameters": list(parameters), "box": box, "sense": sense,
+                 "objective": objective, "constraints": constraints,
+                 "free": list(free or []), "region": region, "claim": claim,
+                 "pieces": pieces, "cover": cover, "title": title},
+        note_key="cert.note.parametric_family",
     )
 
 
@@ -2342,8 +2393,12 @@ def verify(cert, limits=None, source=None) -> VerifyReport:
         return VerifyReport(False, cert.kind, cert.solver_free, checks=[(
             t("verify.sense_known"), False, str(cert.payload["sense"]))],
             detail=t("verify.sense_known"))
+    token = _OPEN.set([])
     try:
         rep = fn(cert, limits)
+        for name, why in _OPEN.get() or []:
+            if all(name != n for n, _r in rep.undecided):
+                rep.undecide(name, reason=why)
         if not rep.ok:
             # NO INVALID CERTIFICATE KEEPS AN AFFIRMATIVE SUMMARY. Verifiers
             # build `detail` from the payload's own declarations -- "7 parts
@@ -2368,6 +2423,8 @@ def verify(cert, limits=None, source=None) -> VerifyReport:
             False, cert.kind, cert.solver_free,
             detail=t("verify.failed", type=type(e).__name__, message=e),
         )
+    finally:
+        _OPEN.reset(token)
 
 
 
@@ -2437,7 +2494,16 @@ def obligations_of(sub: dict):
 
 
 def entails(negated_statement, obligations, limits) -> bool:
+    """True only when the implication was PROVED; see `entailment` for the
+    three answers."""
+    return entailment(negated_statement, obligations, limits)[0] is True
+
+
+def entailment(negated_statement, obligations, limits):
     """Does `not statement` imply everything the certificate closed?
+    `(True | False | None, reason)` -- None when the solver could not decide,
+    with its reason. `entails` read that as False, and a composed proof whose
+    link z3 left open was refused as if the link were wrong.
 
     Together with the sub-certificate's own verification (those obligations
     are contradictory) this gives: `not statement` is unsatisfiable, i.e. the
@@ -2454,7 +2520,16 @@ def entails(negated_statement, obligations, limits) -> bool:
     s.add(negated_statement)
     s.add(z3.Not(z3.And(*obligations)) if len(obligations) > 1
           else z3.Not(obligations[0]))
-    return s.check() == z3.unsat
+    r = s.check()
+    if r == z3.unsat:
+        return True, ""
+    if r == z3.sat:
+        return False, ""
+    try:
+        why = s.reason_unknown()
+    except Exception:  # noqa: BLE001
+        why = ""
+    return None, why or "unknown"
 
 
 def _parse_one(smt2: str):
@@ -2505,8 +2580,8 @@ def _verify_proof(cert, limits) -> VerifyReport:
                            t("verify.bisect.no_cert")))
             continue
         rep = verify(Certificate.from_dict(sub), limits)
-        checks.append((t("verify.proof.lemma", name=name), rep.ok,
-                       "{}: {}".format(sub["kind"], rep.detail)))
+        checks.append(_sub_check(t("verify.proof.lemma", name=name), rep,
+                                 "{}: {}".format(sub["kind"], rep.detail)))
         warnings.extend(_relay(name + ": ", w) for w in rep.warnings)
 
         if not lem.get("derived"):
@@ -2514,7 +2589,8 @@ def _verify_proof(cert, limits) -> VerifyReport:
                               why=lem.get("bridge") or sub["kind"]))
             continue
         obl = obligations_of(sub)
-        linked = bool(obl) and entails(z3.Not(phi), obl, limits)
+        linked = _entailed(t("verify.proof.link", name=name), z3.Not(phi),
+                           obl, limits)
         checks.append((t("verify.proof.link", name=name), linked,
                        t("verify.proof.link_detail", n=len(obl or []))))
 
@@ -2533,7 +2609,10 @@ def _verify_proof(cert, limits) -> VerifyReport:
             neg = z3.And(*(hyps + [z3.Not(z3.Or(*whens) if len(whens) > 1
                                           else whens[0])]))
             obl = obligations_of(sub_c)
-            ok_cases = rep_c.ok and bool(obl) and entails(neg, obl, limits)
+            if not rep_c.ok and rep_c.verification == "inconclusive":
+                _open(t("verify.proof.cases"), rep_c.reason)
+            ok_cases = rep_c.ok and _entailed(t("verify.proof.cases"), neg,
+                                              obl, limits)
         checks.append((t("verify.proof.cases"), ok_cases,
                        t("verify.proof.cases_detail",
                          names=", ".join(cs.get("names") or []))))
@@ -2576,12 +2655,12 @@ def _verify_proof(cert, limits) -> VerifyReport:
         checks.append((t("verify.proof.step"), False, t("verify.bisect.no_cert")))
     else:
         rep = verify(Certificate.from_dict(step), limits)
-        checks.append((t("verify.proof.step"), rep.ok, rep.detail))
+        checks.append(_sub_check(t("verify.proof.step"), rep, rep.detail))
         premises = statements + ambient
         neg = z3.And(*(premises + [z3.Not(theorem)])) if premises \
             else z3.Not(theorem)
         obl = obligations_of(step)
-        linked = bool(obl) and entails(neg, obl, limits)
+        linked = _entailed(t("verify.proof.step_link"), neg, obl, limits)
         checks.append((t("verify.proof.step_link"), linked,
                        t("verify.proof.link_detail", n=len(obl or []))))
         # Nothing may enter the final step that was not declared.
@@ -2650,6 +2729,44 @@ def _verify_proof(cert, limits) -> VerifyReport:
                  bridges=len(p.get("bridges", []))),
     )
 
+
+
+def _induction_definitions(p, k):
+    """The certificate's `facts_smt2` (with the induction variable free) and
+    `initial_smt2`, parsed -- `(None, [])` when it has none."""
+    import z3
+
+    text = p.get("facts_smt2")
+    initial = [_parse_one(f) for f in (p.get("initial_smt2") or [])]
+    facts = None
+    if text:
+        # the parsed `k` is the certificate's own variable: the same name and
+        # sort, so substitution below meets it
+        facts = z3.substitute(_parse_one(text), (z3.Int(str(k)), k))
+    return facts, initial
+
+
+def _verify_parametric_family(cert, limits) -> VerifyReport:
+    """A family of bases, re-derived: every piece's formulas multiplied out,
+    every sign by Bernstein, and the cover walked (`certo.pfamily`)."""
+    from .pfamily import check_family
+
+    p = cert.payload
+    try:
+        checks = check_family(p)
+    except (KeyError, TypeError, ValueError, ZeroDivisionError) as e:
+        checks = [(t("verify.pfamily.shape"), False,
+                   "{}: {}".format(type(e).__name__, e)[:160])]
+    warnings = []
+    if p.get("region"):
+        warnings.append(_note("partial", "verify.pfamily.region",
+                              names=", ".join(sorted(p["region"]))))
+    return VerifyReport(
+        bool(checks) and all(c[1] for c in checks), "parametric_family", True,
+        checks=checks, warnings=warnings,
+        detail=t("verify.pfamily.detail", n=len(p.get("pieces") or []),
+                 box=", ".join("{} in [{}, {}]".format(n, lo, hi)
+                               for n, (lo, hi) in (p.get("box") or {}).items())))
 
 
 def _verify_ball(cert, limits) -> VerifyReport:
@@ -2729,7 +2846,7 @@ def _verify_induction(cert, limits) -> VerifyReport:
             checks.append((label, False, t("verify.bisect.no_cert")))
             continue
         rep = verify(Certificate.from_dict(sub), limits)
-        checks.append((label, rep.ok, "{}: {}".format(sub["kind"], rep.detail)))
+        checks.append(_sub_check(label, rep, "{}: {}".format(sub["kind"], rep.detail)))
         warnings.extend(_relay("k={}: ".format(b["k"]), w)
                         for w in rep.warnings)
         if not b.get("derived") and p.get("bridge"):
@@ -2742,16 +2859,17 @@ def _verify_induction(cert, limits) -> VerifyReport:
     # implication it happened to carry accepted a step proved under
     # `k >= 10` as starting at 0. A certificate written before `k` was
     # recorded has its variable read off the goal, the same way.
-    from .engines.induct import induction_var, required_step
+    from .engines.induct import induction_var, premises_at, required_step
 
     step = p.get("step")
     pk = None
+    facts_pk = None
     if step is None:
         checks.append((t("verify.induction.step"), False,
                        t("verify.bisect.no_cert")))
     else:
         rep = verify(Certificate.from_dict(step), limits)
-        checks.append((t("verify.induction.step"), rep.ok, rep.detail))
+        checks.append(_sub_check(t("verify.induction.step"), rep, rep.detail))
         phi = _parse_one(p["step_smt2"])
         goal = phi.arg(1) if z3.is_implies(phi) else phi
         k = None
@@ -2771,7 +2889,13 @@ def _verify_induction(cert, limits) -> VerifyReport:
             linked = False
         else:
             needed = required_step(goal, k, step_from)
-            linked = bool(obl) and entails(z3.Not(needed), obl, limits)
+            defs, initial = _induction_definitions(p, k)
+            if defs is not None or initial:
+                facts_pk = (defs, initial)
+            linked = _entailed(t("verify.induction.step_link"),
+                               z3.And(*(premises_at(defs, k, [k, k + 1])
+                                        + initial + [z3.Not(needed)])),
+                               obl, limits)
             pk = (k, goal)
         checks.append((t("verify.induction.step_link"), linked,
                        t("verify.induction.step_link_from", step=step_from)))
@@ -2779,17 +2903,58 @@ def _verify_induction(cert, limits) -> VerifyReport:
     # --- a base case that is a proof is a proof of P(n) ---------------------
     if pk is not None:
         k, goal = pk
-        untied = []
+        untied, open_b = [], []
         for b in p["base"]:
             sub = b.get("cert") or {}
             obl_b = obligations_of(sub) if sub else None
             if not obl_b:
                 continue                 # a sweep or a DRAT proof: the bridge
             pn = z3.substitute(goal, (k, z3.IntVal(int(b["k"]) - 1)))
-            if not entails(z3.Not(pn), obl_b, limits):
+            prem = []
+            if facts_pk is not None:
+                prem = (premises_at(facts_pk[0], k, range(k0, int(b["k"]) + 1))
+                        + facts_pk[1])
+            got, why = entailment(z3.And(*(prem + [z3.Not(pn)])), obl_b, limits)
+            if got is not True:
                 untied.append(str(b["k"]))
+                if got is None:
+                    open_b.append(why)
+        if untied and len(open_b) == len(untied):
+            _open(t("verify.induction.base_is_p"), open_b[0])
         checks.append((t("verify.induction.base_is_p"), not untied,
                        ", ".join(untied[:4]) or "-"))
+
+    # THE DEFINITIONS ARE HYPOTHESES: consistent, and said every time.
+    if facts_pk is not None and pk is not None:
+        k = pk[0]
+        from .limits import Limits
+
+        s = z3.Solver()
+        (limits or Limits()).apply_to(s)
+        s.add(*(premises_at(facts_pk[0], k, [k0, k0 + 1]) + facts_pk[1]))
+        r = s.check()
+        name = t("verify.induction.facts_consistent")
+        if r == z3.unknown:
+            _open(name, s.reason_unknown())
+        checks.append((name, r == z3.sat, str(r)))
+        warnings.append(t("verify.induction.facts",
+                          facts=str(facts_pk[0])[:200] if facts_pk[0] is not None else "-",
+                          initial="; ".join(str(f) for f in facts_pk[1])[:200] or "-"))
+    # A STRENGTHENED statement: what was proved, P'(k), implies P(k).
+    st = p.get("strengthened")
+    if st is not None and pk is not None:
+        k, goal = pk
+        name = t("verify.induction.strengthened")
+        try:
+            prop = _parse_one(st["prop_smt2"])
+            pprime = z3.substitute(goal, (k, k - 1))
+            got, why = entailment(z3.And(pprime, z3.Not(prop)), [z3.BoolVal(False)],
+                                  limits)
+            if got is None:
+                _open(name, why)
+            checks.append((name, got is True, str(st.get("q", ""))[:120]))
+        except (KeyError, z3.Z3Exception) as e:
+            checks.append((name, False, str(e)[:120]))
 
     warnings.append(t("verify.induction.schema"))
     return VerifyReport(
@@ -2810,7 +2975,7 @@ def _verify_orbit_witnesses(cert, limits) -> VerifyReport:
                        t("verify.bisect.no_cert")))
     else:
         rep = verify(Certificate.from_dict(sub), limits)
-        checks.append((t("verify.witness.sweep"), rep.ok, rep.detail))
+        checks.append(_sub_check(t("verify.witness.sweep"), rep, rep.detail))
         warnings.extend(rep.warnings)
         free = free and rep.solver_free
 
@@ -2829,7 +2994,7 @@ def _verify_orbit_witnesses(cert, limits) -> VerifyReport:
             checks.append((label, False, t("verify.bisect.no_cert")))
             continue
         rep = verify(Certificate.from_dict(wc), limits)
-        checks.append((label, rep.ok, "{} -> {}".format(w["minimal"], rep.detail)))
+        checks.append(_sub_check(label, rep, "{} -> {}".format(w["minimal"], rep.detail)))
         warnings.extend(_relay("{}: ".format(w["representative"]), x)
                         for x in rep.warnings)
         free = free and rep.solver_free
@@ -4532,6 +4697,8 @@ def _verify_lean_binding(cert, limits) -> VerifyReport:
                    lean0.get("correspondence") or "-")]
     else:
         got = binding.check(p, limits)
+        if got.get("undecided"):
+            _open(t("verify.bind.entails"), got["undecided"])
         checks = [
             (t("verify.bind.entails"), got["agrees"],
              t("verify.bind.covers" if got["covers"] else "verify.bind.gap",
@@ -5587,7 +5754,7 @@ def _verify_mixed_design(cert, limits) -> VerifyReport:
                        t("verify.bisect.no_cert")))
     else:
         rep = verify(Certificate.from_dict(sub), limits)
-        checks.append((t("verify.mixed.residual"), rep.ok, rep.detail))
+        checks.append(_sub_check(t("verify.mixed.residual"), rep, rep.detail))
         warnings.extend(rep.warnings)
         checks.append((t("verify.mixed.substituted"),
                        _residual_matches(p, assign, sub), ""))
@@ -5787,7 +5954,7 @@ def _verify_gap(cert, limits) -> VerifyReport:
             checks.append((label, False, t("verify.bisect.no_cert")))
             continue
         rep = verify(Certificate.from_dict(sub), limits)
-        checks.append((label, rep.ok, rep.detail))
+        checks.append(_sub_check(label, rep, rep.detail))
         warnings.extend(rep.warnings)
 
     # The two halves must be about the SAME packing. Without this the gap is
@@ -7006,9 +7173,15 @@ def _verify_cegis(cert, limits) -> VerifyReport:
     if r2 == z3.unknown:
         open_.append((t("verify.cegis.no_ce"), s.reason_unknown()))
 
+    dom = p.get("domain_check")
+    dom_notes = [t("verify.cegis.domain", verifier=dom.get("verifier", "?"),
+                   version=dom.get("version") or "-",
+                   input=str(dom.get("input_sha256", ""))[:12],
+                   result=str(dom.get("result_sha256", ""))[:12])] \
+        if isinstance(dom, dict) else []
     rep = VerifyReport(
         ok1 and ok2, "cegis", False, checks=checks,
-        warnings=_synth_scope_notes(p, found=True),
+        warnings=_synth_scope_notes(p, found=True) + dom_notes,
         detail=t("verify.cegis.detail", iterations=p["iterations"],
                  ces=len(p["counterexamples"])),
     )
@@ -7156,9 +7329,31 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
                         if subs else z3.Implies(behav, corr))
     checks.append((t("verify.cegis_none.inputs"), ok_ces, ""))
 
+    # CANDIDATES THE DOMAIN VERIFIER REJECTED: excluded from the refutation,
+    # each by its values -- the program is not re-run here, so the
+    # conclusion rests on its answers, and the report says so (relative).
+    blocks, dom_notes = [], []
+    rejected = p.get("domain_rejected") or []
+    ok_rej = isinstance(rejected, list)
+    for rj in rejected if ok_rej else []:
+        imp = rj.get("implementation") if isinstance(rj, dict) else None
+        if not isinstance(imp, dict) or not imp or set(imp) - set(impl) or \
+                any(imp[n][0] != impl[n] for n in imp):
+            ok_rej = False
+            continue
+        eqs = [_const(z3, n, s_) == _value(z3, s_, v) for n, (s_, v) in imp.items()]
+        blocks.append(z3.Not(z3.And(*eqs)) if len(eqs) > 1 else z3.Not(eqs[0]))
+    if rejected:
+        checks.append((t("verify.cegis_none.domain_shape"), ok_rej,
+                       str(len(rejected))))
+        first = rejected[0] if isinstance(rejected[0], dict) else {}
+        dom_notes.append(_note("assumed", "verify.cegis_none.domain",
+                               n=len(rejected), verifier=first.get("verifier", "?"),
+                               version=first.get("version") or "-"))
+
     s = z3.Solver()
     lim.apply_to(s)
-    s.add(*formulas)
+    s.add(*formulas, *blocks)
     r = s.check()
     unsat = r == z3.unsat
     checks.append((t("verify.cegis_none.unsat"), unsat, str(r)))
@@ -7186,8 +7381,9 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
         checks.append((t("verify.cegis_none.decisive"), ok_dec,
                        str(len(dec) if isinstance(dec, list) else dec)))
     rep = VerifyReport(
-        disjoint and covered and ok_ces and unsat and ok_dec, "cegis_none", False,
-        checks=checks, warnings=_synth_scope_notes(p, found=False),
+        disjoint and covered and ok_ces and unsat and ok_dec and ok_rej,
+        "cegis_none", False,
+        checks=checks, warnings=_synth_scope_notes(p, found=False) + dom_notes,
         detail=t("verify.cegis_none.detail", ces=len(p["counterexamples"]),
                  vars=", ".join(impl)))
     if r == z3.unknown:
@@ -7430,7 +7626,7 @@ def _verify_drat(cert, limits) -> VerifyReport:
     )]
     rep = drup.check(cnf.clauses, p["proof"],
                      timeout_s=max(1.0, lim.timeout_ms / 1000))
-    checks.append((t("verify.drat.steps"), rep.ok, rep.detail))
+    checks.append(_sub_check(t("verify.drat.steps"), rep, rep.detail))
     checks.append((t("verify.drat.empty"), rep.derived_empty, ""))
     if drup.drat_trim_available():
         ext = drup.check_with_drat_trim(
@@ -7577,7 +7773,7 @@ def _verify_bisect(cert, limits) -> VerifyReport:
             continue
         rep = verify(Certificate.from_dict(sub), limits)
         free = free and rep.solver_free
-        checks.append((label + " ({})".format(sub["kind"]), rep.ok, rep.detail))
+        checks.append(_sub_check(label + " ({})".format(sub["kind"]), rep, rep.detail))
 
     # POLARITY AND INSTANCE. Each end verified on its own proved nothing
     # about the threshold: the same proof of a tautology at both ends passed.
@@ -7745,7 +7941,7 @@ def _verify_synth_proved(cert, limits) -> VerifyReport:
             continue
         rep = verify(Certificate.from_dict(sub), limits)
         free = free and rep.solver_free
-        checks.append((label + " ({})".format(sub["kind"]), rep.ok, rep.detail))
+        checks.append(_sub_check(label + " ({})".format(sub["kind"]), rep, rep.detail))
 
     # TIED TO THE CANDIDATE. Each half verified on its own proved nothing
     # about the other: the universal proof could be of any true statement.
@@ -7778,7 +7974,8 @@ def _verify_synth_proved(cert, limits) -> VerifyReport:
                            + [z3.Not(uspec.goal)]))
             obl = obligations_of(uni)
             checks.append((t("verify.synth.tied"),
-                           bool(obl) and entails(neg, obl, limits), path.name))
+                           _entailed(t("verify.synth.tied"), neg, obl, limits),
+                           path.name))
         except Exception as e:  # noqa: BLE001 -- a spec that no longer builds
             warnings.append(_note("partial", "verify.synth.untied",
                                   why="{}: {}".format(type(e).__name__, e)))
@@ -7976,7 +8173,7 @@ def _verify_sweep_range(cert, limits) -> VerifyReport:
             continue
         rep = verify(Certificate.from_dict(sub), limits)
         free = free and rep.solver_free
-        checks.append((label, rep.ok, rep.detail))
+        checks.append(_sub_check(label, rep, rep.detail))
 
     first = p.get("first_failure")
     below = [e for e in p["entries"]
@@ -8291,6 +8488,7 @@ VERIFIERS = {
     "affine_semigroup": _verify_affine_semigroup,
     "clique_lp": _verify_clique_lp,
     "parametric_atlas": _verify_parametric_atlas,
+    "parametric_family": _verify_parametric_family,
     "polynomial_nonneg": _verify_polynomial_nonneg,
     "pinned_value": _verify_pinned_value,
     "capacity_profile": _verify_capacity_profile,

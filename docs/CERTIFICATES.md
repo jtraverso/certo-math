@@ -25,7 +25,7 @@ certificate was checked — *"verified without a solver"*, *"checked by
 counting, no solver"*, *"by re-running the spec, not by trusting its
 answers"*. The table below is the map; the header is the territory.
 
-## The sixty-six kinds
+## The sixty-seven kinds
 
 | Kind | What it attests | Solver-free? |
 |---|---|---|
@@ -67,6 +67,7 @@ answers"*. The table below is the map; the header is the territory.
 | `integer_matrix` | rank, determinant, Hermite, Smith, with the transforms | **yes**, matrix multiplication |
 | `clique_lp` | an LP optimum over every clique of a graph, without listing them | **yes**, rational arithmetic and the pricing search rerun |
 | `parametric_atlas` | one parametric bound on a whole domain, from N certificates on N boxes | **yes**, every piece re-verified and the covering recomputed |
+| `parametric_family` | a parametric program FEASIBLE on a whole box: a family of bases, a witness `N(t)/D(t)` per piece, the pieces covering the box along box cuts and frontiers | **yes**, `A N = D d` multiplied out, every sign by Bernstein, the cover walked |
 | `polynomial_nonneg` | a polynomial >= 0 on a box (cut by a region), or the point where it is negative | **yes**, Bernstein coefficients recomputed, or one evaluation |
 | `assignment` | the largest assignment of items to receivers, and a Hall set showing no larger one; with `resources`, a PHYSICAL assignment beside it (no resource twice on a receiver) and the relaxation's collisions named | **yes**, placements, loads and the Hall bound counted |
 | `pinned_value` | `cp_r(G)` between two certified bounds -- equal, or the range | **yes**, both halves re-verified and tied to one edge list |

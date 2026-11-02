@@ -27,6 +27,7 @@ CLASS = {
     "mus": "inconsistency",
     "ideal": "identity", "resultant": "identity",
     "polynomial_nonneg": "sign", "sos": "sign", "parametric_atlas": "sign",
+    "parametric_family": "feasible",
     "parametric_bound": "sign", "ratio_bound": "sign", "ball": "sign",
     "variable_range": "sign",
     "model": "counterexample", "cnf_model": "witness",

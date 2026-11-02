@@ -57,7 +57,7 @@ def scope_note(res: Result):
 # ---------------------------------------------------------------------------
 
 
-_HIDDEN_META = ("self_check", "self_check_ms", "steps", "failed", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
+_HIDDEN_META = ("self_check", "self_check_ms", "phases_ms", "why", "domain_verifier", "steps", "failed", "closed_form", "trace", "errors", "describe", "counterexamples", "solution",
                 "errors_detail", "inconclusive_detail", "implementation",
                 "domain", "evaluations", "calibration", "table", "multipliers",
                 "counterexample", "hint", "hints", "regime_report", "best_constant", "lemmas", "used", "unused", "bridges", "lo", "hi",
@@ -212,6 +212,9 @@ def emit(res: Result, args) -> int:
         print("{}  [{}]".format(head, res.status.value))
         if res.detail:
             print("  " + res.detail)
+        why = res.why
+        if why:
+            print("  " + t("cli.why", code=why, text=t("why." + why)))
         print("  " + t("cli.outcome", state=res.outcome["state"], basis=res.outcome["basis"]))
         from .scope import scope_of
 
@@ -259,6 +262,11 @@ def emit(res: Result, args) -> int:
             if k in _HIDDEN_META:
                 continue
             print("  {}: {}".format(k, v))
+
+        ph = res.meta.get("phases_ms")
+        if ph:
+            print("  " + t("cli.phases", phases=", ".join(
+                "{} {:.0f} ms".format(k, v) for k, v in ph.items())))
 
         if res.meta.get("level") and res.meta["level"] != "certified":
             print("  !! " + t("cli.sweep.level." + res.meta["level"],
@@ -375,6 +383,7 @@ def _self_check(res, args):
     t0 = time.perf_counter()
     rep = verify_cert(cert, limits_from(args))
     res.meta["self_check_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+    res.meta.setdefault("phases_ms", {})["self_check"] = res.meta["self_check_ms"]
     res.meta["self_check"] = "ok" if rep.ok else "FAILED"
     if rep.ok:
         return True
@@ -569,8 +578,10 @@ def cmd_report(args):
             print(json.dumps(s, indent=2, ensure_ascii=False))
         else:
             print("  " + report.coverage_sentence(s))
-            for cmd, n in sorted((s.get("by_command") or {}).items()):
-                print("    {:<12} {}".format(cmd, n))
+            for line in report.coverage_map_lines(s):
+                print("    " + line)
+            if s.get("lines"):
+                print("  " + t("coverage.share"))
         return 0
     info = report.build(argv=argv or None, cert_path=args.certificate,
                         wrong=args.wrong, with_coverage=args.coverage,
@@ -630,6 +641,10 @@ def cmd_nonneg(args):
     from .spec import NonnegSpec, load_spec
 
     spec = load_spec(args.spec, NonnegSpec)
+    if getattr(args, "witness", None):
+        spec.witness = args.witness
+    if getattr(args, "multipliers", None):
+        spec.multipliers = json.loads(args.multipliers)
     return emit(algebra.nonneg(spec, limits_from(args), spec_path=args.spec), args)
 
 
@@ -1384,6 +1399,10 @@ def cmd_doctor(args):
         return 0 if rep["ok"] else 3
 
     print("  " + t("doctor.header"))
+    from .buildinfo import describe as _describe
+
+    print("  " + t("doctor.build", version=rep["build"]["version"],
+                   what=_describe(rep["build"])))
     for r in rep["rows"]:
         mark = "[ok]" if r["ok"] else ("[XX]" if r["required"] else "[--]")
         print("  {:<12} {:<9} {}".format(r["key"], mark, r["what"]))
@@ -1462,9 +1481,13 @@ def cmd_doctor(args):
 
 def cmd_induct(args):
     from .engines import induct
-    from .spec import InductSpec, load_spec
+    from .spec import InductSpec, StrengthenSpec, load_spec
 
-    spec = load_spec(args.spec, InductSpec)
+    spec = load_spec(args.spec)
+    if not isinstance(spec, (InductSpec, StrengthenSpec)):
+        print(t("spec.wrong_type", got=type(spec).__name__,
+                want="InductSpec / StrengthenSpec"), file=sys.stderr)
+        return 3
     res = induct.induct(spec, limits_from(args), spec_path=args.spec)
     return emit(res, args)
 
@@ -3435,6 +3458,14 @@ def build_parser():
                        "a region cuts: Bernstein coefficients, subdivided, "
                        "or the point where it fails")
     sp.add_argument("spec", help=".py file returning a NonnegSpec")
+    sp.add_argument("--witness", metavar="FILE",
+                    help="an external Bernstein tree or forest (JSON: "
+                         "`nonneg_leaves` shape, {\"tree\": ...}, or a "
+                         "polynomial_nonneg certificate), checked against "
+                         "THIS spec instead of searching")
+    sp.add_argument("--multipliers", metavar="JSON",
+                    help='supplied multipliers, e.g. {"g": "1/2", "g*h": 3}: '
+                         "checked, not searched")
     sp.set_defaults(func=cmd_nonneg)
     sp = add("atlas", "a parameter domain covered by boxes, each certified by "
                       "`parametric`, and ONE statement for the whole: the "
@@ -3913,21 +3944,10 @@ def _version_line() -> str:
     The schema matters as much as the version: it is what says whether a
     certificate from elsewhere can be read, and it moves on its own timetable.
     """
-    import subprocess
-
+    from .buildinfo import describe
     from .certificate import SCHEMA_VERSION
 
-    commit = ""
-    try:
-        out = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                             cwd=str(Path(__file__).resolve().parent),
-                             capture_output=True, text=True, timeout=5)
-        if out.returncode == 0:
-            commit = out.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    line = t("cli.version", version=__version__,
-             commit=commit or t("cli.version.no_commit"),
+    line = t("cli.version", version=__version__, commit=describe(),
              schema=SCHEMA_VERSION)
     stale = installed_version()
     if stale is not None and stale != __version__:

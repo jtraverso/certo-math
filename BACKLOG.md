@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-11-02, at **0.38.0**.
+Last updated: 2026-11-02, at **0.39.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -114,11 +114,11 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P2** | Rigorous numerics from FLINT (Arb/Acb): root isolation with error balls plus Sturm counts (comparing algebraic numbers), certified eigenvalue enclosures (spectral bounds of graphs), rigorous integrals in `bounds` | **M** | med | med | `complex_roots`, `acb_mat.eig`, `acb.integral` checked available in python-flint 0.9 |
 | **P3** | Proposers from scipy and networkx: weighted assignment by the Hungarian method (its dual potentials ARE the certificate), graph isomorphism maps by VF2 (checked edge by edge), Bron-Kerbosch for `cliques_of` | **S each** | high | low | installed, unused |
 | **P2** | CEGIS by pieces, with `covering`: when no single candidate works on the whole domain, split it where the counterexamples are and find one candidate per piece; `covering` certifies that the pieces tile the domain. The "selector between bounds" users build by hand | **M-L** | med | med | the CEGIS review (0.34); a user's sessions choose a bound or weight per region by hand |
-| **P2** | Parametric certificates by CEGIS: propose a dual (a basis) for a region of the parameter, find the t where it fails, split there -- the engine the parametric-feasibility row needs | **L** | med | high | the CEGIS review (0.34); unblocks the parametric feasibility row |
+| **P3** | The wheel's record, what 0.39 left: the hash of a dependency lock -- there is no lock in this repository to hash, so the decision comes first | **S** | med | low | the wheel row (0.35 report); commit, clean tree and build date shipped in 0.39 |
+| **P2** | Parametric certificates by CEGIS: propose a basis for a region of the parameter, find the t where it fails, split there -- the SEARCH for the family that `parametric_family` (0.39) checks; with one parameter the frontiers are real roots of the numerators, and could be found rather than given | **L** | med | high | the CEGIS review (0.34); the checker shipped in 0.39, the pieces are still the caller's |
 | **P3** | CEGIS: generalise a counterexample from a point to a box (Bernstein, as `covering` does), so one round discards many candidates | **M** | med | low | speed on large input domains |
 | **P3** | CEGIS: a Pareto front between two objectives, each point certified as not improvable (repeated `synth_optimum` under a bound on the other) | **S-M** | high | low | the CEGIS review (0.34): threshold against cost |
 | **P3** | CEGIS: the LARGEST domain a fixed candidate works on, certified from both sides (like `bisect`, with `cegis_none` beyond it) | **S-M** | med | low | the CEGIS review (0.34) |
-| **P3** | CEGIS for induction: synthesise the strengthening P'(k) that makes a non-inductive P(k) inductive, for `induct` | **M** | low | med | the CEGIS review (0.34) |
 | **P3** | CEGIS with more quantifier alternations (two-player games in bounded depth: Maker-Breaker on small boards, constructor against adversary) | **L** | **low** | med | research-shaped |
 | **P3** | Piecewise-linear templates (breakpoints as unknowns) beside `polynomial` and `combination` | **S-M** | med | low | templates shipped in 0.34 |
 | **P3** | Integer-parameter model families: derive each instance's demands and kernels from one schema in `j`, and check the specialisation | **M-L** | low | med | user feedback (coefficients of j = 9 left inside a proof for j = 8) |
@@ -130,20 +130,14 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | Single asks from one report: simplified rational counterexamples, symmetry/orbit quotient certificates with lifting, a public stable list of kinds, a documented monomial key reader, typed external theorems beyond `cite`, an LP-relaxation-lost-everything warning | **S-M each** | med | low | user feedback (49-78) |
 | **P2** | Construction contracts, what 0.35 left: a portable package report (interpreter, versions, hashes per artefact, which runtime accepted what) and a corpus of whole packages kept across versions with coordinated mutations; a rule for a FAMILY of lifts (0.35 checks a concrete one); Lean contracts for disjointness, cover and catalogue induction | **M-L** | med | med | the vertical example shipped in 0.35 (`ConstructionSpec`); these are the rest of the same report |
 | **P2** | Imported hypotheses as dependencies: each with its declaration, version or hash, the hypotheses used and the exact statement imported, so an erratum propagates only to the results that use it | **M** | med | med | external report on 0.35.0; `compose` already cites lemmas -- this is the interface layer |
-| **P2** | A wheel that knows what it is: commit, clean or dirty tree, the dependency lock's hash and the build date, written at build time (`--version` from a wheel says "not a checkout") | **S** | high | low | external report on 0.35.0 |
 | **P2** | Compact output and a cache by hypothesis or matrix for series that vary one adversary or one capacity; stable summaries with solve, exact reconstruction and self-check times; paged traces | **M** | low | low | external report on 0.35.0; no benchmark yet |
 | **P3** | A chordal-graph adapter: a verified PEO, the maximal cliques derived from it, simplicial vertices, `R - D` selections and an exterior clique witness -- all checked by edges, NetworkX only a proposer | **M** | high | low | external report on 0.35.0 |
 | **P2** | A general EXCHANGE contract: a universe, the supports removed and added, protected owners, a signed cost; checked as an equality of disjoint unions of supports plus each piece's validity -- independent of triangles or of any one extremal problem, with adapters for cliques, paths, matchings | **M-L** | med | high | external review of 0.35.0 (8.2); joins the owner change in the ports row |
 | **P2** | Quantifiers made visible in synthesis: `exists witness`, `forall x exists y`, `exists f forall x`, and `exists f forall x, x'` with joint control (a STABLE selector, not one fibre at a time); a size estimate before the search (states, candidates, neighbours, variables, constraints); a change of formulation recorded with its equivalence | **L** | low | high | external review of 0.35.0 (8.3): the stable-selector question is the important one |
 | **P2** | Resumable searches: the best candidate, the counterexamples, the constraints generated and the pending obligations kept, tied to the model's version, and reused rather than recomputed | **M** | med | med | external review of 0.35.0 (8.4); deadlines, heartbeats and limits already exist |
-| **P1** | `NonnegSpec`, what 0.37 left (a public `degree` and the region terms reported shipped in 0.37): supplied multipliers (a witness found elsewhere, checked, not searched), and products of conditions built on demand starting from the active ones; an external Bernstein witness or forest IMPORTED and re-checked (polynomial, box, guards, tree, coefficients), bound to its obligation | **M** | high | med | user feedback across 0.34 sessions, and RAISED to P1 by the 0.35 sessions (376-379, 387, 388, 391-396): every one of them found its multipliers with an external LP and rebuilt the certificate by hand; tens of millions of coefficients checked outside certo because there is no way in |
-| **P2** | An external domain verifier inside CEGIS: a checker that returns valid or a structured counterexample, with the hashes of its input, its result and its version, joined to the search's trace | **M** | med | med | outside report on 0.36 (F2 boundaries, catalogue incidences); `SynthSpec.original` (0.38) evaluates a predicate, this would run a program |
-| **P3** | `entails` (composition) still reads a solver's `unknown` as `False`: tri-state there too, so a composed proof that could not be re-checked is inconclusive rather than refused | **S** | high | low | found while fixing the verifiers in 0.38 |
 | **P2** | DRAT at scale, what 0.37 left: a resumable check (the backward pass checkpointed), a certificate of the core subset with hashes, the CNF referenced by hash rather than embedded (a schema decision), declared lex-leader symmetry breaking, a certificate per item in `sweep`; CaDiCaL or Kissat found and used when installed | **M-L** | med | med | user feedback on 0.36 (about 280 CNF certificates): the checker that did not finish shipped in 0.37; these are the rest of the same report |
-| **P2** | An `inconclusive` that says why: a negative Bernstein coefficient, a negative rational point, a physical counterexample, a template too small, rounding, or the clock -- with the time per phase (construction, search, extraction, self-check) | **M** | med | med | user feedback, a dozen 0.34 sessions |
 | **P2** | Rational support recovery: from a float support, the exact primal (and dual) on it with the rows that determine it, feasibility separated from optimality; `missing_primal_variables=zero` | **M** | med | med | user feedback (several 0.34 sessions recover supports with an external exact solver and then call `opt --primal`) |
 | **P3** | Smaller asks from the 0.34 sessions: automatic scaling of tiny demands in `columns` with a round-trip certificate; a typed exact accessor for `meta.solution`; `same_program` for signed variables; the meaning of CEGIS's `iterations`, `rounds` and `trace` documented (semantic acceptance in one call and a SymPy adapter shipped in 0.37) | **S each** | high | low | user feedback (0.34) |
-| **P2** | Parametric feasibility certificates: a family of bases with rational formulas and regions, `A(t) w(t) = d(t)`, `w(t) >= 0`, the regions covering the domain and their frontiers | **L** | low | med | user feedback: the crux after the cost identities |
 | **P3** | Jacobian as a PROPOSER: its witnesses (linear systems, Smith/Hermite, inertia, cofactors, isomorphism maps, root intervals) checked by certo's verifiers; what certo cannot check enters `compose` as a cited lemma with Jacobian's operation, version and digest | **S-M** | med | med | the user's question; 1791 operations in Jacobian 0.23, exact but not certificates |
 | **P3** | Signed certificates (Ed25519 / JWS, detached, over the digest): WHO produced a certificate, for a chain of custody | **M** | med | low | external suggestion. A signature attests provenance, never correctness: `verify` re-derives the mathematics whoever signed, and an edited certificate already fails it unless the edit is itself a valid certificate. Keys are the user's; optional, and never a substitute for `verify` |
 | **P2** | No code from a spec is evaluated where a model wrote it -- an AST-checked or declarative notation instead of `exec` | **(the declarative notation row)** | | | external suggestion, merged into the declarative spec notation row above. Today: specs are Python by design and run on load; `CERTO_NO_EXEC=1` and the twelve JSON spec types run nothing, and the MCP confines paths -- not a sandbox, and `SECURITY.md` says so |
@@ -159,7 +153,6 @@ the shape of the corpus LPs all changed the moment they were measured.
 | **P3** | A ratio objective certified directly: `kappa = min cap/K`, `profile` or `ratio` joined to `parametric` | **L** | **low** | med | done today by bisection outside certo |
 | **P2** | Charts in `atlas`: pieces in other coordinate systems natively in the `atlas` command (0.35's `ConstructionSpec` already checks an atlas of charts and a change of coordinates, step by step) | **L** | **low** | med | `atlas` covers a domain in ONE chart. The user's ~2 000 boxes are in three rational charts (a blow-up at the apex, a projection from a point of the conic): the map between them, its image, and where it is defined are what must be checked. Also the migration path a user asked for: thousands of 0.16-0.19 certificates on the orthant `t >= 0` are pieces in a reparametrised chart. Until then, re-certifying with `box=` is minutes of compute (20 ms each) once the batch row lands |
 | **P3** | `atlas`: excluding a cell that only TOUCHES the region's boundary | **M** | **low** | low | a cell is excluded only where a condition is strictly negative on it, closed; one touching `g = 0` needs a piece even when the neighbours cover that face. Conservative, and exactly where slivers live |
-| **P2** | The coverage map, from a USER'S machine | **S** | **high** | low | read again in this cycle: three lines here, none with `why`, and the users' maps live on their machines. The step is asking for one -- `certo report --coverage` or `doctor --json` -- not code |
 | **P2** | Polynomial multipliers for a region on a box, and region leaves that subdivide | **M** | **low** | med | box + region landed with CONSTANT multipliers on the conditions and their products, on the whole box. A residual that needs `p * g` or a split first is not certified yet |
 | **P3** | Other implicit column families: stars, independent sets, and a generic pricing hook | **L** | **low** | med | `columns` gained `max_size` and a Farkas certificate for an infeasible partition; which OTHER family is wanted was never said, and the pricing bound is per family |
 | **P3** | The support pass FIRST on a branch-and-bound node? | **S** | **low** | low | measured: over ~6 000 node certifications it never ran -- the ladder closes every node. Whether two eliminations beat the ladder's 11 `check_lp` on the 1048-column case is the question left, and it belongs to the P2 row on that instance |
@@ -223,7 +216,7 @@ and a list that mixes them makes the second look like neglect.
 | A required reviewer on the `pypi` environment | the repository owner | one setting. Nine versions have reached the index in three days with nobody approving the step, and a version on PyPI cannot be replaced |
 
 **The coverage map, and why the row that shipped said *record* rather
-than *map*.** *(the recording landed in 0.13.0; reading it is still open)*
+than *map*.** *(the recording landed in 0.13.0; the map, and the first one read, in 0.39.0)*
 
 The idea first: **every `out_of_theory` is a recorded instance of a question
 certo was asked and could not settle** -- a route whose caller had to abandon
@@ -256,6 +249,30 @@ And it pays off later rather than now. Until it has run for a while, the
 question "where is the coverage thin" still has no measured answer, which is
 why the breadth-shaped P2 below it is the thing to build in the meantime
 rather than after.
+
+**The first map from a user's machine** *(0.39)*. 565 lines, 2026-09-22 to
+2026-10-23, certo 0.13 to 0.37, read with `certo report --coverage`:
+
+| command | reason | count | sizes |
+|---|---|---|---|
+| `parametric` | `negative_coefficient` | 267 | -- |
+| `cases` | `unchecked` | 216 | up to 1.6 M vars, 5.7 M clauses |
+| `parametric` | `out_of_theory` | 30 | -- |
+| `nonneg` | `out_of_theory` | 8 | -- |
+| `prove` | `clock` | 8 | -- |
+| `atlas` | `negative_coefficient` | 7 | -- |
+| `cases` | `resource` | 4 | up to 0.8 M vars |
+| everything else | | 25 | |
+
+Two lines account for 85%, and both had been read from the reports without
+the map: the `cases` row is the DRUP checker that did not finish (0.37), and
+the `parametric` row -- all 267 from one version, 0.20.1 -- is a session
+looking for duals box by box, which is the work `parametric_family` (0.39)
+and the CEGIS row above are about. What the map adds is the ranking's
+EVIDENCE, and one correction to a guess: `out_of_theory` is 50 lines over
+nine commands, but 30 of them are `parametric` again -- the same domain,
+asked in shapes it refuses -- so the breadth gap is narrower than the
+command count suggests.
 
 One caveat that will keep applying once data exists: this records only what
 somebody thought to ask. A domain nobody attempted because it obviously would
@@ -389,6 +406,7 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| Supplied multipliers, products of conditions on demand and imported Bernstein forests in `nonneg`; a family of bases, `parametric_family`; a domain verifier inside CEGIS; CEGIS for induction (`StrengthenSpec`) and recurrences in `induct`; `why` and phase times on every result; the coverage map and the first one read; a wheel that knows its commit; `entails` in three states | **0.39.0** |
 | Inconclusive kept apart from invalid (`verification`, `reason`, exit 2); LP infeasibility decided exactly or not concluded; the parametric primal binding; `OBJECT_EXHIBITED` and `reading`; `--cert` case collisions; `lp_view`, `nonneg_leaves`, `Poly.to_sympy`; lint for hidden hypotheses, negated goals and zero identities; counterexamples against the original domain | **0.38.0** |
 | A DRUP checker with watched literals that checks the core backwards, and a CDCL that deletes and logs; an UNCHECKED proof kept rather than thrown away; `verify --expect/--complete` and the `claim` view; `NonnegSpec.degree`; an id-free canonical form for formulas; the parametric binding reading the whole claim; exact numbers past 4300 digits; sympy read exactly | **0.37.0** |
 | Construction contracts that check MEANING (edge-disjoint hosting, computed bindings, strict fields, owners, label collisions, every CEGIS parameter accounted for), `core_selector` and `adversary_reduction`, typed `outcome`, notes from the evidence, integer strict rows in `farkas`, typed LP and synthesis numbers, `same_obligation` for nine more families, `CoveringSpec.cuts` | **0.36.0** |

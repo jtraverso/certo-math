@@ -6,6 +6,84 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.39.0] — 2026-11-02
+
+**A witness found elsewhere gets in, and an inconclusive says why.** The P1
+the 0.34-0.37 sessions kept raising -- multipliers and Bernstein forests made
+outside certo, checked by hand because there was no way in -- and the
+parametric obligation several sessions called their universal one: a program
+feasible on a whole domain by a family of bases. No new commands (62); one
+new kind, `parametric_family` (67); the schema stays 5, every payload change
+an optional field. New optional fields `NonnegSpec.multipliers`, `.witness`,
+`.products`; `ParametricSpec.pieces`; `SynthSpec.domain_verifier`,
+`.domain_verifier_version`; `InductSpec.facts`, `.initial`; new spec
+`StrengthenSpec` (under `induct`); new outputs `why` and `meta["phases_ms"]`
+on every result; new API `certo.build_info`, `certificate.entailment`.
+
+### Added
+
+- **`NonnegSpec(multipliers=...)`** -- constants on the region's conditions
+  and their products (`"g*h*k"`, any order, up to six factors), CHECKED and
+  not searched: each a known term and `>= 0`, the remainder certified by
+  Bernstein, halving as `subdivide` allows. What fails is named. CLI
+  `--multipliers JSON`, MCP `multipliers`.
+- **`NonnegSpec(witness=...)`** -- an external Bernstein tree or FOREST
+  imported and re-checked: `nonneg_leaves`' shape, certo's `{"tree": ...}`
+  or a `polynomial_nonneg` certificate, or a path to any of them. Bound to
+  the obligation first (polynomial, ring, box, region); the leaves must tile
+  the box, turned into certo's tree by cuts no leaf crosses; every leaf
+  recomputed, and the witness's own coefficients compared and the
+  disagreements counted. CLI `--witness FILE`, MCP `witness_path`.
+- **`NonnegSpec(products=3)`** -- products of three or more ACTIVE
+  conditions built on demand when pairs are not enough. `verify` builds a
+  product term from the conditions themselves.
+- **`ParametricSpec(pieces=[...])`, certificate `parametric_family`** -- a
+  program FEASIBLE on the whole box, by a family of bases: from each basis
+  the exact solution `N(t)/D(t)` (Cramer with Bareiss' fraction-free
+  elimination), `A N = D d` checked as a polynomial identity, `D` of one
+  sign, `N >= 0` and every slack `>= 0` on the piece's region by Bernstein;
+  the basis itself a checked claim; the pieces covering the box as the leaves
+  of a tree of box cuts and frontier cuts (`g >= 0` | `-g >= 0`), walked by
+  `verify`. `claim=` bounds the optimum on every piece. Solver-free;
+  `verify --obligation` compares the program row by row.
+- **`SynthSpec(domain_verifier=fn)`** -- a program that knows the real
+  problem, called on every candidate the model accepts; a rejection excludes
+  the candidate (and teaches its counterexample), each call's input hash,
+  result hash and version joined to the trace. A `cegis_none` that rests on
+  rejections says so: its degree is `relative`.
+- **`StrengthenSpec`, under `induct`** -- CEGIS for induction: a true `P(k)`
+  that is not inductive is strengthened by `Q_c(k)` from a template, the
+  coefficients found by counterexamples grounded from the model, then `P and
+  Q` proved by `induct`. The certificate records the strengthening and
+  `verify` checks that what was proved implies `P`. None in the template is
+  `template_too_small`, never a statement about P.
+- **`InductSpec(facts=..., initial=...)`** -- a sequence given by a
+  recurrence: the definitions as the theorem's hypotheses, premises of the
+  step and base links, kept in the certificate, checked consistent and said
+  on every verification.
+- **`why` on every inconclusive result** -- `clock`, `resource`,
+  `negative_coefficient`, `negative_point`, `physical_counterexample`,
+  `template_too_small`, `rounding`, `solver_unknown`, `out_of_theory`,
+  `unchecked` -- in `Result.why`, the JSON, `reading` and the CLI; and
+  `meta["phases_ms"]` (construction, search, extraction, check, self_check)
+  where the engine measures them.
+- **The coverage map** -- `certo report --coverage` prints command x reason
+  with counts and the sizes seen; `--json` adds `by_reason`, `by_why`,
+  `by_version` and the map. Each coverage line now records its `reason`;
+  lines written before are classified on reading.
+- **A wheel that knows what it is** -- the build writes `certo/_build.json`
+  (commit, clean tree, build date) into the sdist and the wheel;
+  `certo --version` and `doctor` print it, `certo.build_info()` returns it.
+
+### Fixed
+
+- **`entails` read a solver's `unknown` as False**: a composed proof, an
+  induction or a binding whose link z3 could not decide was INVALID. It is
+  `inconclusive` with z3's reason; `compose` and `induct` say the link was
+  not decided rather than wrong; and a nested certificate that could not be
+  re-checked leaves its parent open, not failed.
+- A region leaf whose remainder is zero accepted a negative degree.
+
 ## [0.38.0] — 2026-11-02
 
 **An answer is valid, invalid or inconclusive -- never one for another.** The

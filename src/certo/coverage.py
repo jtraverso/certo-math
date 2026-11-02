@@ -103,8 +103,32 @@ def entry(res, source: str) -> dict:
         "source": source,
         "shape": shape_of(getattr(res, "meta", None)),
         "why": why_of(getattr(res, "detail", "")),
+        # The REASON, from the fixed list (`certo.why`): a key above names a
+        # message, this names what kind of gap it was.
+        "reason": _reason(res),
         "certo": _version(),
     }
+
+
+def _reason(res):
+    try:
+        from .why import classify
+
+        return classify(res)
+    except Exception:  # noqa: BLE001 -- a log must never fail a command
+        return None
+
+
+def _reason_of_line(e) -> str:
+    """The reason of a line written before 0.39, which has none: from its
+    message key, then its status -- the same order `certo.why` uses."""
+    from .why import _BY_KEY
+
+    if e.get("why") in _BY_KEY:
+        return _BY_KEY[e["why"]]
+    return {"timeout": "clock", "resource_exhausted": "resource",
+            "out_of_theory": "out_of_theory", "explored": "rounding"}.get(
+                e.get("status"), "solver_unknown")
 
 
 _PATTERNS = None
@@ -208,7 +232,8 @@ def summary(path=None) -> dict:
     """
     p = Path(path) if path else default_path()
     out = {"path": str(p), "exists": p.exists(), "lines": 0,
-           "by_command": {}, "by_status": {}, "by_why": {}, "first": None,
+           "by_command": {}, "by_status": {}, "by_why": {}, "by_reason": {},
+           "by_version": {}, "map": {}, "first": None,
            "last": None, "full": False}
     if not p.exists():
         return out
@@ -230,6 +255,18 @@ def summary(path=None) -> dict:
                 if why:
                     k = "{} {}".format(cmd, why)
                     out["by_why"][k] = out["by_why"].get(k, 0) + 1
+                reason = e.get("reason") or _reason_of_line(e)
+                out["by_reason"][reason] = out["by_reason"].get(reason, 0) + 1
+                ver = e.get("certo") or "?"
+                out["by_version"][ver] = out["by_version"].get(ver, 0) + 1
+                # THE MAP: command -> reason -> {count, sizes seen}
+                cell = out["map"].setdefault(cmd, {}).setdefault(
+                    reason, {"count": 0, "shape": {}})
+                cell["count"] += 1
+                for sk, sv in (e.get("shape") or {}).items():
+                    if isinstance(sv, (int, float)):
+                        lo, hi = cell["shape"].get(sk, (sv, sv))
+                        cell["shape"][sk] = (min(lo, sv), max(hi, sv))
                 if ts:
                     out["first"] = ts if out["first"] is None else min(out["first"], ts)
                     out["last"] = ts if out["last"] is None else max(out["last"], ts)

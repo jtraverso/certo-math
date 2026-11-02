@@ -196,6 +196,27 @@ en 0 porque `step_from` lo diga. Si el objetivo menciona más de un entero,
 nombra el índice con `InductSpec(k=...)`; si no, certo dice que no sabe cuál
 es, y no escribe nada.
 
+**Una sucesión dada por una recurrencia** *(0.39)*. `InductSpec(facts=lambda
+k: [...], initial=[...])`: `facts(k)` vale en todo k (`a(k+1) == a(k) + 1`),
+`initial` en índices fijos (`a(0) == 0`). Son HIPÓTESIS del teorema: el paso
+se enlaza con `facts(k)` y `facts(k+1)` como premisas, un caso base en kb con
+`initial` y `facts(j)` para j = k0..kb, el certificado guarda ambos
+(`facts_smt2`, `initial_smt2`), y cada verificación comprueba que son
+consistentes y dice que el enunciado está condicionado a ellos.
+
+**No inductivo tal como está: el fortalecimiento, por CEGIS** *(0.39)*.
+`StrengthenSpec(k, k0, prop, template, coefficients, bounds, facts, initial)`
+con el mismo comando. Un `P(k)` verdadero que no se transmite -- la hipótesis
+del paso admite estados que ninguna ejecución alcanza -- se fortalece con
+`Q_c(k) = template(c, k)`: CEGIS sobre los coeficientes enteros `c`, cada
+candidato fallido deja un punto (el índice y los valores de la sucesión ahí,
+aterrizados del modelo) que el siguiente debe cumplir. Hallado: `P(k) y Q(k)`
+pasa por `induct`, y el certificado registra el fortalecimiento
+(`strengthened`), con `verify` comprobando que lo demostrado implica `P(k)`.
+Ninguno en la plantilla: NO CONCLUYENTE, `why: template_too_small` -- la
+plantilla, no P. `examples/induct_strengthen.py` halla `a(k) >= 0` para
+`b(k) >= 0` en tres rondas.
+
 ---
 
 ## ¿Mi planteamiento es sano?
@@ -483,6 +504,13 @@ datos en el acto y se imprime su ruta. En local, y sin enviarse nunca.
 usuario (`%LOCALAPPDATA%\certo\reports`, `~/.local/share/certo/reports`), no
 al directorio de trabajo -- que a menudo es un workspace de otros.
 
+**El mapa de cobertura** *(0.39)*. `certo report --coverage` imprime el mapa:
+una línea por comando y RAZÓN (el código `why` de abajo), con cuántos y los
+tamaños vistos (`vars 30..1635002`), de mayor a menor; `--json` da lo mismo,
+más `by_reason`, `by_why` (las claves de mensaje de certo) y `by_version`.
+Solo comandos, razones, conteos y tamaños -- sin nombres, valores, rutas ni
+specs -- que es lo que lo hace seguro de pegar en un issue.
+
 ### `certo doctor`
 
 **Pregunta** — ¿Puede esta instalación hacer lo que necesito?
@@ -530,6 +558,12 @@ escribe es absoluta, así que ese `.mcp.json` pasa a ser de esta máquina.
 La fila `cbc` importa con PuLP 4, que ya no trae CBC incluido. Sin
 `pulp[cbc]`, las resoluciones enteras pasan a HiGHS si está instalado y se
 rechazan si no, y `pulp` por sí solo nunca lo decía.
+
+**Qué certo** *(0.39)*. El build escribe `certo/_build.json` -- el commit, si
+el árbol estaba limpio, la fecha de build -- así `certo --version` y `doctor`
+dicen `commit 32f0068, árbol limpio, construido el 2026-11-02` para un wheel
+instalado, donde antes decían "no es un checkout". Un checkout se lee de git
+al correr; `certo.build_info()` devuelve el registro.
 
 ---
 
@@ -1511,6 +1545,25 @@ teselan la caja y verifica cada pieza en su propia hoja. Con `claim=T` el
 enunciado del conjunto es `opt ≤ T` en la caja; donde ninguna hoja lo alcanza,
 se nombran las cajas que fallan y no se certifica nada.
 
+**Factible en toda la caja: una familia de bases** *(0.39)*. `pieces=[...]`
+en lugar de un dual o un primal: cada pieza un dict con `"basis"` (variables,
+y filas cuya holgura es básica) o `"primal"` (fórmulas, funciones racionales
+permitidas), y opcionalmente `"box"` (por defecto toda la caja) y `"region"`
+(sus condiciones de frontera). Desde una base certo resuelve las filas
+ajustadas exactamente -- regla de Cramer con la eliminación sin fracciones de
+Bareiss, un denominador común -- y comprueba, pieza por pieza:
+`A(t) N(t) = D(t) d(t)` en las filas ajustadas como identidad polinómica, `D`
+de un signo en la caja de la pieza, y `N >= 0` y toda holgura `>= 0` en la
+región de la pieza (Bernstein, con los multiplicadores de la región). La base
+es a su vez una afirmación: una columna fuera de ella es cero, una fila fuera
+de ella está ajustada. Las piezas deben CUBRIR la caja: sus cajas la teselan,
+y las piezas que comparten caja se distinguen por fronteras -- `g >= 0` en
+unas y `-g >= 0` en las otras -- así la cobertura es un árbol de cortes de
+caja y de frontera que `verify` recorre, y nada de una frontera hay que
+resolverlo. `claim=T` agrega el objetivo en el testigo de cada pieza contra
+`T`. Certificado `parametric_family`, sin solver; `verify --obligation SPEC`
+compara el programa fila por fila. `examples/parametric_family.py`.
+
 ### `certo atlas`
 
 **Pregunta** — Cada caja está certificada. ¿Vale la cota en todo el dominio
@@ -1624,6 +1677,35 @@ los nombres desordenados; uno escrito entonces se sigue leyendo), y el nombre
 de una condición no puede contener `*`. La corrida respeta `--timeout` dentro
 del tensor de Bernstein y del simplex de los multiplicadores -- 0.34 seguía
 minutos después. Una CONSTANTE no necesita caja: su signo se lee.
+
+**Un testigo hallado afuera, comprobado aquí** *(0.39)*. Varias sesiones
+hallaban sus multiplicadores con un LP externo y reconstruían el certificado a
+mano.
+
+* `multipliers={"g": "1/2", "g*h": 3, "g*h*k": 1}` -- constantes sobre las
+  condiciones y sus productos (hasta seis factores, nombrados con `*` en
+  cualquier orden). certo comprueba que cada uno es un término conocido y
+  `>= 0`, y certifica el resto `poly - sum(lambda * term)` por Bernstein,
+  partiendo hasta `subdivide` veces. No se busca nada; lo que falla se dice --
+  un término desconocido, un multiplicador negativo, o un resto con un
+  coeficiente negativo (`why: negative_coefficient`). CLI `--multipliers
+  JSON`, MCP `multipliers`.
+* `witness=` -- un árbol o BOSQUE de Bernstein externo, o la ruta de su JSON:
+  la forma que escribe `nonneg_leaves` (`{"leaves": [{"box", "degrees",
+  "region", "coefficients"?}]}`), el `{"tree": ...}` propio de certo, o un
+  certificado `polynomial_nonneg`. Atado primero a ESTA obligación: un
+  polinomio, anillo, caja o región que declare debe ser el de la spec, o se
+  rechaza nombrando qué difiere. Las hojas deben teselar la caja -- un bosque
+  se vuelve el árbol de certo por cortes que ninguna hoja cruza, y un
+  solapamiento, un hueco o una hoja fuera se rechazan -- y cada hoja se
+  recalcula. Los coeficientes que traiga se comparan y se cuentan las
+  discrepancias (`meta["coefficients_disagreeing"]`); decide la aritmética de
+  certo. CLI `--witness FILE`, MCP `witness_path`.
+* `products=3` -- cuando las condiciones y sus productos de a pares no
+  bastan, se construyen productos de tres (hasta `products`) factores de las
+  condiciones ACTIVAS -- las que no son ya `>= 0` en la caja -- y se vuelven a
+  buscar los multiplicadores. `verify` construye un término producto a partir
+  de las propias condiciones. `examples/nonneg_multipliers.py`.
 
 ### `certo assign`
 
@@ -2314,6 +2396,21 @@ funciona también tras `minimize` y `maximize`.
 `improvements`, `path`, cada búsqueda, y `better_value_refutation`, la que no
 halló nada mejor).
 
+**Un verificador de dominio: el problema real, como programa** *(0.39)*.
+`SynthSpec(domain_verifier=fn, domain_verifier_version="...")`: `fn` se llama
+con cada candidato que el MODELO acepta, con `{nombre: valor}` (int,
+Fraction, bool), y responde válido (`True`, `None`, `{"valid": True}`) o
+inválido (`False`, o `{"valid": False, "counterexample": {...}, "reason":
+...}`). Un candidato rechazado se excluye y la búsqueda sigue; un
+contraejemplo dado también se aprende. El hash de la entrada, el del
+resultado y la versión del verificador de cada llamada se unen a la traza
+(`meta["domain_verifier"]`). Hallado: el certificado `cegis` registra la
+última llamada, y `verify` dice que no se volvió a correr. Ninguno: la
+refutación `cegis_none` lleva los candidatos rechazados como exclusiones, así
+que es RELATIVA a las respuestas del verificador -- y lo dice. Un verificador
+que lanza una excepción da no concluyente, nunca una refutación.
+`examples/synth_domain_verifier.py`.
+
 ### `certo compose`
 
 **Pregunta** — ¿Cómo ensamblo mis lemas en una demostración?
@@ -2487,6 +2584,13 @@ extendida. Cada una se detecta; la batería lo mantiene así. `verify
 --obligation SPEC` además ata un `farkas_ray` suelto a tu programa: el sistema
 de su carga contra tu `A x <= b`. Por MCP las mismas baterías son
 `verify(..., tamper=true)` *(0.35.1)*, como datos.
+
+**Enlaces no concluyentes** *(0.39)*. Una demostración compuesta, una
+inducción o un enlace cuyo vínculo z3 respondió con `unknown` salía INVÁLIDO:
+`entails` leía `unknown` como falso. Ahora `certo.certificate.entailment`
+devuelve `(True | False | None, razón)`, un enlace que queda abierto es
+`inconclusive` con la razón de z3, y un certificado anidado que no se pudo
+volver a comprobar deja abierto a su padre, no fallido.
 
 ### `certo step`
 

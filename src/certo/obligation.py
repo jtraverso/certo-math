@@ -65,12 +65,13 @@ FAMILIES = {
     "synth_proved": "synth",
     "ratio_bound": "ratio", "resultant": "resultant", "integer_peak": "peak",
     "bound_step": "step", "parametric_bound": "parametric",
+    "parametric_family": "pfamily",
 }
 
 #: families whose certificate carries the whole obligation
 WHOLE = ("ideal", "nonneg", "cover", "cnf", "lp", "atlas", "covering", "roles",
          "system", "sos", "synth", "ratio", "resultant", "peak", "step",
-         "parametric")
+         "parametric", "pfamily")
 
 
 # --- canonical pieces ---------------------------------------------------------
@@ -128,11 +129,30 @@ def _fraction(v) -> str:
 
 # --- the certificate's side --------------------------------------------------
 
+def _pfamily(ring, P, box, sense, free, region, objective, constraints, claim):
+    """A family of bases' obligation: the program, the box, the region and
+    the claim -- the pieces are the proof, not the obligation."""
+    return {"parameters": sorted(ring), "sense": sense, "free": sorted(free),
+            "box": {n: [_fraction(lo), _fraction(hi)] for n, (lo, hi) in box.items()},
+            "region": {str(n): _poly_key(P(g)) for n, g in region},
+            "objective": {str(v): _poly_key(P(c)) for v, c in objective.items()},
+            "constraints": sorted([str(n), {str(v): _poly_key(P(c))
+                                            for v, c in row.items()},
+                                   s, _poly_key(P(rhs))]
+                                  for n, row, s, rhs in constraints),
+            "claim": None if claim is None else _poly_key(P(claim))}
+
+
 def _of_cert(cert) -> dict:
     from .polynomials import Poly
 
     p, kind = cert.payload, cert.kind
     fam = FAMILIES.get(kind)
+    if fam == "pfamily":
+        ring = tuple(p["parameters"])
+        return _pfamily(ring, lambda x: Poly.parse(ring, x), p["box"], p["sense"],
+                        p.get("free") or [], sorted((p.get("region") or {}).items()),
+                        p["objective"], p["constraints"], p.get("claim"))
     if fam == "ideal":
         vs = tuple(p["variables"])
         return {"variables": sorted(vs),
@@ -372,6 +392,15 @@ def _cert_formulas(cert) -> dict:
 
 def _of_spec(spec, family, cert=None) -> dict:
     name = type(spec).__name__
+    if family == "pfamily":
+        from .polynomials import as_poly
+
+        ring = tuple(spec.parameters)
+        return _pfamily(ring, lambda x: as_poly(ring, x), spec.box,
+                        getattr(spec, "sense", "max"),
+                        [str(v) for v in (getattr(spec, "free", None) or [])],
+                        list(getattr(spec, "region", None) or []),
+                        spec.objective, spec.constraints, getattr(spec, "claim", None))
     if family == "ideal":
         from .engines.algebra import ideal_polynomials
 
@@ -687,6 +716,8 @@ def _obligations(obls):
 
 
 def _family_of_spec(spec):
+    if type(spec).__name__ == "ParametricSpec" and getattr(spec, "pieces", None) is not None:
+        return "pfamily"
     return {"IdealSpec": "ideal", "NonnegSpec": "nonneg", "CoverSpec": "cover",
             "AtlasSpec": "atlas", "CoveringSpec": "covering", "RoleSpec": "roles",
             "CNFSpec": "cnf", "LPSpec": "lp", "PackingSpec": "lp", "SOSSpec": "sos",

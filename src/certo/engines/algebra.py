@@ -934,8 +934,11 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     from ..parametric import evaluate
     from ..polynomials import Poly
 
+    from ..why import Phases
+
     t0 = time.perf_counter()
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
+    phases = Phases()
 
     def refuse(msg):
         return Result("nonneg", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
@@ -1011,7 +1014,11 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
                "title": spec.title}
     if cleared is not None:
         payload["cleared"] = cleared
+    supplied = (getattr(spec, "witness", None) is not None
+                or getattr(spec, "multipliers", None) is not None)
     if any(hi is None for _lo, hi in box.values()):
+        if supplied:
+            return refuse(t("nonneg.witness_open"))
         return _with_method(
             _nonneg_ray(spec, poly, box, conditions, payload, ms, spec_path),
             "shift")
@@ -1021,6 +1028,14 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         degrees = _proof_degrees(getattr(spec, "degree", None), ring)
     except (ValueError, TypeError) as e:
         return refuse(e)
+    phases.ms["construction"] = ms()
+    if getattr(spec, "witness", None) is not None:
+        return phases.into(_nonneg_witness(spec, poly, box, conditions, terms,
+                                           payload, ms, spec_path, phases))
+    if getattr(spec, "multipliers", None) is not None:
+        return phases.into(_nonneg_multipliers(spec, poly, box, conditions,
+                                               terms, depth, degrees, payload,
+                                               ms, spec_path, phases))
     # Every condition and every pairwise product is a term, whatever its
     # degree: the proof runs at the largest degree any of them needs, and
     # says which, so no guard is dropped for being of higher degree than the
@@ -1028,16 +1043,40 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     used = bernstein._region_degrees(poly, terms, degrees)
     run_meta = {"bernstein_degrees": dict(zip(ring, used)),
                 "region_terms": [n for n, _g in terms]}
-    ok, tree = (bernstein.nonneg_region(poly, box, terms, depth, degrees) if terms
-                else bernstein.nonneg(poly, box, depth, degrees))
+    with phases("search"):
+        ok, tree = (bernstein.nonneg_region(poly, box, terms, depth, degrees)
+                    if terms else bernstein.nonneg(poly, box, depth, degrees))
+        products = int(getattr(spec, "products", 2) or 2)
+        if not ok and conditions and products > 2:
+            # PRODUCTS ON DEMAND: pairs were not enough, so triples (and up to
+            # `products` factors) of the ACTIVE conditions -- the ones not
+            # already non-negative on the whole box, which cut nothing.
+            active = [n for n, g in conditions
+                      if not bernstein.nonneg(g, box)[0]]
+            extra = []
+            for order in range(3, products + 1):
+                extra += bernstein.higher_products(conditions, order, active)
+                if len(terms) + len(extra) > PRODUCT_TERMS_MAX:
+                    run_meta["products_capped"] = order
+                    break
+                ok, tree = bernstein.region_multipliers(poly, box, terms + extra,
+                                                        degrees)
+                run_meta["products"] = order
+                run_meta["region_terms"] = [n for n, _g in terms + extra]
+                run_meta["bernstein_degrees"] = dict(zip(ring, bernstein._region_degrees(
+                    poly, terms + extra, degrees)))
+                if ok:
+                    break
     if ok:
-        cert = polynomial_nonneg_certificate(
-            dict(payload, holds=True, tree=tree)).stamp(spec_path or None)
-        return Result("nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG,
-                      ms(), cert, detail=t("nonneg.proved", poly=str(poly) or "0",
-                                           box=_box_text(box) or t("nonneg.constant"),
-                                           region=_region_text(conditions)),
-                      meta=run_meta)
+        with phases("extraction"):
+            cert = polynomial_nonneg_certificate(
+                dict(payload, holds=True, tree=tree)).stamp(spec_path or None)
+        return phases.into(Result(
+            "nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG,
+            ms(), cert, detail=t("nonneg.proved", poly=str(poly) or "0",
+                                 box=_box_text(box) or t("nonneg.constant"),
+                                 region=_region_text(conditions)),
+            meta=run_meta))
 
     # A point where it fails: the corners of a grid on the box, finest last,
     # inside the region. A NEGATIVE corner coefficient is such a point, and
@@ -1079,10 +1118,220 @@ def _nonneg(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         where = t("nonneg.root_hint", name=roots[0][0], at=str(roots[0][1]))
     elif hint and hint.get("split"):
         where = t("nonneg.split_hint", name=hint["split"], at=hint["at"])
+    return phases.into(Result(
+        "nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+        ENGINE_NONNEG, ms(), None,
+        detail=t("nonneg.unknown", depth=depth) + (" " + where if where else ""),
+        meta=dict(run_meta, diagnose=hint, why="negative_coefficient")))
+
+
+#: Region terms past which products of more factors are not built: the
+#: multiplier program has one column per term.
+PRODUCT_TERMS_MAX = 2_000
+
+
+def _nonneg_proved(poly, box, conditions, payload, tree, ms, spec_path, meta,
+                   detail_extra=""):
+    from ..certificate import polynomial_nonneg_certificate
+
+    cert = polynomial_nonneg_certificate(
+        dict(payload, holds=True, tree=tree)).stamp(spec_path or None)
+    detail = t("nonneg.proved", poly=str(poly) or "0",
+               box=_box_text(box) or t("nonneg.constant"),
+               region=_region_text(conditions))
+    if detail_extra:
+        detail = detail.rstrip(". ") + ". " + detail_extra
+    return Result("nonneg", Status.UNSAT, Verdict.PROVED, ENGINE_NONNEG, ms(),
+                  cert, detail=detail, meta=meta)
+
+
+def _nonneg_multipliers(spec, poly, box, conditions, terms, depth, degrees,
+                        payload, ms, spec_path, phases):
+    """SUPPLIED multipliers: a witness found elsewhere, checked here and
+    never searched. What fails is said: a term certo does not know, a
+    negative multiplier, or a remainder not shown non-negative."""
+    from .. import bernstein
+
+    mult = dict(spec.multipliers or {})
+    with phases("check"):
+        ok, tree, why = bernstein.with_multipliers(
+            poly, box, dict(terms), mult, depth, degrees)
+    meta = {"method": "bernstein", "supplied": "multipliers",
+            "multipliers": {str(k): str(v) for k, v in mult.items()}}
+    if ok:
+        with phases("extraction"):
+            return _nonneg_proved(poly, box, conditions, payload, tree, ms,
+                                  spec_path, meta,
+                                  t("nonneg.multipliers_checked", n=len(mult)))
+    kind, name = why
+    if kind in ("term", "sign", "value"):
+        return Result("nonneg", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_NONNEG, ms(), None,
+                      detail=t({"term": "nonneg.multiplier_term",
+                                "sign": "nonneg.multiplier_sign",
+                                "value": "nonneg.multiplier_value"}[kind], name=name,
+                               names=", ".join(n for n, _g in terms) or "-"),
+                      meta=meta)
     return Result("nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                   ENGINE_NONNEG, ms(), None,
-                  detail=t("nonneg.unknown", depth=depth) + (" " + where if where else ""),
-                  meta=dict(run_meta, diagnose=hint))
+                  detail=t("nonneg.multipliers_short", depth=depth),
+                  meta=dict(meta, why="negative_coefficient"))
+
+
+def _read_witness(w):
+    """A path, a JSON text, a dict or a list of leaves -> a dict."""
+    import json
+    from pathlib import Path
+
+    from ..bernstein import NotAWitness
+
+    if isinstance(w, (str, Path)):
+        text = str(w)
+        if not text.lstrip().startswith(("{", "[")):
+            try:
+                text = Path(w).read_text(encoding="utf-8")
+            except OSError as e:
+                raise NotAWitness(str(e)) from e
+        try:
+            w = json.loads(text)
+        except ValueError as e:
+            raise NotAWitness("not JSON: {}".format(e)) from e
+    if isinstance(w, list):
+        w = {"leaves": w}
+    if not isinstance(w, dict):
+        raise NotAWitness("a witness is a dict, a list of leaves, or a path")
+    if w.get("kind") == "polynomial_nonneg" and isinstance(w.get("payload"), dict):
+        # A certo certificate made elsewhere: its payload is the witness.
+        p = w["payload"]
+        w = {"polynomial": p.get("poly"), "parameters": p.get("parameters"),
+             "box": p.get("box"), "region": p.get("region"),
+             "tree": p.get("tree")}
+    return w
+
+
+def _nonneg_witness(spec, poly, box, conditions, terms, payload, ms,
+                    spec_path, phases):
+    """AN EXTERNAL Bernstein witness, IMPORTED and re-checked.
+
+    Bound to THIS obligation first: a polynomial, a ring, a box or a region
+    the witness carries must be the spec's, or it is refused naming what
+    differs -- a valid witness of another polynomial proves nothing here.
+    Then every leaf is recomputed; the witness's own coefficients, when it
+    carries them, are compared and the disagreements counted, but certo's
+    arithmetic is what decides.
+    """
+    from fractions import Fraction
+
+    from .. import bernstein
+    from ..bernstein import NotAWitness
+    from ..polynomials import Poly
+
+    ring = tuple(poly.vars)
+
+    def refuse(msg):
+        return Result("nonneg", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_NONNEG, ms(), None,
+                      detail=t("nonneg.witness_bad", why=str(msg)),
+                      meta={"supplied": "witness"})
+
+    with phases("construction"):
+        try:
+            w = _read_witness(spec.witness)
+            if w.get("parameters") is not None and tuple(w["parameters"]) != ring:
+                raise NotAWitness(t("nonneg.witness_other", what="parameters",
+                                    got=list(w["parameters"]), want=list(ring)))
+            wp = w.get("polynomial", w.get("poly"))
+            if wp is not None and Poly.parse(ring, wp) != poly:
+                raise NotAWitness(t("nonneg.witness_other", what="polynomial",
+                                    got=str(Poly.parse(ring, wp)), want=str(poly)))
+            if w.get("box") is not None:
+                wb = {n: (Fraction(lo), Fraction(hi))
+                      for n, (lo, hi) in w["box"].items()}
+                if wb != box:
+                    raise NotAWitness(t("nonneg.witness_other", what="box",
+                                        got=_box_text(wb), want=_box_text(box)))
+            if w.get("region") is not None:
+                wr = {str(n): Poly.parse(ring, g) for n, g in w["region"].items()}
+                if wr != dict(conditions):
+                    raise NotAWitness(t("nonneg.witness_other", what="region",
+                                        got=sorted(wr), want=sorted(dict(conditions))))
+            tdict = dict(terms)
+            leaves = []
+            if w.get("tree") is not None or "leaves" not in w:
+                tree = w.get("tree")
+            else:
+                for raw in w["leaves"]:
+                    lb = bernstein._leaf_box(raw["box"], ring)
+                    region = {str(k): str(v) for k, v in
+                              (raw.get("region") or {}).items() if Fraction(v)}
+                    deg = raw.get("degrees", raw.get("deg"))
+                    if region:
+                        if deg is None:
+                            used = []
+                            for n in region:
+                                g = bernstein.term_named(tdict, n)
+                                if g is None:
+                                    raise NotAWitness(t(
+                                        "nonneg.multiplier_term", name=n,
+                                        names=", ".join(tdict) or "-"))
+                                used.append((n, g))
+                            deg = list(bernstein._region_degrees(poly, used, None))
+                        leaf = {"deg": [int(x) for x in deg], "region": region}
+                    elif deg is not None:
+                        leaf = {"deg": [int(x) for x in deg]}
+                    else:
+                        leaf = None
+                    leaves.append((lb, leaf, raw.get("coefficients")))
+                tree = bernstein.forest_tree(box, [(b, l) for b, l, _c in leaves])
+        except (NotAWitness, KeyError, TypeError, ValueError,
+                ZeroDivisionError) as e:
+            return refuse(e)
+
+    meta = {"method": "bernstein", "supplied": "witness"}
+    with phases("check"):
+        failed, compared, mismatched = [], 0, 0
+        for lb, leaf, coeffs in leaves:
+            if not bernstein.check(poly, lb, leaf, terms=tdict or None):
+                failed.append(lb)
+            if coeffs is not None:
+                rest = poly
+                for n, v in ((leaf or {}).get("region") or {}).items():
+                    rest = rest - bernstein.term_named(tdict, n).scaled(Fraction(v))
+                d = (tuple(leaf["deg"]) if isinstance(leaf, dict) and "deg" in leaf
+                     else bernstein.degrees_of(rest))
+                mine = bernstein.coefficient_list(rest, lb, d)
+                theirs = (coeffs if isinstance(coeffs, dict)
+                          else dict(zip(list(mine), coeffs)))
+                for k, v in theirs.items():
+                    compared += 1
+                    key = k if isinstance(k, str) else ",".join(map(str, k))
+                    try:
+                        if mine.get(key) != Fraction(str(v)):
+                            mismatched += 1
+                    except (ValueError, ZeroDivisionError):
+                        mismatched += 1
+        ok = (not failed and bernstein.check(poly, box, tree, terms=tdict or None))
+    meta.update(leaves=len(leaves) if leaves else None,
+                coefficients_compared=compared,
+                coefficients_disagreeing=mismatched)
+    extra = (t("nonneg.witness_coeffs", n=mismatched, total=compared)
+             if mismatched else "")
+    if ok:
+        with phases("extraction"):
+            return _nonneg_proved(poly, box, conditions, payload, tree, ms,
+                                  spec_path, meta,
+                                  (t("nonneg.witness_checked",
+                                     n=len(leaves) if leaves else "-")
+                                   + (". " + extra if extra else "")))
+    where = ""
+    if failed:
+        where = _box_text(failed[0])
+        meta["failed_leaves"] = len(failed)
+    return Result("nonneg", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                  ENGINE_NONNEG, ms(), None,
+                  detail=t("nonneg.witness_short", n=len(failed), where=where or "-")
+                  + (" " + extra if extra else ""),
+                  meta=dict(meta, why="negative_coefficient"))
 
 
 def _proof_degrees(degree, ring):
@@ -2053,6 +2302,7 @@ def parametric(spec, limits: Limits | None = None,
     # A primal only has to be FEASIBLE, so any sense is fine there; with a
     # dual, an equality row is fine too -- its dual simply has no sign.
     allowed = ({"<=", ">=", "=="} if getattr(spec, "primal", None) is not None
+               or getattr(spec, "pieces", None) is not None
                else {want, "=="})
     bad_sense = [n for n, _, sense, _ in spec.constraints
                  if sense not in allowed]
@@ -2062,8 +2312,14 @@ def parametric(spec, limits: Limits | None = None,
                       detail=t("engine.param.le_only", sense=spec.sense,
                                want=want,
                                names=", ".join(map(str, bad_sense[:4]))))
+    if getattr(spec, "pieces", None) is not None:
+        return _parametric_family(spec, t0, spec_path)
+    from ..why import Phases
+
+    phases = Phases()
     try:
-        out = certify(spec)
+        with phases("search"):
+            out = certify(spec)
     except (NotParametric, NotPolynomial) as e:
         return Result("parametric", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
                       ENGINE_PARAM, 0.0, None, detail=str(e))
@@ -2099,11 +2355,19 @@ def parametric(spec, limits: Limits | None = None,
         if diag:
             detail = detail.rstrip()
             detail += ("" if detail.endswith(".") else ".") + " " +                 _where_text(diag[0])
-        return Result("parametric", Status.UNKNOWN_SOLVER,
-                      Verdict.INCONCLUSIVE, ENGINE_PARAM, ms, None,
-                      detail=detail,
-                      meta={"failed_columns": out["failed"],
-                            "diagnosis": diag})
+        # A corner where the residual is NEGATIVE is a point where this
+        # witness fails; otherwise only a coefficient is.
+        # At a CORNER the coefficient is the value there: with no region to
+        # exclude the vertex, the residual is negative at that point.
+        at_point = not getattr(spec, "region", None) and any(
+            (d or {}).get("corner") for d in diag)
+        return phases.into(Result(
+            "parametric", Status.UNKNOWN_SOLVER,
+            Verdict.INCONCLUSIVE, ENGINE_PARAM, ms, None,
+            detail=detail,
+            meta={"failed_columns": out["failed"], "diagnosis": diag,
+                  "why": "negative_point" if at_point
+                  else "negative_coefficient"}))
 
     cert = parametric_bound_certificate(
         parameters=dict(spec.parameters),
@@ -2156,6 +2420,67 @@ def parametric(spec, limits: Limits | None = None,
                   meta={"bound": str(out["bound"]), "floor": floor,
                         "sense": out["sense"],
                         "columns": len(out["variables"])})
+
+
+def _parametric_family(spec, t0, spec_path):
+    """FEASIBLE on the whole box: a family of bases, each piece checked and
+    the pieces covering the box (`certo.pfamily`)."""
+    from ..certificate import parametric_family_certificate
+    from ..linarith import NotPolynomial
+    from ..pfamily import NotAFamily, certify_family
+    from ..why import Phases
+
+    phases = Phases()
+    try:
+        with phases("search"):
+            out = certify_family(spec)
+    except (NotAFamily, NotPolynomial, ValueError, TypeError) as e:
+        return Result("parametric", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      ENGINE_PARAM, (time.perf_counter() - t0) * 1000, None,
+                      detail=t("pfamily.refused", why=str(e)))
+    box = ", ".join("{} in [{}, {}]".format(n, lo, hi)
+                    for n, (lo, hi) in out["box"].items())
+    if not out["ok"]:
+        i, label, hint = out["failed"][0]
+        where = ""
+        if hint and hint.get("point"):
+            where = " " + t("pfamily.where", point=", ".join(
+                "{} = {}".format(n, v) for n, v in hint["point"].items()))
+        at_point = bool(hint and hint.get("corner")
+                        and not getattr(spec, "region", None)
+                        and not (spec.pieces[i] or {}).get("region"))
+        return phases.into(Result(
+            "parametric", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+            ENGINE_PARAM, (time.perf_counter() - t0) * 1000, None,
+            detail=t("pfamily.failed", n=len(out["failed"]), i=i, what=label,
+                     box=box) + ("." + where if where else ""),
+            meta={"failed": [{"piece": a, "check": b} for a, b, _h in out["failed"]],
+                  "why": "negative_point" if at_point else "negative_coefficient"}))
+    with phases("extraction"):
+        cert = parametric_family_certificate(
+            parameters=list(spec.parameters), box=out["box"], sense=out["sense"],
+            objective=out["objective"], constraints=out["constraints"],
+            free=out["free"], region=out["region"] or None, claim=out["claim"],
+            pieces=out["pieces"], cover=out["cover"], title=spec.title,
+        ).stamp(spec_path or None)
+    frontiers = _count_frontiers(out["cover"])
+    detail = t("pfamily.proved", n=len(out["pieces"]), box=box, frontiers=frontiers)
+    if out["claim"] is not None:
+        detail += " -- " + t("pfamily.claim", relation=">=" if out["sense"] == "max"
+                             else "<=", target=str(_poly_text(spec, out["claim"])))
+    return phases.into(Result(
+        "parametric", Status.SAT, Verdict.PROVED, ENGINE_PARAM,
+        (time.perf_counter() - t0) * 1000, cert, detail=detail,
+        meta={"pieces": len(out["pieces"]), "frontiers": frontiers,
+              "bases": [p.get("basis") for p in out["pieces"]]}))
+
+
+def _count_frontiers(node) -> int:
+    if isinstance(node, list):
+        return _count_frontiers(node[1]) + _count_frontiers(node[2])
+    if isinstance(node, dict) and "frontier" in node:
+        return 1 + _count_frontiers(node["pos"]) + _count_frontiers(node["neg"])
+    return 0
 
 
 def _parametric_pieces(spec, out, t0, spec_path):

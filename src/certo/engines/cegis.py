@@ -41,6 +41,77 @@ def _in_original(original, point):
         return False
     return None
 
+def _plain_values(assign) -> dict:
+    """`{name: (sort, text)}` as Python values: int, Fraction, bool."""
+    from fractions import Fraction
+
+    out = {}
+    for n, (sort, v) in assign.items():
+        if sort == "Int":
+            out[n] = int(v)
+        elif sort == "Real":
+            out[n] = Fraction(str(v))
+        elif sort == "Bool":
+            out[n] = str(v).lower() == "true"
+        else:
+            out[n] = v
+    return out
+
+
+def _as_z3(var, value):
+    """A Python value as a z3 value of `var`'s sort."""
+    from fractions import Fraction
+
+    if var.sort() == z3.IntSort():
+        return z3.IntVal(int(value))
+    if var.sort() == z3.RealSort():
+        return z3.RealVal(str(Fraction(str(value))))
+    if var.sort() == z3.BoolSort():
+        return z3.BoolVal(bool(value) if not isinstance(value, str)
+                          else value.lower() == "true")
+    raise ValueError("unsupported sort: {}".format(var.sort()))
+
+
+def _sha(obj) -> str:
+    import hashlib
+    import json
+
+    text = json.dumps(obj, sort_keys=True, default=str, ensure_ascii=False)
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _domain_check(spec, impl_assign):
+    """Run the external verifier on one candidate. `(valid, ce, record)`:
+    valid True / False / None (it raised), ce `{input: value}` or None, and
+    the record the trace and the certificate keep."""
+    fn = spec.domain_verifier
+    values = _plain_values(impl_assign)
+    version = (getattr(spec, "domain_verifier_version", "")
+               or getattr(fn, "version", None) or getattr(fn, "__version__", None)
+               or "")
+    record = {"verifier": getattr(fn, "__qualname__", type(fn).__name__),
+              "version": str(version),
+              "input_sha256": _sha({n: str(v) for n, v in values.items()})}
+    try:
+        got = fn(values)
+    except Exception as e:  # noqa: BLE001 -- the program is the user's
+        record.update(valid=None, error="{}: {}".format(type(e).__name__, e),
+                      result_sha256=None)
+        return None, None, record
+    if isinstance(got, dict):
+        valid = bool(got.get("valid", False))
+        ce = got.get("counterexample") or got.get("input")
+        reason = got.get("reason")
+    else:
+        valid, ce, reason = (got is None or got is True), None, None
+    record.update(valid=valid, result_sha256=_sha(got))
+    if reason:
+        record["reason"] = str(reason)[:200]
+    if ce is not None:
+        record["counterexample"] = {str(k): str(v) for k, v in ce.items()}
+    return valid, ce, record
+
+
 def _remaining_ms(deadline):
     return max(1, int((deadline - time.perf_counter()) * 1000))
 
@@ -95,6 +166,9 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     counterexamples = []
     ce_points = []          # the same, as (z3 var, value) pairs
     trace = []
+    domain_log = []         # every call of the external verifier
+    rejected = []           # the candidates it rejected, kept as exclusions
+    by_name = {str(v): v for v in input_vars}
     spec_smt2 = {
         "impl_constraints": z3util.smt2(impl_cons),
         "behavior": z3util.smt2(behav),
@@ -107,9 +181,28 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
 
     scope = spec.scope_data() if hasattr(spec, "scope_data") else None
 
+    built = time.perf_counter()
+
     def done(status, verdict, detail, cert=None, k=0, impl=None):
         meta = {"iterations": k, "counterexamples": len(counterexamples),
-                "domain": domain, "trace": trace}
+                "domain": domain, "trace": trace,
+                # construction: the contract normalised and the solvers set
+                # up; search: the rounds, the certificate written with them
+                "phases_ms": {"construction": round((built - t0) * 1000, 2),
+                              "search": round((time.perf_counter() - built) * 1000, 2)}}
+        if domain_log:
+            meta["domain_verifier"] = {
+                "calls": len(domain_log),
+                "rejected": sum(1 for r in domain_log if r.get("valid") is False),
+                "log": domain_log}
+            if cert is not None and cert.kind == "cegis_none":
+                cert.payload["domain_rejected"] = rejected
+            if cert is not None and cert.kind == "cegis":
+                cert.payload["domain_check"] = domain_log[-1]
+                detail = detail.rstrip(". ") + ". " + t(
+                    "engine.synth.domain_accepted",
+                    rejected=meta["domain_verifier"]["rejected"],
+                    version=domain_log[-1].get("version") or "-")
         original = getattr(spec, "original", None)
         if original is not None and ce_points:
             inside = [_in_original(original, pt) for pt in ce_points]
@@ -166,10 +259,16 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
                 counterexamples)
             # THE DECISIVE ONES: a minimal subset of the counterexamples that
             # still leaves no candidate -- "these three inputs force it", the
-            # sentence a write-up wants. Checked again by `verify`.
-            decisive = _decisive(impl_cons, behav, corr, input_vars, helper_vars,
-                                 counterexamples, lim)
+            # sentence a write-up wants. Checked again by `verify`. Not when
+            # the domain verifier excluded candidates: those exclusions are
+            # part of the refutation, and the subset alone would not be one.
+            decisive = None if rejected else _decisive(
+                impl_cons, behav, corr, input_vars, helper_vars,
+                counterexamples, lim)
             detail = t("engine.synth.none", ces=len(counterexamples))
+            if rejected:
+                detail = detail.rstrip(". ") + ". " + t(
+                    "engine.synth.domain_rejected", n=len(rejected))
             if decisive is not None:
                 cert.payload["decisive"] = decisive
                 detail = detail.rstrip(". ") + ". " + t(
@@ -195,6 +294,36 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             ce_solver.set("timeout", _remaining_ms(deadline))
             r2 = ce_solver.check()
 
+            if r2 == z3.unsat and getattr(spec, "domain_verifier", None) is not None:
+                # THE MODEL ACCEPTS IT; NOW THE REAL PROBLEM. A candidate the
+                # domain verifier rejects is excluded, and the search goes on.
+                valid, dce, record = _domain_check(spec, impl_assign)
+                record["round"] = k + 1
+                domain_log.append(record)
+                if valid is None:
+                    return done(Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
+                                t("engine.synth.domain_error",
+                                  error=record.get("error", "")), k=k)
+                if not valid:
+                    rejected.append(dict(record, implementation=impl_assign))
+                    trace.append({"round": k + 1, "implementation": impl_assign,
+                                  "counterexample": record.get("counterexample"),
+                                  "source": "domain",
+                                  "input_sha256": record["input_sha256"],
+                                  "result_sha256": record["result_sha256"],
+                                  "version": record["version"]})
+                    if on_round is not None:
+                        on_round(trace[-1])
+                    impl_solver.add(z3.Not(z3.And(*fixed)) if len(fixed) > 1
+                                    else z3.Not(fixed[0]))
+                    pts = [(by_name[n], _as_z3(by_name[n], v))
+                           for n, v in (dce or {}).items() if n in by_name]
+                    if pts and len(pts) == len(input_vars):
+                        subs = list(pts) + [
+                            (h, z3.Const("{}__dom{}".format(h, k), h.sort()))
+                            for h in helper_vars]
+                        impl_solver.add(z3.substitute(z3.Implies(behav, corr), *subs))
+                    continue
             if r2 == z3.unsat:
                 if on_round is not None:
                     # The ACCEPTED round is a round too: a caller counting

@@ -43,3 +43,5 @@ examples/interchange_cell.json
 # tree and should stay there; this is the belt for the day it does not.
 *.env
 !examples/*.env
+# written by the build (setup.py), never committed
+src/certo/_build.json

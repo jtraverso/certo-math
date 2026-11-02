@@ -46,10 +46,15 @@ def _fail(detail, t0, status=Status.UNKNOWN_SOLVER, meta=None) -> Result:
 
 
 def induct(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
-    from ..certificate import Certificate, entails, obligations_of
+    from ..certificate import Certificate, entailment, obligations_of
     from ..certificate import verify as verify_cert
     from . import smt
 
+    if type(spec).__name__ == "StrengthenSpec":
+        # P(k) is not inductive as stated: find the strengthening first.
+        from .strengthen import strengthen
+
+        return strengthen(spec, limits, spec_path)
     lim = limits or Limits()
     t0 = time.perf_counter()
 
@@ -102,8 +107,17 @@ def induct(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
     statement, kvar = _step_statement(spec, step_from)
     if statement is None:
         return _fail(t("engine.induct.which_k"), t0, Status.OUT_OF_THEORY)
+    facts = facts_formula(spec, kvar)
+    initial = list(getattr(spec, "initial", None) or [])
+    negated = z3.And(*(premises_at(facts, kvar, [kvar, kvar + 1]) + initial
+                       + [z3.Not(statement)]))
     obl = obligations_of(step.certificate.to_dict())
-    if not obl or not entails(z3.Not(statement), obl, lim):
+    got, why = (entailment(negated, obl, lim) if obl
+                else (False, ""))
+    if got is None:
+        return _fail(t("engine.induct.step_link_unknown", reason=why), t0,
+                     meta={"reason": why})
+    if not got:
         return _fail(t("engine.induct.step_link_from", step=step_from), t0)
 
     ms = (time.perf_counter() - t0) * 1000
@@ -113,7 +127,11 @@ def induct(spec, limits: Limits | None = None, spec_path: str = "") -> Result:
         step_smt2=z3util.smt2(statement), k=str(kvar),
         conclusion=spec.describe or t("engine.induct.conclusion", k0=spec.k0),
         bridge=spec.bridge, title=spec.title,
-    ).stamp(spec_path or None)
+    )
+    if facts is not None or initial:
+        cert.payload["facts_smt2"] = z3util.smt2(facts) if facts is not None else None
+        cert.payload["initial_smt2"] = [z3util.smt2(f) for f in initial]
+    cert.stamp(spec_path or None)
 
     return Result(
         "induct", Status.UNSAT, Verdict.PROVED, ENGINE, ms, cert,
@@ -153,6 +171,23 @@ def induction_var(goal, declared=None):
         return declared
     ints = [c for c in z3util.free_consts(goal) if c.sort() == z3.IntSort()]
     return ints[0] if len(ints) == 1 else None
+
+
+def facts_formula(spec, k):
+    """`And(facts(k))` with `k` free, or None -- what the certificate keeps."""
+    fn = getattr(spec, "facts", None)
+    if fn is None:
+        return None
+    fs = list(fn(k))
+    return z3.And(*fs) if len(fs) > 1 else (fs[0] if fs else None)
+
+
+def premises_at(facts, k, js):
+    """The definitions at each index in `js`: `facts` with k -> j."""
+    if facts is None:
+        return []
+    return [z3.substitute(facts, (k, j if z3.is_expr(j) else z3.IntVal(j)))
+            for j in js]
 
 
 def required_step(goal, k, step_from):

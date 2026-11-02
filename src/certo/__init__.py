@@ -23,16 +23,17 @@ from .i18n import set_lang, t
 from .limits import Limits
 from .lpview import lp_view
 from .reader import nonneg_leaves
+from .buildinfo import build_info
 from .polynomials import Poly
 from .spec import (BisectSpec, BoundSpec, DomainSpec, IdealSpec,
-                   InductSpec, Lemma, LPSpec, NumberSpec, OrderSpec,
+                   InductSpec, StrengthenSpec, Lemma, LPSpec, NumberSpec, OrderSpec,
                    AssignmentSpec, ConstructionSpec, AtlasSpec, BindSpec, CoveringSpec, RoleSpec, StepSpec, DivisibilitySpec, CliqueLPSpec, NonnegSpec, PinSpec, ConeSpec, CoverSpec, SemigroupSpec, ProfileSpec, CycleSpec, EliminateSpec, EquitableQuotientSpec, LinearSystemSpec, MatrixSpec, ParametricSymmetrySpec, EntrySpec, FamilySpec, MomentSpec, ParametricSpec, SymmetrySpec, PeakSpec, RatioSpec,
                    SOSSpec,
                    MultiSpec, Outcome, ProofSpec, Spec, SweepSpec,
                    SynthSpec, load_spec)
 from .status import Result, Status, Verdict
 
-__version__ = "0.38.0"
+__version__ = "0.39.0"
 
 # `spec.role(...)`, `.link(...)`, `.pending(...)` on every spec type: the
 # card a certificate carries (`certo.card`).
@@ -43,7 +44,7 @@ _card.install(*[v for k, v in dict(globals()).items()
 
 __all__ = [
     "Spec", "SynthSpec", "LPSpec", "SweepSpec", "CNF", "CNFSpec",
-    "BisectSpec", "BoundSpec", "DomainSpec", "IdealSpec", "InductSpec",
+    "BisectSpec", "BoundSpec", "DomainSpec", "IdealSpec", "InductSpec", "StrengthenSpec",
     "AssignmentSpec", "ConstructionSpec", "CoveringSpec", "RoleSpec", "StepSpec", "DivisibilitySpec", "NumberSpec", "OrderSpec", "SOSSpec", "EliminateSpec", "ParametricSpec", "PeakSpec", "FamilySpec", "RatioSpec", "MomentSpec", "EntrySpec", "SymmetrySpec", "CoverSpec", "ConeSpec", "SemigroupSpec", "CliqueLPSpec", "AtlasSpec", "NonnegSpec", "PinSpec", "ProfileSpec", "CycleSpec", "BindSpec", "EquitableQuotientSpec", "MatrixSpec", "LinearSystemSpec", "ParametricSymmetrySpec", "Poly", "MultiSpec",
     "ProofSpec", "Lemma",
     "Outcome", "load_spec",
@@ -51,6 +52,6 @@ __all__ = [
     "Certificate", "VerifyReport", "verify",
     "Graph", "PackingSpec", "HypergraphSpec", "loads_from_dual", "doctor", "reducers", "SetFamily",
     "family_from_masks", "mask_to_set", "set_to_mask", "set_lang", "t",
-    "api", "lp_view", "nonneg_leaves",
+    "api", "lp_view", "nonneg_leaves", "build_info",
     "__version__",
 ]
