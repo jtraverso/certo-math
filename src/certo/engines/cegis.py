@@ -29,6 +29,18 @@ from ..status import Result, Status, Verdict, classify_unknown
 ENGINE = "cegis/z3:" + z3.get_version_string()
 
 
+
+def _in_original(original, point):
+    """True, False, or None (it mentions something the point does not fix)."""
+    import z3
+
+    v = z3.simplify(z3.substitute(original, *point)) if point else z3.simplify(original)
+    if z3.is_true(v):
+        return True
+    if z3.is_false(v):
+        return False
+    return None
+
 def _remaining_ms(deadline):
     return max(1, int((deadline - time.perf_counter()) * 1000))
 
@@ -81,6 +93,7 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     ce_solver.add(_no_helper_saves(behav, corr, helper_vars))
 
     counterexamples = []
+    ce_points = []          # the same, as (z3 var, value) pairs
     trace = []
     spec_smt2 = {
         "impl_constraints": z3util.smt2(impl_cons),
@@ -97,6 +110,18 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     def done(status, verdict, detail, cert=None, k=0, impl=None):
         meta = {"iterations": k, "counterexamples": len(counterexamples),
                 "domain": domain, "trace": trace}
+        original = getattr(spec, "original", None)
+        if original is not None and ce_points:
+            inside = [_in_original(original, pt) for pt in ce_points]
+            meta["counterexamples_in_original"] = {
+                "inside": sum(1 for v in inside if v is True),
+                "outside": sum(1 for v in inside if v is False),
+                "undecided": sum(1 for v in inside if v is None),
+                "each": inside}
+            out_ = meta["counterexamples_in_original"]["outside"]
+            if out_:
+                detail = detail.rstrip(". ") + ". " + t(
+                    "engine.synth.outside_original", n=out_, total=len(inside))
         if scope:
             # WHAT the search was about travels with what it found, and in
             # the certificate, where a reader of the result looks.
@@ -123,6 +148,7 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
         if time.perf_counter() >= deadline:
             return done(Status.TIMEOUT, Verdict.INCONCLUSIVE,
                         t("engine.synth.timeout", rounds=k), k=k)
+
 
         # --- 1. proponer una implementacion compatible con lo visto -------
         impl_solver.set("timeout", _remaining_ms(deadline))
@@ -199,6 +225,7 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             ce_solver.pop()  # (d) del original: el pop faltaba en dos ramas
 
         counterexamples.append(ce_assign)
+        ce_points.append(ce_concrete)
         trace.append({"round": k + 1, "implementation": impl_assign,
                       "counterexample": ce_assign})
         if breaks is not None:
@@ -300,6 +327,7 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
     base = spec.impl_constraints if spec.impl_constraints is not None else z3.BoolVal(True)
     plain = dataclasses.replace(spec, minimize=None, maximize=None)
     best, rounds, path, searches = None, 0, [], []
+    where = {"inside": 0, "outside": 0, "undecided": 0}   # over every search
     current = plain
     for _ in range(max(1, lim.max_iterations)):
         res = synth(current, lim, on_round)
@@ -307,6 +335,8 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
         searches.append({"iterations": res.meta.get("iterations", 0),
                          "counterexamples": res.meta.get("counterexamples", 0),
                          "verdict": res.verdict.value})
+        for key in where:
+            where[key] += (res.meta.get("counterexamples_in_original") or {}).get(key, 0)
         if res.verdict is Verdict.PROVED and res.certificate is not None:
             impl = res.certificate.payload["implementation"]
             subs = [(z3util_const(n, s), z3util_value(s, v)) for n, (s, v) in impl.items()]
@@ -342,9 +372,15 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
                 "better_value_refutation": {
                     "iterations": res.meta.get("iterations", 0),
                     "counterexamples": res.meta.get("counterexamples", 0)}}
+            detail = t("engine.synth.optimum", sense=sense, value=value,
+                       steps=len(path), rounds=rounds)
+            if getattr(spec, "original", None) is not None:
+                meta["counterexamples_in_original"] = dict(where)
+                if where["outside"]:
+                    detail += " " + t("engine.synth.outside_original", n=where["outside"],
+                                      total=sum(where.values()))
             return Result("synth", Status.SAT, Verdict.PROVED, ENGINE, ms, cert,
-                          t("engine.synth.optimum", sense=sense, value=value,
-                            steps=len(path), rounds=rounds), meta=meta)
+                          detail, meta=meta)
         # stopped: the best so far is reported, its optimality is not
         detail = res.detail
         if best is not None:

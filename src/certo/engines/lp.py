@@ -937,11 +937,23 @@ def _opt(spec, limits: Limits | None = None, use_exact: bool = True,
         # is cross-cutting rule 1 broken in the one case -- non-existence --
         # where the evidence is the whole answer.
         ray = infeasible_certificate(spec, lim) if _ray else None
-        detail = t("engine.opt.infeasible") + " -- " + t(
-            "engine.opt.infeasible_ray" if ray is not None
-            else "engine.opt.infeasible_no_ray")
-        return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
-                      ray, detail=detail, meta={"lp_solver": engine()})
+        if ray is not None:
+            return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
+                          ray, detail=t("engine.opt.infeasible") + " -- "
+                          + t("engine.opt.infeasible_ray"),
+                          meta={"lp_solver": engine()})
+        if not _ray:
+            # the auxiliary LP of `infeasible_certificate` itself: its caller
+            # decides what an infeasible auxiliary means
+            return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, engine(), ms(),
+                          None, detail=t("engine.opt.infeasible"),
+                          meta={"lp_solver": engine()})
+        # NO RAY, NO ANSWER. 0.37 answered `unsat`, conclusive, on the
+        # solver's word -- and on two programs a user then showed feasible
+        # with exact weights. A small program is decided exactly here;
+        # otherwise the solver's word is reported and nothing is concluded.
+        return _decide_exactly(spec, A, b, c, cons_names, discrete or _vectors_only,
+                               target, t0, engine(), st_name, main_name)
     if st_name == "Undefined" and _ray and not discrete:
         # CBC through PuLP 4 says "Undefined" for an infeasible LP. A solver
         # that does not know is not a solver that says no -- but an exact
@@ -1364,6 +1376,88 @@ def _ray_all_rows(spec, limits):
             os.environ.pop("CERTO_HIGHS_DIRECT", None)
         else:
             os.environ["CERTO_HIGHS_DIRECT"] = old
+
+
+#: entries of `A` up to which a program the solver called infeasible, with
+#: no ray reconstructed, is decided by certo's exact simplex
+EXACT_DECIDE_ENTRIES = 40_000
+
+
+def exact_farkas(A, b):
+    """`Ax <= b, x >= 0` decided in exact arithmetic: a Farkas ray `y` (a
+    list of Fraction), or None when none exists -- and then, by Farkas'
+    lemma, the system HAS a solution. `min b.y` over `y >= 0`, `A^T y >= 0`,
+    `sum y <= 1`: its minimum is negative exactly when a ray exists."""
+    from fractions import Fraction
+
+    from ..simplex import minimise
+
+    n = len(A[0]) if A else 0
+    A2 = [list(row) + [Fraction(-1)] for row in A]
+    c2 = [Fraction(0)] * n + [Fraction(-1)]
+    y = minimise(A2, b, c2)
+    if sum((bi * yi for bi, yi in zip(b, y)), Fraction(0)) < 0:
+        return y
+    return None
+
+
+def _decide_exactly(spec, A, b, c, cons_names, no_optimum, target, t0, engine,
+                    status, solver):
+    """The solver said infeasible and no ray was reconstructed from its
+    answer: decide it exactly when it is small, or say nothing. With
+    `no_optimum` (an integer program, or a caller that wants vectors) a
+    feasible verdict stops there: no optimum is certified."""
+    from .. import exact
+    from ..certificate import farkas_ray_certificate
+    from ..simplex import SimplexLimit
+
+    meta = {"lp_solver": engine, "solver_said": status}
+    size = len(A) * (len(c) or 1)
+    if not A or size > EXACT_DECIDE_ENTRIES:
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, engine,
+                      ms_now(t0), None,
+                      detail=t("engine.opt.infeasible_unproved", solver=solver,
+                               status=status),
+                      meta=dict(meta, hint=t("engine.opt.infeasible_unproved_hint")))
+    try:
+        y = exact_farkas(A, b)
+    except SimplexLimit as e:
+        return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, engine,
+                      ms_now(t0), None,
+                      detail=t("engine.opt.infeasible_unproved", solver=solver,
+                               status=status) + " (" + str(e) + ")", meta=meta)
+    if y is not None:
+        ray = farkas_ray_certificate(
+            A=[exact.serialize_all(r) for r in A], b=exact.serialize_all(b),
+            y=exact.serialize_all(y), names=cons_names)
+        return Result("opt", Status.UNSAT, Verdict.UNSATISFIABLE, "certo/exact",
+                      ms_now(t0), ray,
+                      detail=t("engine.opt.infeasible_exact", solver=solver),
+                      meta=dict(meta, exact=True))
+    # No ray exists: the constraints CAN hold. The solver's "infeasible" was
+    # wrong -- usually scaling. For a continuous program, the exact optimum.
+    meta["solver_was_wrong"] = True
+    if not no_optimum:
+        try:
+            from ..simplex import minimise
+
+            y_opt = minimise(A, b, c)
+            x = exact.primal_from_dual(A, b, c, y_opt)
+        except (SimplexLimit, ValueError, ZeroDivisionError):
+            x = None
+        if x is not None:
+            res = _opt_from_primal(spec, A, b, c, cons_names,
+                                   dict(zip(spec.var_names, x)), t0, target)
+            if res.certificate is not None:
+                res.detail = t("engine.opt.infeasible_was_feasible", solver=solver,
+                               status=status) + " " + t("engine.opt.exact_recovered",
+                                                        value=res.meta.get("objective"))
+                res.meta.update(meta)
+                return res
+    return Result("opt", Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE, engine,
+                  ms_now(t0), None,
+                  detail=t("engine.opt.infeasible_feasible", solver=solver,
+                           status=status), meta=meta)
 
 
 def infeasible_certificate(spec, limits=None):

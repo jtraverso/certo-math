@@ -6,6 +6,66 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.38.0] — 2026-11-02
+
+**An answer is valid, invalid or inconclusive -- never one for another.** The
+bugs the 0.37 sessions and two outside reports found, none of them a false
+certificate accepted, two of them a wrong answer given: an LP called
+infeasible on the solver's word, and a re-check left `unknown` graded
+invalid. No new commands (62) and no new kinds (66); the schema stays 5. New
+optional field `SynthSpec.original`; new outputs `verification` and `reason`
+(`verify`), `reading` (results, CLI `--json` and MCP), outcome
+`OBJECT_EXHIBITED`, `solver_was_wrong`, `counterexamples_in_original`; new
+API `certo.lp_view`, `certo.nonneg_leaves`, `Poly.to_sympy`.
+
+### Fixed
+
+- **`opt` answered `unsat`, conclusive, with no certificate** when the solver
+  said infeasible and no Farkas ray could be rebuilt -- `exact_required` or
+  not. On two programs a user then showed feasible with exact weights. A
+  program of up to 40 000 entries is now decided by certo's exact simplex: a
+  Farkas ray, certified, or the proof that none exists and the exact optimum
+  (`solver_was_wrong`). Larger, it is `inconclusive`.
+- **A re-check that z3 left `unknown` was graded `invalid`**, exit 1 (unsat
+  cores, `cegis`, `cegis_none`, `synth_optimum`). It is `inconclusive`, with
+  the reason, and `verify` exits `2` -- the code the README always gave for
+  inconclusive, which `verify` had not honoured for a timeout either.
+- **`same_obligation` of a `ParametricSpec` with `primal=` and a claim**
+  reversed the claim's direction (a regression of 0.37): a primal bounds a
+  minimisation from above. Reported in eight sessions; the binding was being
+  avoided by hand.
+- **A cover found and checked read `THEOREM_PROVED`** beside `evidence:
+  feasible`. It is `OBJECT_EXHIBITED`: an object you have, not shown optimal.
+- **A SAT search the clock stopped was `resource_exhausted`**, and its detail
+  -- like the binary's and pysat's -- was Spanish whatever the locale. It is
+  `timeout`, localised, and says what to try.
+- **A certificate built by hand with `Fraction`s** (`farkas_ray_certificate`,
+  ...) could not be written: `to_dict`, `to_json` and `digest` now write exact
+  numbers as `exact.serialize` does. A certificate of plain data serialises
+  and digests exactly as before.
+
+### Added
+
+- **`reading`**: `solver_status`, `verification` and `conclusion` apart, in
+  `--json` and the MCP -- three answers a reader had to tell apart by
+  convention.
+- **`--cert` refuses a name that differs only in case** from a file in the
+  folder (one file on Windows and macOS: reported four times), and says when
+  it replaces a certificate of another obligation.
+- **`certo.lp_view(result)`**: an LP answer typed -- `optimum`, `feasible`,
+  `bound`, `infeasible` -- with only the fields it has. `as_leq_system()`
+  returns named fields; the fourth names the ROWS.
+- **`lint`**: hypotheses inside an implication goal (`core` sees none), a
+  negated goal used to find an object, and an `IdealSpec` claim that expands
+  to zero (the `ideal` result says it too).
+- **`certo.nonneg_leaves(cert)`**: a `polynomial_nonneg` certificate as its
+  leaves -- exact boxes, degrees, multipliers -- the walk `verify` makes.
+- **`SynthSpec(original=...)`**: each counterexample evaluated against the
+  real domain; the result says how many lie outside the relaxation's.
+- **`Poly.to_sympy`**, the way back from `Poly.from_sympy`.
+- An unsat core's check says it RE-SOLVES the core with z3, and points to
+  `prove --drat` for a boolean core checked without a solver.
+
 ## [0.37.0] — 2026-10-23
 
 The bugs the 0.36 sessions reported, a DRUP checker that finishes, and one

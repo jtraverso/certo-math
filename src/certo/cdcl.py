@@ -26,6 +26,8 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
+from .i18n import t
+
 UNSAT, SAT, UNKNOWN = "unsat", "sat", "unknown"
 
 
@@ -39,6 +41,10 @@ class CdclResult:
     propagations: int = 0
     elapsed_ms: float = 0.0
     detail: str = ""
+    # why an UNKNOWN stopped: "time" or "conflicts" -- a timeout and an
+    # exhausted budget are different advice, and 0.37 reported both as
+    # `resource_exhausted`, in Spanish whatever the locale
+    stopped_by: str = ""
 
 
 class Cdcl:
@@ -266,7 +272,7 @@ class Cdcl:
             self._log([])
             return CdclResult(UNSAT, None, self.proof, 0, 0, 0,
                               (time.perf_counter() - t0) * 1000,
-                              "contradiccion entre clausulas unitarias de entrada")
+                              t("cdcl.unit_clash"))
 
         restart_limit, restart_base = 100, 100
         reduce_at, reduce_step = 2000, 2000
@@ -296,7 +302,8 @@ class Cdcl:
                     return CdclResult(UNKNOWN, None, None, self.conflicts,
                                       self.decisions, self.propagations,
                                       (time.perf_counter() - t0) * 1000,
-                                      "presupuesto de conflictos agotado")
+                                      t("cdcl.conflicts", n=max_conflicts),
+                                      stopped_by="conflicts")
                 if self.conflicts >= restart_limit:
                     restart_base = int(restart_base * 1.5)
                     restart_limit = self.conflicts + restart_base
@@ -306,7 +313,8 @@ class Cdcl:
                     return CdclResult(UNKNOWN, None, None, self.conflicts,
                                       self.decisions, self.propagations,
                                       (time.perf_counter() - t0) * 1000,
-                                      "tiempo agotado")
+                                      t("cdcl.time", s=round(timeout_s, 1)),
+                                      stopped_by="time")
                 if not self._decide():
                     model = [v if self.value[v] == 1 else -v
                              for v in range(1, self.n + 1)]

@@ -293,6 +293,15 @@ def _check_spec(spec, limits):
             if degree is not None:
                 yield _f(WARN, "spec.high_degree", degree=degree,
                          proved=DEGREE_CLIFF - 1, cliff=DEGREE_CLIFF)
+            # Hypotheses INSIDE the goal: `prove` sees one formula, so `core`
+            # and `audit` report "0 of 0 hypotheses used" and the vacuity
+            # check has nothing to check.
+            if z3.is_implies(spec.goal) and not spec.assumptions:
+                yield _f(NOTE, "spec.hypotheses_in_goal")
+            # `prove(Not(constraints))` to FIND an object: correct, and it
+            # answers REFUTED with the object as the counterexample.
+            if z3.is_not(spec.goal):
+                yield _f(NOTE, "spec.negated_goal")
     if not spec.assumptions:
         yield _f(NOTE, "spec.no_hypotheses")
     clash = _contradictory(spec.assumptions, limits)
@@ -795,6 +804,14 @@ def _check_ideal(spec, limits):
         yield _f(ERROR, "ideal.no_equations")
     elif not spec.equations:
         yield _f(NOTE, "ideal.identity")
+    try:
+        from .engines.algebra import ideal_polynomials
+
+        _gs, claim, _nz, _cl = ideal_polynomials(spec, tuple(spec.variables))
+        if claim is not None and not claim.terms:
+            yield _f(WARN, "ideal.claim_zero")
+    except Exception:  # noqa: BLE001 -- the engine says why; lint only adds
+        pass
     if not spec.variables:
         yield _f(ERROR, "ideal.no_variables")
 

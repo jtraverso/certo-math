@@ -185,6 +185,25 @@ class Poly:
             out[tuple(mono)] = Fraction(int(c.p), int(c.q))
         return cls(tuple(variables), out)
 
+    def to_sympy(self):
+        """The polynomial as a sympy expression in symbols named after the
+        ring, coefficients as `sympy.Rational`: the way back from `from_sympy`,
+        for an auditor that compares in sympy rather than through `.terms`."""
+        import sympy
+
+        gens = sympy.symbols(list(self.vars)) if self.vars else ()
+        if not isinstance(gens, (list, tuple)):
+            gens = (gens,)
+        out = sympy.Integer(0)
+        for exps, c in self.terms.items():
+            c = Fraction(c)
+            mono = sympy.Integer(1)
+            for g, k in zip(gens, exps):
+                if k:
+                    mono *= g ** k
+            out += sympy.Rational(c.numerator, c.denominator) * mono
+        return out
+
     # --- arithmetic -------------------------------------------------------
 
     def __bool__(self):

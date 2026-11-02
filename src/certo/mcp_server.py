@@ -446,6 +446,12 @@ def _scope(res) -> list:
     return scope_of(res.certificate)
 
 
+def _reading(res):
+    from .outcome import reading
+
+    return reading(res)
+
+
 def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
     """Render a Result for the model, stamping provenance on the way out.
 
@@ -492,6 +498,8 @@ def _emit(res, save_cert: bool = True, spec_file=None) -> dict:
         # What KIND of evidence it is: a proof, a feasible bound, an LP
         # optimum, a relaxation bound, a finite check...
         "evidence": _evidence(res),
+        # solver_status, verification and conclusion, apart (certo.outcome.reading)
+        "reading": _reading(res),
         "engine": res.engine,
         "elapsed_ms": round(res.elapsed_ms, 1),
         "meta": _trim(res.meta),

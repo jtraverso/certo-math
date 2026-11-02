@@ -44,6 +44,7 @@ def _run_internal(cnf, lim):
     return r.status, r.model, r.proof, "certo/cdcl", {
         "conflicts": r.conflicts, "decisions": r.decisions,
         "propagations": r.propagations, "detail": r.detail,
+        "stopped_by": r.stopped_by,
     }
 
 
@@ -56,7 +57,7 @@ def _run_binary(cnf, lim, exe):
                                text=True, timeout=max(1.0, lim.timeout_ms / 1000))
         except subprocess.TimeoutExpired:
             return "unknown", None, None, "binary/" + Path(exe).stem, {
-                "detail": "el binario se paso del tiempo"}
+                "detail": t("engine.cases.binary_time"), "stopped_by": "time"}
         out = r.stdout
         if "s SATISFIABLE" in out:
             model = []
@@ -68,7 +69,7 @@ def _run_binary(cnf, lim, exe):
             proof = prf_p.read_text(encoding="utf-8").splitlines() if prf_p.exists() else None
             return "unsat", None, proof, "binary/" + Path(exe).stem, {}
         return "unknown", None, None, "binary/" + Path(exe).stem, {
-            "detail": (out.strip().splitlines() or ["sin salida"])[-1]}
+            "detail": (out.strip().splitlines() or [t("engine.cases.no_output")])[-1]}
 
 
 def _run_pysat(cnf, lim, name):
@@ -90,9 +91,7 @@ def _run_pysat(cnf, lim, name):
         proof = s.get_proof()
         note = {}
         if not proof:
-            note["detail"] = (
-                "pysat no devolvio prueba (su proof logging no funciona en esta "
-                "plataforma). Sin certificado: usa el motor internal o un binario.")
+            note["detail"] = t("engine.cases.pysat_noproof")
             proof = None
         return "unsat", None, proof, "pysat/" + name, note
     finally:
@@ -122,10 +121,16 @@ def cases(spec, limits: Limits | None = None, backend: str = DEFAULT_BACKEND,
     ms = lambda: (time.perf_counter() - t0) * 1000  # noqa: E731
 
     if status == "unknown":
-        return Result("cases", Status.RESOURCE_EXHAUSTED, Verdict.INCONCLUSIVE,
-                      engine, ms(), None,
+        # A clock is not a budget: say which stopped it, and what to try.
+        timed = info.get("stopped_by") == "time"
+        hints = [t("engine.cases.hint_binary"), t("engine.cases.hint_smaller")]
+        if engine == "certo/cdcl":
+            hints.insert(0, t("engine.cases.hint_internal", vars=cnf.nvars,
+                              clauses=len(cnf.clauses)))
+        return Result("cases", Status.TIMEOUT if timed else Status.RESOURCE_EXHAUSTED,
+                      Verdict.INCONCLUSIVE, engine, ms(), None,
                       detail=info.get("detail") or t("engine.cases.exhausted",
-                                       budget=""), meta=base_meta)
+                                       budget=""), meta=dict(base_meta, hints=hints))
 
     if status == "sat":
         true_vars = [v for v in (model or []) if v > 0]

@@ -127,6 +127,13 @@ class SynthSpec:
     #                    "relaxation" (it may exist only in the relaxed model,
     #                    so "no candidate" refutes the relaxed contract only)
     scope: dict = None
+    # THE ORIGINAL DOMAIN, when `behavior` relaxes it: a predicate over the
+    # input variables. Each counterexample is evaluated against it and the
+    # result says how many lie inside -- a counterexample of the relaxation
+    # only refutes the relaxed contract, and two sessions had to check that
+    # by hand (a corner with T/x > 5/3 was outside the real problem). Read,
+    # not certified: it is in `meta`, not in the certificate.
+    original: object = None
 
     # THE BEST ONE, not just one: an integer expression over `impl_vars` to
     # minimise (or maximise). `synth` keeps asking for a better candidate
@@ -462,7 +469,10 @@ class LPSpec:
             for j, v in r.items():
                 row[j] = v
             A.append(row)
-        return A, b, c, names
+        from .lpview import LeqSystem
+
+        # named fields, still a tuple: the fourth names the ROWS
+        return LeqSystem(A, b, c, names)
 
     def as_leq_sparse(self):
         """Normalise to max c.x subject to A x <= b, x >= 0.

@@ -138,7 +138,9 @@ class Certificate:
         if copy:
             out["note_args"] = _copy.deepcopy(self.note_args)
             out["provenance"] = _copy.deepcopy(self.provenance)
-            out["payload"] = _copy.deepcopy(self.payload)
+            # plain data, exact numbers as text: a certificate built by hand
+            # with Fractions came back from `to_dict` unwritable by `json`
+            out["payload"] = _plain(self.payload)
         return out
 
     @staticmethod
@@ -177,9 +179,10 @@ class Certificate:
         -- and nobody reads a file that size by eye. The digest is over the
         content, so it is the same either way."""
         d = self.to_dict(copy=False)
-        text = json.dumps(d, indent=2, ensure_ascii=False)
+        text = json.dumps(d, indent=2, ensure_ascii=False, default=_json_default)
         if len(text) > COMPACT_ABOVE:
-            text = json.dumps(d, ensure_ascii=False, separators=(",", ":"))
+            text = json.dumps(d, ensure_ascii=False, separators=(",", ":"),
+                              default=_json_default)
         return text
 
     def digest(self) -> str:
@@ -197,7 +200,7 @@ class Certificate:
         """
         blob = json.dumps({"kind": self.kind,
                            "payload": _without_provenance(self.payload)},
-                          sort_keys=True).encode()
+                          sort_keys=True, default=_json_default).encode()
         return hashlib.sha256(blob).hexdigest()[:16]
 
     def stamp(self, spec_path=None, extra=None) -> "Certificate":
@@ -253,6 +256,39 @@ DEGREES = ("complete", "with_solver", "relative", "partial", "inconclusive",
            "invalid")
 
 
+def _json_default(o):
+    """An exact number as the text `exact.serialize` writes ('32/3'), the
+    integer and float types of numpy as Python's; anything else is refused
+    as `json` refuses it. Only reached for what `json` cannot write, so a
+    certificate of plain data serialises -- and digests -- exactly as before."""
+    if hasattr(o, "numerator") and hasattr(o, "denominator") and not isinstance(o, bool):
+        from .exact import serialize
+
+        return serialize(o)
+    if type(o).__module__ == "numpy":
+        if hasattr(o, "item"):
+            return o.item()
+    if isinstance(o, (set, frozenset)):
+        return sorted(o, key=str)
+    raise TypeError("Object of type {} is not JSON serializable".format(type(o).__name__))
+
+
+def _plain(obj):
+    """A deep copy as plain JSON data (see `_json_default`)."""
+    if isinstance(obj, dict):
+        return {k: _plain(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_plain(v) for v in obj]
+    if obj is None or isinstance(obj, (str, bool, int, float)):
+        return obj
+    try:
+        return _plain(_json_default(obj))
+    except TypeError:
+        import copy as _copy
+
+        return _copy.deepcopy(obj)      # as before: copied, not converted
+
+
 @dataclass
 class VerifyReport:
     ok: bool
@@ -268,6 +304,48 @@ class VerifyReport:
     # The failure, if any, is a time budget running out -- nothing was found
     # wrong. Still not `ok`: an unfinished check accepts nothing.
     timed_out: bool = False
+    # Checks a solver could not DECIDE, `[(check name, reason)]`: z3 said
+    # `unknown`. 0.36 graded them `invalid`, which says something was found
+    # wrong; nothing was. When every failing check is one of these, the
+    # report is `inconclusive`, with the reason.
+    undecided: list = field(default_factory=list)
+
+    def undecide(self, name, solver=None, reason=None) -> None:
+        """Record that `name` was not decided (`solver.reason_unknown()`)."""
+        if reason is None:
+            try:
+                reason = solver.reason_unknown() if solver is not None else ""
+            except Exception:  # noqa: BLE001
+                reason = ""
+        self.undecided.append((name, reason or "unknown"))
+
+    @property
+    def verification(self) -> str:
+        """`valid`, `invalid` or `inconclusive`: invalid means a check FAILED,
+        inconclusive that one could not be finished or decided."""
+        if self.ok:
+            return "valid"
+        return "inconclusive" if self._unfinished() else "invalid"
+
+    def _unfinished(self) -> bool:
+        if self.timed_out:
+            return True
+        if not self.undecided:
+            return False
+        open_ = {n for n, _r in self.undecided}
+        failing = [n for n, ok, _d in self.checks if not ok]
+        return bool(failing) and all(n in open_ for n in failing)
+
+    @property
+    def reason(self) -> str:
+        """Why it is not valid: `timeout`, `unknown: <z3's reason>`, or ''."""
+        if self.ok:
+            return ""
+        if self.timed_out:
+            return "timeout"
+        if self._unfinished():
+            return "; ".join("unknown: {}".format(r) for _n, r in self.undecided)
+        return ""
 
     @property
     def method(self) -> str:
@@ -290,7 +368,7 @@ class VerifyReport:
     def degree(self) -> str:
         """How much of the claim was checked, in one word: see DEGREES."""
         if not self.ok:
-            return "inconclusive" if self.timed_out else "invalid"
+            return "inconclusive" if self._unfinished() else "invalid"
         if self.partial:
             return "partial"
         if self.assumed:
@@ -302,6 +380,8 @@ class VerifyReport:
             "ok": self.ok,
             "kind": self.kind,
             "degree": self.degree,
+            "verification": self.verification,
+            "reason": self.reason,
             "timed_out": self.timed_out,
             "partial": self.partial,
             "assumed": self.assumed,
@@ -6426,15 +6506,18 @@ def _verify_core_by_solver(cert, limits) -> VerifyReport:
     formulas = len(list(z3.parse_smt2_string(cert.payload["core_smt2"])))
     named = n == formulas and len(set(cert.payload["names"])) == n
     ok = ok and named
-    return VerifyReport(
+    rep = VerifyReport(
         ok, "unsat_core", False,
         checks=[(t("verify.core.unsat"), r == z3.unsat, str(r)),
                 (t("verify.core.named"), named,
                  t("verify.proof.assumptions_count", names=n,
                    formulas=formulas))],
-        warnings=_core_warnings(cert),
+        warnings=_core_warnings(cert) + [t("verify.core.resolved")],
         detail=t("verify.core.detail", n=n),
     )
+    if r == z3.unknown:
+        rep.undecide(t("verify.core.unsat"), s)
+    return rep
 
 
 def _verify_lp_dual(cert, limits) -> VerifyReport:
@@ -6906,6 +6989,7 @@ def _verify_cegis(cert, limits) -> VerifyReport:
     r1 = s.check()
     ok1 = r1 == z3.sat
     checks.append((t("verify.cegis.impl_ok"), ok1, str(r1)))
+    open_ = [(t("verify.cegis.impl_ok"), s.reason_unknown())] if r1 == z3.unknown else []
 
     # No input that NO helper saves: the helpers recorded are quantified
     # universally inside the negation, as the contract reads. A certificate
@@ -6919,13 +7003,18 @@ def _verify_cegis(cert, limits) -> VerifyReport:
     r2 = s.check()
     ok2 = r2 == z3.unsat
     checks.append((t("verify.cegis.no_ce"), ok2, str(r2)))
+    if r2 == z3.unknown:
+        open_.append((t("verify.cegis.no_ce"), s.reason_unknown()))
 
-    return VerifyReport(
+    rep = VerifyReport(
         ok1 and ok2, "cegis", False, checks=checks,
         warnings=_synth_scope_notes(p, found=True),
         detail=t("verify.cegis.detail", iterations=p["iterations"],
                  ces=len(p["counterexamples"])),
     )
+    for name, why in open_:
+        rep.undecide(name, reason=why)
+    return rep
 
 
 def _synth_scope_notes(p, found) -> list:
@@ -6963,21 +7052,32 @@ def _verify_synth_optimum(cert, limits) -> VerifyReport:
     checks.append((t("verify.synth_opt.below"), below.kind == "cegis_none" and rb.ok,
                    rb.detail))
     decls: dict = {}
+    open_ = []          # [(check, reason)]: what a solver could not decide
+    for sub, name in ((rf, t("verify.synth_opt.found")), (rb, t("verify.synth_opt.below"))):
+        if not sub.ok and sub.verification == "inconclusive":
+            open_.append((name, sub.reason))
 
     def parse(s):
         return z3.And(*z3.parse_smt2_string(s, decls=decls))
+
+    unknown = []
 
     def equivalent(a, b):
         s = z3.Solver()
         lim.apply_to(s)
         s.add(z3.Xor(a, b))
-        return s.check() == z3.unsat
+        r = s.check()
+        if r == z3.unknown:
+            unknown.append(s.reason_unknown())
+        return r == z3.unsat
 
     try:
         fs, bs = found.payload["smt2"], below.payload["smt2"]
         same = (equivalent(parse(fs["behavior"]), parse(bs["behavior"]))
                 and equivalent(parse(fs["correctness"]), parse(bs["correctness"])))
         checks.append((t("verify.synth_opt.same_contract"), same, ""))
+        if unknown:
+            open_.append((t("verify.synth_opt.same_contract"), unknown.pop()))
         base = parse(p["base_smt2"])
         eq = list(z3.parse_smt2_string(p["value_smt2"], decls=decls))[0]
         obj, val = eq.arg(0), eq.arg(1)
@@ -6990,18 +7090,26 @@ def _verify_synth_optimum(cert, limits) -> VerifyReport:
         lim.apply_to(s)
         s.add(*fix)
         s.add(z3.Not(z3.And(base, eq)))
-        attains = ok_val and s.check() == z3.unsat
+        ra = s.check() if ok_val else None
+        attains = ok_val and ra == z3.unsat
         checks.append((t("verify.synth_opt.attains"), attains, str(p["value"])))
+        if ra == z3.unknown:
+            open_.append((t("verify.synth_opt.attains"), s.reason_unknown()))
         bound = obj < val if p["sense"] == "min" else obj > val
         tied = equivalent(parse(bs["impl_constraints"]), z3.And(base, bound))
         checks.append((t("verify.synth_opt.bound"), tied,
                        "{} {} {}".format(obj, "<" if p["sense"] == "min" else ">", val)))
+        if unknown:
+            open_.append((t("verify.synth_opt.bound"), unknown.pop()))
     except (KeyError, IndexError, TypeError, z3.Z3Exception) as e:
         checks.append((t("verify.synth_opt.bound"), False, str(e)[:120]))
-    return VerifyReport(all(c[1] for c in checks), "synth_optimum", False,
-                        checks=checks, warnings=list(rf.warnings),
-                        detail=t("verify.synth_opt.detail", sense=p.get("sense"),
-                                 value=p.get("value")))
+    rep = VerifyReport(all(c[1] for c in checks), "synth_optimum", False,
+                       checks=checks, warnings=list(rf.warnings),
+                       detail=t("verify.synth_opt.detail", sense=p.get("sense"),
+                                value=p.get("value")))
+    for name, why in open_:
+        rep.undecide(name, reason=why)
+    return rep
 
 
 def _verify_cegis_none(cert, limits) -> VerifyReport:
@@ -7063,12 +7171,16 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
         ok_dec = (isinstance(dec, list) and all(isinstance(i, int) and
                   0 <= i < len(formulas) - 1 for i in dec)
                   and len(set(dec)) == len(dec))
+        dec_unknown = []
         if ok_dec:
             def _unsat(keep):
                 s2 = z3.Solver()
                 lim.apply_to(s2)
                 s2.add(formulas[0], *[formulas[1 + i] for i in keep])
-                return s2.check()
+                got = s2.check()
+                if got == z3.unknown:
+                    dec_unknown.append(s2.reason_unknown())
+                return got
             ok_dec = _unsat(dec) == z3.unsat and all(
                 _unsat([j for j in dec if j != i]) == z3.sat for i in dec)
         checks.append((t("verify.cegis_none.decisive"), ok_dec,
@@ -7078,7 +7190,10 @@ def _verify_cegis_none(cert, limits) -> VerifyReport:
         checks=checks, warnings=_synth_scope_notes(p, found=False),
         detail=t("verify.cegis_none.detail", ces=len(p["counterexamples"]),
                  vars=", ".join(impl)))
-    rep.timed_out = r == z3.unknown
+    if r == z3.unknown:
+        rep.undecide(t("verify.cegis_none.unsat"), s)
+    if dec is not None and dec_unknown and not ok_dec:
+        rep.undecide(t("verify.cegis_none.decisive"), reason=dec_unknown[0])
     return rep
 
 

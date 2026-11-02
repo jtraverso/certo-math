@@ -102,6 +102,21 @@ screen and establish very different things.
 When `opt` reports a gap, **`certo mixed SPEC --prove-optimal` closes it** on
 the same spec. It has existed since 0.4.0; the message now says so.
 
+**Infeasible means a Farkas ray** *(0.38)*. When the LP solver says
+infeasible and no exact ray can be rebuilt from its answer, a program of
+up to 40 000 matrix entries is decided by certo's exact simplex: a ray
+(`unsatisfiable`, certified), or the proof that none exists -- the solver was
+wrong, usually on badly scaled rows, and the exact optimum is certified
+instead (`solver_was_wrong` in `meta`). A larger program is `inconclusive`,
+with what the solver said in the detail. Until 0.37 it was `unsat`,
+conclusive, with no certificate, `exact_required` or not.
+
+`certo.lp_view(result)` reads an LP answer typed: `kind` is `optimum`,
+`feasible` (a zero objective: a point, nothing optimised), `bound`,
+`float_candidate` or `infeasible`, with only the fields that kind has --
+`primal` and `dual` by name, or the `ray`. `LPSpec.as_leq_system()` returns
+named fields (`A, b, c, row_names`); the fourth names the rows.
+
 ### `mixed`: three levels, named in the certificate
 
 | Level | Means |
@@ -132,6 +147,21 @@ lives in the certificate as `false` against `null`.
 | `semigroup` `normal` | -- | always `null`: a witness refutes normality, nothing here asserts it |
 | `hilbert` `is_minimal_generating_set` | decided: not the minimal set, and why | could not be decided |
 
+## Three answers, apart *(0.38)*
+
+A valid cover once read as `status: unsat`, `THEOREM_PROVED` and `evidence:
+feasible` at the same time. Each is right about something different, and
+`reading` in `--json` and in the MCP says which is which:
+
+| Field | Answers |
+|---|---|
+| `solver_status` | what the backend answered -- an engine convention, not mathematics |
+| `verification` | whether the certificate was re-derived just now: `valid`, `invalid`, `not_run` |
+| `conclusion` | what is established (the `outcome` state), with `conclusive`, `evidence` and `scope` |
+
+A cover, a design or a packing found and checked is now `OBJECT_EXHIBITED`
+-- an object you have, not shown optimal -- rather than `THEOREM_PROVED`.
+
 ## Scope: what a conclusive answer is about
 
 A conclusive verdict is conclusive **about what was asked**, which is not
@@ -151,7 +181,14 @@ always the statement you have in mind.
 
 * **VALID** -- every check passed.
 * **INVALID** -- a check failed. The certificate must not be relied on,
-  whatever produced it.
+  whatever produced it. Exit `1`.
+* **INCONCLUSIVE** *(0.38)* -- a check could not be finished or decided: the
+  clock stopped it, or the solver a certificate is re-checked with answered
+  `unknown`. Nothing was found wrong and nothing is accepted; `reason` says
+  which (`timeout`, `unknown: <z3's reason>`). Exit `2`. Until 0.37 a
+  re-check left `unknown` was graded INVALID and exited `1`. `verify
+  --json` and the MCP carry `verification` (`valid`, `invalid`,
+  `inconclusive`) and `reason` beside `degree`.
 * **A warning on a valid certificate** is a different fact from invalidity:
   a `--target` not reached, a certificate from an older version that says
   less than a new one would, or a floating-point certificate marked **not

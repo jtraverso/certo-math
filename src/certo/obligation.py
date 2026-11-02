@@ -655,9 +655,14 @@ def _parametric_scope(spec, cert) -> dict:
     box = PM._box_of(spec, ring)
     pieces = cert is not None and cert.payload.get("witness") == "pieces"
     claim = getattr(spec, "claim", None)
+    primal = getattr(spec, "primal", None) is not None
+    # A dual bounds a maximisation from above and a minimisation from below;
+    # a PRIMAL bounds each the other way. 0.37 read only the sense, and every
+    # primal with a claim was "another obligation".
+    upper = minimising == primal
     return {
         "sense": "min" if minimising else "max",
-        "witness": "primal" if getattr(spec, "primal", None) is not None else "dual",
+        "witness": "primal" if primal else "dual",
         "free": sorted(str(v) for v in (getattr(spec, "free", None) or [])),
         # a box cut into pieces is certified on the whole box: no region is
         # written, and none is needed for the claim to hold where one was meant
@@ -666,7 +671,7 @@ def _parametric_scope(spec, cert) -> dict:
         "box": None if box is None else
         {n: [_fraction(lo), _fraction(hi)] for n, (lo, hi) in box.items()},
         "claim": None if claim is None else
-        [">=" if minimising else "<=", P(claim).serialize()]}
+        ["<=" if upper else ">=", P(claim).serialize()]}
 
 
 def _obligations(obls):

@@ -1940,6 +1940,8 @@ def exists(spec, limits: Limits | None = None, spec_path: str = "",
         meta["max_parts"] = max_parts
 
     if got.verdict is Verdict.INCONCLUSIVE:
+        if got.meta.get("hints"):
+            meta["hints"] = list(got.meta["hints"])
         return Result("exists", got.status, Verdict.INCONCLUSIVE, got.engine,
                       ms, None, detail=got.detail, meta=meta)
 
@@ -2361,6 +2363,28 @@ def ideal_polynomials(spec, variables, clear=None):
 def ideal(spec, limits: Limits | None = None, spec_path: str = "",
           progress=None, eliminate_linear=None,
           clear_denominators=None) -> Result:
+    """`_ideal`, and a word when the claim is the ZERO polynomial before any
+    cofactor: true, and certified, and very likely not what was meant -- a
+    user's loop variable had shadowed the expression and an artificial zero
+    was certified. Said, never refused: some identities are meant."""
+    res = _ideal(spec, limits, spec_path, progress, eliminate_linear,
+                 clear_denominators)
+    try:
+        from ..linarith import NotPolynomial
+
+        variables = tuple(spec.variables)
+        _gs, claim, _nz, _cl = ideal_polynomials(
+            spec, variables, clear_denominators or getattr(spec, "clear_denominators", False))
+        if claim is not None and not claim.terms:
+            res.meta.setdefault("hints", []).append(t("engine.ideal.claim_zero"))
+    except (NotPolynomial, ValueError, TypeError, KeyError):
+        pass
+    return res
+
+
+def _ideal(spec, limits: Limits | None = None, spec_path: str = "",
+           progress=None, eliminate_linear=None,
+           clear_denominators=None) -> Result:
     """Membership in a polynomial ideal, with the cofactors as certificate.
 
     `progress`, a callable, receives at most one event a second during the

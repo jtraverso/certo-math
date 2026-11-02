@@ -19588,6 +19588,271 @@ def test_0_37_exact_numbers_of_any_size_in_certo_s_own_process():
         sys.set_int_max_str_digits(old)
 
 
+
+# --- 0.38: what the 0.37 sessions found ------------------------------------------
+
+
+def test_0_38_a_parametric_primal_binds_with_its_claim():
+    """With `primal=` the bound runs the other way; 0.37 read only the sense
+    and every primal with a claim was "another obligation"."""
+    from certo import api
+    from certo.obligation import same_obligation
+    from certo.polynomials import Poly
+    from certo.spec import ParametricSpec
+
+    R = ("p",)
+    p, one = Poly.var(R, "p"), Poly.const(R, 1)
+    base = dict(parameters={"p": 0}, objective={"w": one},
+                constraints=[("eq", {"w": one}, "==", p)], box={"p": (0, 1)})
+    for sense in ("min", "max"):
+        for primal in (True, False):
+            upper = (sense == "min") == primal
+            kw = dict(base, sense=sense, claim=p + one if upper else p - one)
+            if primal:
+                kw["primal"] = {"w": p}
+            else:
+                kw.update(dual={"eq": one}, free=["w"])
+            s = ParametricSpec(**kw)
+            c = api.run("parametric", s).certificate
+            assert c is not None and same_obligation(c, s)["same"], (sense, primal)
+            other = ParametricSpec(**dict(kw, claim=p + one.scaled(2) if upper else p))
+            assert same_obligation(c, other)["same"] is False
+
+
+def _lp_small(rhs):
+    from certo import LPSpec
+
+    s = LPSpec(sense="max")
+    s.variable("a")
+    s.variable("b")
+    s.objective({"a": 1, "b": 2})
+    s.constraint({"a": 1, "b": 1}, "<=", 4, name="cap")
+    s.constraint({"a": 1}, ">=", rhs, name="low")
+    return s
+
+
+def test_0_38_a_solver_s_infeasible_is_decided_exactly_or_not_at_all():
+    """A solver said infeasible, no ray came back, and 0.37 answered `unsat`,
+    conclusive -- on two programs a user then showed feasible."""
+    from certo.engines import lp
+    from certo.outcome import outcome
+
+    real = lp._solve, lp.infeasible_certificate, lp.EXACT_DECIDE_ENTRIES
+    lp._solve = lambda prob, solver: "Infeasible"
+    lp.infeasible_certificate = lambda spec, lim=None: None
+    try:
+        r = lp.opt(_lp_small(1), LIM)                      # feasible, really
+        assert r.verdict.value == "satisfiable" and r.meta["solver_was_wrong"]
+        assert r.certificate.kind == "lp_dual" and verify(_roundtrip(r.certificate), LIM).ok
+        assert Fraction(r.meta["objective"]) == 7
+        r = lp.opt(_lp_small(9), LIM)                      # infeasible, really
+        assert r.verdict.value == "unsatisfiable" and r.certificate.kind == "farkas_ray"
+        assert verify(_roundtrip(r.certificate), LIM).ok
+        lp.EXACT_DECIDE_ENTRIES = 1                         # too large to decide
+        r = lp.opt(_lp_small(9), LIM)
+        assert r.verdict.value == "inconclusive" and r.certificate is None
+        assert outcome(r)["conclusive"] is False
+    finally:
+        lp._solve, lp.infeasible_certificate, lp.EXACT_DECIDE_ENTRIES = real
+
+
+def test_0_38_unknown_is_inconclusive_not_invalid():
+    """z3 answering `unknown` on a re-check was graded `invalid`, exit 1."""
+    import subprocess
+    import sys
+    import tempfile
+
+    import z3
+
+    from certo.certificate import Certificate
+
+    x, y, w = z3.Ints("x y w")
+    s = z3.Solver()
+    s.add(x > 0, y > 0, w > 0, x * x * x + y * y * y == w * w * w)
+    cert = Certificate(kind="unsat_core", solver_free=False,
+                       payload={"core_smt2": s.to_smt2(), "names": ["a", "b", "c", "d"]})
+    rep = verify(cert, Limits(timeout_ms=1500))
+    assert not rep.ok and rep.degree == "inconclusive"
+    assert rep.verification == "inconclusive" and rep.reason.startswith("unknown")
+    assert rep.to_dict()["verification"] == "inconclusive"
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "core.json")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(cert.to_json())
+    env = dict(os.environ, PYTHONPATH=str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+    out = subprocess.run([sys.executable, "-c",
+                          "import sys; from certo.cli import main; sys.exit(main())",
+                          "verify", path, "--timeout-ms", "1500"],
+                         capture_output=True, text=True, env=env)
+    assert out.returncode == 2, out.stdout[-400:]
+    # a check that FAILED is still invalid
+    bad = Certificate(kind="unsat_core", solver_free=False,
+                      payload={"core_smt2": "(declare-fun x () Int)(assert (> x 0))",
+                               "names": ["a"]})
+    rep = verify(bad, LIM)
+    assert rep.verification == "invalid" and rep.degree == "invalid"
+
+
+def test_0_38_a_cover_is_an_object_exhibited_with_the_three_answers_apart():
+    from certo import api
+    from certo.outcome import outcome, reading
+    from certo.spec import CoverSpec
+
+    r = api.run("cover", CoverSpec(universe=[1, 2, 3, 4], parts=[(1, 2), (3, 4)], exact=True))
+    assert outcome(r)["state"] == "OBJECT_EXHIBITED"
+    rd = reading(r)
+    assert rd["conclusion"] == "OBJECT_EXHIBITED" and rd["evidence"] == "feasible"
+    assert rd["solver_status"] == r.status.value and rd["verification"] in ("valid", "not_run")
+
+
+def test_0_38_a_timeout_is_a_timeout_and_says_what_to_try():
+    from certo.cnf import CNFSpec
+    from certo.engines import sat
+    from certo.i18n import set_lang
+
+    set_lang("en")
+    r = sat.cases(CNFSpec(cnf=_php(9)), Limits(timeout_ms=300))
+    assert r.status is Status.TIMEOUT and r.verdict is Verdict.INCONCLUSIVE
+    assert "tiempo" not in r.detail and "out of time" in r.detail
+    assert any("--solver-binary" in h for h in r.meta["hints"])
+
+
+def test_0_38_a_certificate_built_with_fractions_is_written():
+    from certo.certificate import Certificate, farkas_ray_certificate
+
+    F = Fraction
+    c = farkas_ray_certificate(A=[[F(1)], [F(-1)]], b=[F(1, 2), F(-1)],
+                               y=[F(1), F(1)], names=["u", "l"])
+    text = json.dumps(c.to_dict())
+    back = Certificate.from_dict(json.loads(text))
+    assert verify(c, LIM).ok and verify(back, LIM).ok
+    assert c.digest() == back.digest()
+    assert json.loads(c.to_json())["payload"]["b"] == ["1/2", "-1"]
+
+
+def test_0_38_cert_refuses_a_name_that_differs_only_in_case():
+    import subprocess
+    import sys
+    import tempfile
+
+    d = tempfile.mkdtemp()
+    spec = os.path.join(d, "s.py")
+    other = os.path.join(d, "o.py")
+    for path, poly in ((spec, "x*x + 1"), (other, "x + 2")):
+        with open(path, "w") as f:
+            f.write("import z3\nfrom certo.spec import NonnegSpec\nx = z3.Real('x')\n"
+                    "def spec():\n    return NonnegSpec(poly={}, box={{'x': (0, 1)}})\n"
+                    .format(poly))
+    env = dict(os.environ, PYTHONPATH=str(pathlib.Path(__file__).resolve().parent.parent / "src"))
+
+    def run(*a):
+        return subprocess.run([sys.executable, "-c",
+                               "import sys; from certo.cli import main; sys.exit(main())", *a],
+                              capture_output=True, text=True, env=env)
+
+    assert run("nonneg", spec, "--cert", os.path.join(d, "pair_Pv.json")).returncode == 0
+    r = run("nonneg", spec, "--cert", os.path.join(d, "pair_PV.json"))
+    assert r.returncode == 3 and "case" in r.stderr
+    assert sorted(n for n in os.listdir(d) if n.endswith(".json")) == ["pair_Pv.json"]
+    r = run("nonneg", other, "--cert", os.path.join(d, "pair_Pv.json"))
+    assert r.returncode == 0 and "ANOTHER obligation" in r.stderr
+
+
+def test_0_38_an_lp_answer_typed():
+    from certo import LPSpec, lp_view
+    from certo.engines import lp
+
+    s = LPSpec(sense="min")
+    s.variable("a")
+    s.variable("b")
+    s.objective({"a": 1, "b": 2})
+    s.constraint({"a": 1, "b": 1}, ">=", 3, name="need")
+    v = lp_view(lp.opt(s, LIM))
+    assert v["kind"] == "optimum" and v["objective"] == 3 and v["ray"] is None
+    assert v["primal"] == {"a": 3, "b": 0}
+    s.constraint({"a": 1, "b": 1}, "<=", 1, name="cap")
+    v = lp_view(lp.opt(s, LIM))
+    assert v["kind"] == "infeasible" and v["primal"] is None and set(v["ray"]) == {"need_geq", "cap"}
+    assert s.as_leq_system().row_names == ["need_geq", "cap"]
+    A, b, c, names = s.as_leq_system()                      # still a tuple
+    assert names == ["need_geq", "cap"]
+
+
+def test_0_38_lint_says_where_hypotheses_hide_and_a_zero_claim():
+    import tempfile
+
+    import z3
+
+    from certo import api
+    from certo.lint import lint
+    from certo.spec import IdealSpec
+
+    d = tempfile.mkdtemp()
+    cases = {
+        "spec.hypotheses_in_goal": "import z3\nfrom certo import Spec\nx = z3.Real('x')\n"
+        "def spec():\n    s = Spec()\n    s.claim(z3.Implies(x > 1, x * x > 1))\n    return s\n",
+        "spec.negated_goal": "import z3\nfrom certo import Spec\nx = z3.Int('x')\n"
+        "def spec():\n    s = Spec()\n    s.claim(z3.Not(z3.And(x > 0, x < 3)))\n    return s\n",
+        "ideal.claim_zero": "import z3\nfrom certo import IdealSpec\nx = z3.Real('x')\n"
+        "def spec():\n    return IdealSpec(variables=['x'], equations=[x - 1], claim=x - x)\n",
+    }
+    for key, text in cases.items():
+        path = os.path.join(d, key.replace(".", "_") + ".py")
+        with open(path, "w") as f:
+            f.write(text)
+        assert key in [f["key"] for f in lint(path)["findings"]], key
+    x = z3.Real("x")
+    r = api.run("ideal", IdealSpec(variables=["x"], equations=[x - 1], claim=x - x))
+    assert r.verdict.value == "proved" and r.meta.get("hints")
+
+
+def test_0_38_poly_to_sympy_and_back():
+    try:
+        import sympy  # noqa: F401
+    except ImportError:
+        return
+    from certo.polynomials import Poly
+
+    R = ("x", "y")
+    x, y = Poly.var(R, "x"), Poly.var(R, "y")
+    p = x * x * y + Poly.const(R, Fraction(-3, 7)) + y.scaled(2)
+    assert Poly.from_sympy(p.to_sympy(), R) == p
+
+
+def test_0_38_a_nonneg_certificate_read_as_leaves():
+    import z3
+
+    from certo import api, nonneg_leaves
+    from certo.spec import NonnegSpec
+
+    x = z3.Real("x")
+    v = nonneg_leaves(api.run("nonneg", NonnegSpec(
+        poly=(x - Fraction(1, 2)) ** 2 + Fraction(1, 100), box={"x": (0, 1)})).certificate)
+    assert v["method"] == "bernstein"
+    boxes = [lf["box"]["x"] for lf in v["leaves"]]
+    assert boxes[0][0] == "0" and boxes[-1][1] == "1"
+    assert all(a[1] == b[0] for a, b in zip(boxes, boxes[1:]))     # they tile
+    assert nonneg_leaves(api.run("nonneg", NonnegSpec(
+        poly=x + 1, box={"x": (0, None)})).certificate)["method"] == "shift"
+    assert nonneg_leaves(api.run("nonneg", NonnegSpec(
+        poly=x - 1, box={"x": (0, 2)})).certificate)["method"] == "point"
+
+
+def test_0_38_counterexamples_against_the_original_domain():
+    import z3
+
+    from certo import api
+    from certo.spec import SynthSpec
+
+    c, x = z3.Int("c"), z3.Real("x")
+    s = SynthSpec(impl_vars=[c], input_vars=[x], impl_constraints=z3.And(c >= 0, c <= 10),
+                  behavior=z3.And(x >= 0, x <= 3), correctness=x * x <= c, minimize=c,
+                  original=z3.And(x >= 0, x <= 1))
+    r = api.run("synth", s)
+    where = r.meta["counterexamples_in_original"]
+    assert where["outside"] >= 1 and "OUTSIDE" in r.detail
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     fails = 0

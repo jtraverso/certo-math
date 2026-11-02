@@ -270,6 +270,15 @@ Four findings that pay for themselves:
 | the predicate returns `bool` | then the sweep will be `reproducible`, not `certified`. People who wrote the predicate themselves have read that difference wrong |
 | `integer=True` makes **all** variables integer | a user read it as "there are integers in here" and got a design worth nothing, every weight rounded to zero |
 
+*(0.38)* Three notes more. A goal that is an IMPLICATION with no named
+hypothesis: `core` and `audit` then report "0 of 0 hypotheses used" and the
+vacuity check has nothing to check -- name them with `assume`. A goal that is
+a NEGATION: to find an object, `check` or `exists` says so directly, where
+`prove` answers `refuted` with the object as its counterexample. And an
+`IdealSpec` claim that expands to the zero polynomial -- certified, trivially,
+and the mark of a variable that shadowed the expression meant (the `ideal`
+result says it too).
+
 It counts a domain without building it — `items=lambda: iter(range(10**7))` is
 peeked at, never materialised — and reads the size of a graph family from a
 table, so linting an 11-vertex sweep costs the time to read the file.
@@ -1553,6 +1562,12 @@ It may still hold; the detail says where to cut.
     NonnegSpec(poly=Fraction(3, 10) - x, box={"x": (0, Fraction(1, 2))},
                region=[("below_root", Fraction(3, 40) - x**2)])
 
+**Reading a certificate** *(0.38)*. `certo.nonneg_leaves(cert)` walks the
+tree the way `verify` does and returns every leaf with its exact box, its
+degrees and its region multipliers -- or the `shift` multipliers on an open
+end, or the point of a refutation. For an auditor that rebuilds the check
+outside certo: the format, read once, here.
+
 **The proof's degree** *(0.37)*. `degree=60`, or `{"x": 60}`, runs the
 Bernstein test at a degree above the polynomial's: the coefficients enclose
 it more tightly, and `(x - 1/2)^2 + 1/100` on `[0, 1]`, inconclusive at its
@@ -1846,6 +1861,10 @@ deletion into the proof. The pigeonhole proof of 9 pigeons in 8 holes, which
 0.36 could not check in ten minutes, is now solved in about one minute and
 checked in about one and a half. A
 proof line that does not end in `0` is refused as truncated.
+
+*(0.38)* A run the clock stopped is `timeout`, not `resource_exhausted`
+(that is a conflict budget), and says what to try: a SAT binary
+(`--solver-binary`), a smaller obligation, a symmetry quotient first.
 
 When the solver answers UNSAT but the check runs out of time, the result is
 `INCONCLUSIVE` with outcome `UNCHECKED`, and the certificate is **kept**: the
@@ -2256,6 +2275,13 @@ callback now also receives the ACCEPTED round (`"accepted": True`,
 `"counterexample": None`), so it is called `iterations` times; `--trace`
 prints it.
 
+**Counterexamples against the real domain** *(0.38)*. When `behavior` relaxes
+the problem, `SynthSpec(original=predicate)` -- over the input variables --
+has every counterexample evaluated against it: `meta
+["counterexamples_in_original"]` counts those inside, outside and undecided,
+and the result says when some lie outside (they refute the relaxation only).
+Read, not certified: it is not in the certificate.
+
 **Which obligation, and the best candidate.** `correctness={"access": ...,
 "payment": ...}` is one contract with named parts, and each counterexample in
 the trace says which it `breaks`. `minimize=expr` (or `maximize`), an integer
@@ -2466,6 +2492,14 @@ optimum raised with the chosen list extended. Each is caught; the battery
 keeps it so. `verify --obligation SPEC` also ties a standalone `farkas_ray`
 to your program: the system in its payload against your `A x <= b`.
 Over MCP the same batteries are `verify(..., tamper=true)` *(0.35.1)*, as data.
+
+
+**Where the certificate is written** *(0.38)*. `--cert` refuses (exit `3`) a
+name that differs only in case from a file already in the folder --
+`pair_PV.json` beside `pair_Pv.json` -- because on Windows and macOS they are
+one file and the second certificate would replace the first. Writing over a
+certificate of ANOTHER obligation is said on stderr, and done: re-running an
+edited spec does exactly that.
 
 ### `certo step`
 

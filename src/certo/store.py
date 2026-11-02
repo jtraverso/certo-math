@@ -23,9 +23,12 @@ from __future__ import annotations
 import gzip
 import io
 import json
+import os
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .i18n import t
 
 MANIFEST = "manifest.json"
 
@@ -79,6 +82,42 @@ def write_certificate(cert, path) -> None:
         p.write_bytes(gzip.compress(text.encode("utf-8"), 6))
     else:
         p.write_text(text, encoding="utf-8")
+
+
+def collision(cert, path):
+    """`(refusal, warning)` before writing `cert` to `path`, each None or a
+    message.
+
+    REFUSED: another file in the folder whose name differs from `path` only
+    in case. On Windows and macOS they are ONE file, and two certificates
+    written as `pair_Pv.json` and `pair_PV.json` left one -- reported four
+    times, each found only when a binding failed later.
+
+    WARNED: `path` holds a certificate of ANOTHER obligation. Re-running an
+    edited spec does exactly that, so it is said, not refused."""
+    p = Path(path)
+    folder = p.parent if str(p.parent) else Path(".")
+    try:
+        names = [n for n in os.listdir(folder) if n.casefold() == p.name.casefold()]
+    except OSError:
+        names = []
+    other = [n for n in names if n != p.name]
+    if other:
+        return t("store.case_collision", path=str(p), other=other[0]), None
+    if not p.is_file():
+        return None, None
+    try:
+        from .certificate import Certificate
+        from . import obligation
+
+        old = Certificate.from_dict(read_json(str(p)))
+        mine, theirs = obligation.fingerprint(cert), obligation.fingerprint(old)
+    except Exception:  # noqa: BLE001 -- not a certificate we can read: plain overwrite
+        return None, None
+    differs = (mine != theirs) if (mine and theirs) else (old.kind != cert.kind)
+    if differs:
+        return None, t("store.other_obligation", path=str(p), kind=old.kind)
+    return None, None
 
 
 def is_certificate_name(name) -> bool:

@@ -25,6 +25,8 @@ certificate and typed metadata -- nothing is parsed from text -- as
     FEASIBLE_POINT            a point meeting every constraint; nothing optimised
     INFEASIBLE                the constraints cannot hold together
     TARGET_MET                a required count reached (assign, cover, exists)
+    OBJECT_EXHIBITED          an object exists and was checked (a cover, a
+                              design): a bound you HAVE, not shown optimal
     PHYSICAL_WITNESS_VERIFIED a physical object rebuilt and checked (no
                               resource or edge used twice)
     CONSTRUCTION_VERIFIED     every contract of a construction re-derived
@@ -42,7 +44,7 @@ STATES = (
     "HYPOTHESES_VERIFIED", "PARAMETER_SYNTHESIZED", "PARAMETER_OPTIMUM",
     "SYNTHESIS_PROVED_UNIVERSAL", "NO_PARAMETER", "FINITE_DOMAIN_COVERED",
     "CONTINUOUS_OPTIMUM", "INTEGER_OPTIMUM", "BOUND_ONLY", "FEASIBLE_POINT",
-    "INFEASIBLE", "TARGET_MET", "PHYSICAL_WITNESS_VERIFIED",
+    "INFEASIBLE", "TARGET_MET", "OBJECT_EXHIBITED", "PHYSICAL_WITNESS_VERIFIED",
     "CONSTRUCTION_VERIFIED", "ALGEBRAIC_CONDITION_DERIVED", "REFUTED",
     "SATISFIABLE", "UNCHECKED", "INCONCLUSIVE",
 )
@@ -101,6 +103,14 @@ def _state(res):
         if meta.get("cited") or meta.get("bridges"):
             return "UNIVERSAL_WITH_IMPORTED_THEOREM", "rests on cited lemmas or bridges"
         return "THEOREM_PROVED", "every lemma linked"
+    if v == "proved" and cert is not None:
+        from .evidence import evidence_class
+
+        if evidence_class(cert) == "feasible":
+            # A cover found and checked is an OBJECT, not a theorem: 0.37
+            # said THEOREM_PROVED beside `evidence: feasible`, and a reader
+            # had to know the convention to see they were the same fact.
+            return "OBJECT_EXHIBITED", "an object exists and was checked; not shown optimal"
     if v == "proved":
         return "THEOREM_PROVED", "the claim holds under the hypotheses"
     if v == "refuted":
@@ -116,3 +126,29 @@ def outcome(res) -> dict:
     state, basis = _state(res)
     return {"state": state, "conclusive": state not in ("INCONCLUSIVE", "UNCHECKED"),
             "basis": basis}
+
+
+def reading(res) -> dict:
+    """The three answers a result holds, apart -- a report asked for exactly
+    this after reading a valid cover as `status: unsat`, `THEOREM_PROVED` and
+    `evidence: feasible` at once:
+
+        solver_status   what the engine's backend answered (`unsat`, `sat`,
+                        `timeout`, ...) -- a convention of the engine, not a
+                        statement about mathematics
+        verification    whether the certificate was re-derived just now:
+                        `valid`, `invalid`, or `not_run`
+        conclusion      what is established, typed (`outcome`), with
+                        `conclusive`, the `evidence` class and the `scope`
+    """
+    from .evidence import evidence_of
+    from .scope import scope_of
+
+    o = outcome(res)
+    sc = (res.meta or {}).get("self_check")
+    ev = evidence_of(res.certificate)
+    return {"solver_status": getattr(res.status, "value", str(res.status)),
+            "verification": {"ok": "valid", "FAILED": "invalid"}.get(sc, "not_run"),
+            "conclusion": o["state"], "conclusive": o["conclusive"],
+            "evidence": ev["class"] if ev else None,
+            "scope": scope_of(res.certificate)}

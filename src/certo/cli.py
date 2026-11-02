@@ -115,6 +115,9 @@ def _as_json(res, args) -> dict:
     ev = evidence_of(res.certificate)
     if ev:
         out["evidence"] = ev["class"]
+    from .outcome import reading
+
+    out["reading"] = reading(res)
     if res.meta.get("self_check") == "FAILED":
         # What the engine claimed is kept, under its own name; the verdict a
         # reader acts on is that there is none.
@@ -285,6 +288,12 @@ def emit(res: Result, args) -> int:
     if out and res.certificate is not None:
         from . import store
 
+        refusal, warning = store.collision(res.certificate, out)
+        if refusal:
+            print(refusal, file=sys.stderr)
+            return 3
+        if warning:
+            print("!! " + warning, file=sys.stderr)
         store.write_certificate(res.certificate, out)
         if not quiet:
             print("  " + t("cli.cert.written", path=out))
@@ -2490,6 +2499,15 @@ def _obligation_check(cert, rep, path):
     return None
 
 
+def _verify_exit(rep) -> int:
+    """`0` valid, `1` invalid, `2` inconclusive -- the README's contract. 0.36
+    exited 1 for a check the clock stopped or z3 left `unknown`, which a
+    script read as a certificate found wrong."""
+    if rep.ok:
+        return 0
+    return 2 if rep.verification == "inconclusive" else 1
+
+
 def cmd_verify(args):
     from . import store
 
@@ -2552,7 +2570,7 @@ def cmd_verify(args):
             rep.ok = False
     if getattr(args, "md", False):
         _print_explained(cert, md=True)
-        return 0 if rep.ok else 1
+        return _verify_exit(rep)
     if args.json:
         out = rep.to_dict()
         from . import explain
@@ -2574,12 +2592,12 @@ def cmd_verify(args):
         print(json.dumps(out, indent=2, ensure_ascii=False))
     elif getattr(args, "oneline", False):
         pend = len(((cert.payload or {}).get("card") or {}).get("pending") or [])
-        print(oneline("valid" if rep.ok else "invalid", rep.degree, rep.kind,
+        print(oneline(rep.verification, rep.degree, rep.kind,
                       cert.digest(), args.certificate, rep.detail,
                       *(["pending={}".format(pend)] if pend else [])))
     else:
         print(t("cli.verify.header",
-                state=t("cli.verify.valid" if rep.ok else "cli.verify.invalid"),
+                state=t("cli.verify." + rep.verification),
                 kind=rep.kind,
                 how=t(rep.method_key or ("cli.verify.solver_free"
                                          if rep.solver_free
@@ -2592,6 +2610,8 @@ def cmd_verify(args):
         n = len(rep.partial) if rep.degree == "partial" else len(rep.assumed)
         print("  " + t("cli.verify.degree", degree=rep.degree,
                        what=t("verify.degree." + rep.degree, n=n)))
+        if rep.reason:
+            print("  " + t("cli.verify.reason", reason=rep.reason))
         if rep.detail:
             # The detail describes what the certificate SAYS about itself.
             # After a failure, a bare trailing summary reads as an
@@ -2610,7 +2630,7 @@ def cmd_verify(args):
             print("  " + _claim.line(view))
         if rep.ok:
             _print_explained(cert)
-    return 0 if rep.ok else 1
+    return _verify_exit(rep)
 
 
 # Errors, warnings and notes get a mark rather than a colour: this output is
