@@ -19078,15 +19078,19 @@ def test_0_35_1_an_integer_strict_row_is_tightened_and_the_step_is_checked():
 
 
 def test_0_35_1_synthesis_statistics_are_named_by_their_scale():
-    """C-FB-04: `iterations` is the search that found the optimum; the
-    optimisation's total is `optimization.total_rounds`."""
+    """C-FB-04, and 0.40: `iterations` is EVERY search together, the same
+    number as `optimization.total_rounds`; the search that found the optimum
+    keeps its own under `last_candidate`."""
     from certo.engines import cegis
     from certo.spec import load_spec
 
     root = pathlib.Path(__file__).resolve().parent.parent
     r = cegis.synth(load_spec(str(root / "examples" / "synth_minimum.py")))
     m = r.meta
-    assert m["last_candidate"]["iterations"] == m["iterations"]
+    assert m["iterations"] == m["rounds"] == m["optimization"]["total_rounds"]
+    assert m["last_candidate"]["iterations"] <= m["iterations"]
+    assert len(m["trace"]) >= len(m["last_candidate"]["trace"])
+    assert all("search" in row for row in m["trace"])
     opt = m["optimization"]
     assert opt["total_rounds"] == m["rounds"] == sum(s["iterations"] for s in opt["searches"])
     assert opt["improvements"] == len(opt["path"]) and opt["path"][-1] == m["value"]
@@ -20180,6 +20184,270 @@ def test_0_39_bareiss_solves_a_basis_exactly():
     D, N = basis_solution(R, rows, ["x", "y"], lambda v: as_poly(R, v))
     # x = t / (1 + t), y = 1 / (1 + t), over one denominator
     assert N["x"] * (one + t) == t * D and N["y"] * (one + t) == D
+
+
+# ---------------------------------------------------------------------------
+# 0.40: CEGIS without quantifiers, and the 0.39 session defects
+# ---------------------------------------------------------------------------
+
+
+def _split_spec(minimize=False, n=3, top=8):
+    """A capacity k such that every load splits into helpers h_i <= k."""
+    import z3
+
+    from certo.spec import SynthSpec
+
+    k = z3.Int("k")
+    xs = z3.Ints(" ".join("x{}".format(i) for i in range(n)))
+    hs = z3.Ints("h0 h1 h2")
+    return SynthSpec(
+        impl_vars=[k], input_vars=list(xs), helper_vars=list(hs),
+        impl_constraints=z3.And(k >= 0, k <= 40),
+        behavior=z3.And(*[z3.And(x >= 0, x <= top) for x in xs]),
+        correctness=z3.And(*[h >= 0 for h in hs], *[h <= k for h in hs],
+                           z3.Sum(hs) == z3.Sum(xs), hs[0] >= xs[0]),
+        minimize=k if minimize else None)
+
+
+def test_0_40_helpers_are_searched_without_quantifiers():
+    """r159, r139, r148: `forall helpers` sent z3 to `incomplete quantifiers`
+    on domains of a few values. The search is now plain queries, and the
+    helper values it found are the certificate's strategy."""
+    from certo.certificate import verify
+    from certo.engines import cegis
+
+    r = cegis.synth(_split_spec(minimize=True, n=6, top=6), LIM)
+    assert r.verdict.value == "proved" and r.meta["value"] == 12, r.detail
+    found = r.certificate.payload["found"]
+    assert found["payload"]["helper_witnesses"]
+    rep = verify(r.certificate, LIM)
+    assert rep.ok, rep.checks
+
+
+def test_0_40_the_strategy_is_checked_without_quantifiers():
+    from certo.certificate import verify
+    from certo.engines import cegis
+
+    r = cegis.synth(_split_spec(), LIM)
+    assert r.verdict.value == "proved"
+    assert r.meta["helper_search"]["quantifier_free"]
+    rep = verify(r.certificate, LIM)
+    names = [n for n, _ok, _d in rep.checks]
+    assert rep.ok and any("quantifier-free" in n or "sin cuantificadores" in n
+                          for n in names), names
+
+
+def test_0_40_a_witness_that_fixes_an_input_is_refused():
+    """A 'witness' substituting an INPUT turns the correctness into another
+    formula, which could close the query for a wrong reason."""
+    import copy
+
+    from certo.certificate import Certificate, verify
+    from certo.engines import cegis
+
+    r = cegis.synth(_split_spec(), LIM)
+    d = copy.deepcopy(r.certificate.to_dict())
+    w = d["payload"]["helper_witnesses"][0]
+    w.pop("h2")
+    w["x0"] = ["Int", 0]
+    assert verify(Certificate.from_dict(d), LIM).verification == "invalid"
+
+
+def test_0_40_wrong_witness_values_fall_back_to_the_quantified_check():
+    import copy
+
+    from certo.certificate import Certificate, verify
+    from certo.engines import cegis
+
+    r = cegis.synth(_split_spec(), LIM)
+    d = copy.deepcopy(r.certificate.to_dict())
+    d["payload"]["helper_witnesses"] = [
+        {n: [s, 999] for n, (s, _v) in w.items()}
+        for w in d["payload"]["helper_witnesses"]]
+    rep = verify(Certificate.from_dict(d), LIM)
+    assert rep.ok and rep.warnings
+
+
+def test_0_40_a_vacuous_candidate_is_said():
+    """A candidate whose domain is empty meets every contract: said in the
+    headline, the reading and by `verify`, as `prove` does."""
+    import z3
+
+    from certo.certificate import verify
+    from certo.engines import cegis
+    from certo.spec import SynthSpec
+
+    k, p = z3.Ints("k p")
+    s = SynthSpec(impl_vars=[k], input_vars=[p],
+                  impl_constraints=z3.And(k >= 1, k <= 10),
+                  behavior=z3.And(p >= k, p < 0), correctness=p == 7)
+    r = cegis.synth(s, LIM)
+    assert r.meta["vacuous"] and r.certificate.payload["vacuous"]
+    assert "vacuous" in r.outcome["basis"]
+    assert verify(r.certificate, LIM).warnings
+
+
+def test_0_40_unbounded_inputs_are_not_called_a_bounded_domain():
+    """r176: the template was bounded, the inputs were not, and the reading
+    said 'works on the bounded domain only'."""
+    import z3
+
+    from certo.engines import cegis
+    from certo.spec import SynthSpec
+
+    k, p = z3.Ints("k p")
+    s = SynthSpec(impl_vars=[k], input_vars=[p],
+                  impl_constraints=z3.And(k >= 1, k <= 10),
+                  behavior=p >= 0, correctness=p + k >= 3)
+    r = cegis.synth(s, LIM)
+    assert r.meta["input_domain"] == {"bounded": False, "unbounded": ["p"]}
+    assert "every input" in r.outcome["basis"]
+    bounded = cegis.synth(SynthSpec(
+        impl_vars=[k], input_vars=[p], impl_constraints=z3.And(k >= 1, k <= 10),
+        behavior=z3.And(p >= 0, p <= 5), correctness=p + k >= 3), LIM)
+    assert bounded.meta["input_domain"]["bounded"]
+
+
+def test_0_40_an_optimum_counts_every_search_at_the_top():
+    from certo.engines import cegis
+
+    r = cegis.synth(_split_spec(minimize=True), LIM)
+    m = r.meta
+    assert m["iterations"] == m["optimization"]["total_rounds"]
+    assert m["counterexamples"] == sum(s["counterexamples"]
+                                       for s in m["optimization"]["searches"])
+    ref = m["optimization"]["better_value_refutation"]
+    assert ref["inputs"] and len(ref["inputs"]) == ref["counterexamples"]
+
+
+def test_0_40_an_inconclusive_synthesis_says_where_it_stopped():
+    import dataclasses
+
+    from certo.engines import cegis
+    from certo.limits import Limits
+
+    import z3
+
+    from certo.spec import SynthSpec
+
+    k, x, h = z3.Ints("k x h")
+    # no candidate works, so the first one is refuted whichever z3 picks
+    s = SynthSpec(impl_vars=[k], input_vars=[x], helper_vars=[h],
+                  impl_constraints=z3.And(k >= 0, k <= 3),
+                  behavior=z3.And(x >= 0, x <= 8),
+                  correctness=z3.And(h >= x, h <= k))
+    r = cegis.synth(s, dataclasses.replace(Limits(), max_iterations=1))
+    st = r.meta["stalled"]
+    assert r.verdict.value == "inconclusive" and st["phase"] == "rounds"
+    assert {"round", "counterexamples", "witnesses", "inputs", "helpers",
+            "rlimit", "candidate"} <= set(st)
+    assert any(k.startswith("search.") for k in r.meta["phases_ms"])
+
+
+def test_0_40_which_obligation_breaks_without_quantifiers():
+    import z3
+
+    from certo.engines import cegis
+    from certo.spec import SynthSpec
+
+    k, x, h = z3.Ints("k x h")
+    s = SynthSpec(impl_vars=[k], input_vars=[x], helper_vars=[h],
+                  impl_constraints=z3.And(k >= 0, k <= 5),
+                  behavior=z3.And(x >= 0, x <= 5),
+                  correctness={"cap": x <= k, "split": h == x})
+    r = cegis.synth(s, LIM)
+    assert r.verdict.value == "proved" and r.meta["implementation"]["k"] == 5
+    # `split` is always saved by some h; `cap` by none, whatever h is
+    assert r.meta["trace"] and all(row["breaks"] == ["cap"] for row in r.meta["trace"])
+
+
+def test_0_40_an_unfinished_self_check_is_not_a_bug():
+    """r145, r187: a replay z3 could not decide raised SelfCheckFailed --
+    'a bug in certo' -- and the result was lost with it."""
+    import tempfile
+
+    import z3
+
+    from certo import Spec, api, certificate
+
+    x = z3.Real("x")
+    s = Spec()
+    s.assume("pos", x >= 1)
+    s.claim(x >= 0)
+    real = certificate.verify
+
+    def undecided(cert, limits=None):
+        rep = real(cert, limits)
+        name = rep.checks[0][0]
+        rep.checks[0] = (name, False, "unknown")
+        rep.ok = False
+        rep.undecide(name, reason="timeout")
+        return rep
+
+    where = tempfile.mkdtemp()
+    certificate.verify = undecided
+    try:
+        try:
+            api.run("prove", s, self_check="all", receipt_dir=where)
+            raise AssertionError("no exception")
+        except api.SelfCheckInconclusive as e:
+            assert isinstance(e, api.SelfCheckFailed)
+            assert "inconclusive" in str(e) and "(unknown)" in str(e)
+            assert e.receipt is not None and e.receipt.exists()
+            assert e.result.meta["self_check"].startswith("inconclusive")
+    finally:
+        certificate.verify = real
+
+
+def test_0_40_the_catalogue_has_every_commands_help():
+    """r243: `catalogue.commands()` gave `help: ''` -- for all 62."""
+    from certo import catalogue
+
+    rows = catalogue.commands()
+    assert rows and all(r["help"].strip() for r in rows), \
+        [r["name"] for r in rows if not r["help"].strip()]
+
+
+def test_0_40_farkas_splits_a_conjunction_and_explains_an_equality():
+    """r237: `And(...)` as one premise was 'not a comparison'; r240: an
+    equality goal was 'not a single row'."""
+    import z3
+
+    from certo import Spec
+    from certo.certificate import verify
+    from certo.engines import farkas
+
+    a, b, c = z3.Reals("a b c")
+    s = Spec()
+    s.assume("signs", z3.And(a >= 0, b >= 0, c >= 1))
+    s.claim(a + b + c >= 1)
+    r = farkas.farkas(s, LIM)
+    assert r.verdict.value == "proved", r.detail
+    assert verify(r.certificate, LIM).ok
+    e = Spec()
+    e.assume("h", a == b)
+    e.claim(a + c == b + c)
+    r = farkas.farkas(e, LIM)
+    assert r.status.value == "out_of_theory" and "<=" in r.detail
+
+
+def test_0_40_a_synthesis_scope_takes_a_note():
+    import z3
+
+    from certo.spec import SynthSpec
+
+    k, x = z3.Ints("k x")
+    s = SynthSpec(impl_vars=[k], input_vars=[x], behavior=x >= 0,
+                  correctness=x + k >= 0,
+                  scope={"counterexamples": SynthSpec.CE_RELAXATION,
+                         "note": "finite resource ledger, rows 1-40"})
+    assert s.scope_data()["note"].startswith("finite")
+    try:
+        SynthSpec(impl_vars=[k], input_vars=[x], behavior=x >= 0,
+                  correctness=x >= 0, scope={"counterexamples": "relaxed"})
+        raise AssertionError("accepted")
+    except ValueError as e:
+        assert "note" in str(e)
 
 
 if __name__ == "__main__":

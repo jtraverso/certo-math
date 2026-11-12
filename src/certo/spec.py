@@ -126,6 +126,10 @@ class SynthSpec:
     #   counterexamples  "realisable" (each one is a real object) or
     #                    "relaxation" (it may exist only in the relaxed model,
     #                    so "no candidate" refutes the relaxed contract only)
+    #                    -- `SynthSpec.CE_REALISABLE` / `.CE_RELAXATION`
+    #   note             free text, kept as written: where the model comes
+    #                    from, which ledger it reads. Five sessions put that
+    #                    in `counterexamples` and were refused.
     scope: dict = None
     # THE ORIGINAL DOMAIN, when `behavior` relaxes it: a predicate over the
     # input variables. Each counterexample is evaluated against it and the
@@ -158,7 +162,9 @@ class SynthSpec:
     # constraints; the result names the function found.
     templates: list = field(default_factory=list)
 
-    SCOPE_KEYS = ("model", "relaxed", "counterexamples")
+    SCOPE_KEYS = ("model", "relaxed", "counterexamples", "note")
+    CE_REALISABLE = "realisable"
+    CE_RELAXATION = "relaxation"
 
     def __post_init__(self):
         import z3
@@ -202,6 +208,8 @@ class SynthSpec:
             if ce not in ("realisable", "relaxation"):
                 raise ValueError(t("spec.synth_scope_ce", got=ce))
             out["counterexamples"] = ce
+        if sc.get("note"):
+            out["note"] = str(sc["note"])
         return out or None
 
     def normalized(self):

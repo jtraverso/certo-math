@@ -163,8 +163,23 @@ STRUCTURAL_BENIGN = {
         'nodes.*:dropkey', 'open:reversed', 'order:empty', 'order:reversed',
         'order:short', 'system.cons:reversed',
     },
-    # the counterexamples are the loop's history; the object is re-checked on the domain
+    # the counterexamples are the loop's history; the object is re-checked on the domain.
+    # A number rewritten everywhere -- the domain, the contract, the helper
+    # witnesses -- is another problem, consistently, and the witnesses still
+    # save it; `verify --obligation` ties the certificate to the spec.
     'cegis': {
+        '=0:coherent', '=1:coherent', '=3:coherent', '=4:coherent',
+        '=5:coherent', '=7:coherent', '=8:coherent',
+        # The helper witnesses are a strategy that SHORTENS the check: fewer,
+        # reordered or repeated, they either still save every input -- which
+        # is all the check asks -- or `verify` falls back to the quantified
+        # query and decides it there. The helpers' declaration is a set: the
+        # same names repeated or reordered quantify the same variables.
+        'helper_witnesses:dup', 'helper_witnesses:empty',
+        'helper_witnesses:reversed', 'helper_witnesses:short',
+        'helpers:dup', 'helpers:reversed',
+    } | {'counterexamples.*.{}:{}'.format(v, m) for v in ('y', 'b')
+         for m in ('dup', 'empty', 'reversed', 'short')} | {
         'counterexamples.*.x:dup', 'counterexamples.*.x:empty',
         'counterexamples.*.x:reversed', 'counterexamples.*.x:short',
         'counterexamples.*:dropkey', 'counterexamples.*:empty',
@@ -1586,6 +1601,7 @@ EXAMPLE_FIXTURES = [
     ("parametric_family.py", "parametric", ()),
     ("bisect_constant.py", "bisect", ()),
     ("synth_constant.py", "synth", ()),
+    ("synth_helpers.py", "synth", ()),
     ("synth_none.py", "synth", ()),
     ("clique_partition_minimum.py", "cover", ("--minimum",)),
     ("repair_refused.py", "cover", ()),
@@ -1714,6 +1730,9 @@ EXAMPLE_SKIPS = {
     # an edge less is another graph, on which the roles may move too;
     # `verify --obligation SPEC` is what ties the certificate to yours
     "role_transport": ("edges",),
+    # a strategy that SHORTENS the check: wrong values do not close the
+    # quantifier-free query, and `verify` decides the quantified one instead
+    "cegis": ("helper_witnesses",),
 }
 
 #: The kinds the hand-built fixtures above cover; with EXAMPLE_FIXTURES and

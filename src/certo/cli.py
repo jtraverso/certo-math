@@ -387,6 +387,14 @@ def _self_check(res, args):
     res.meta["self_check"] = "ok" if rep.ok else "FAILED"
     if rep.ok:
         return True
+    if rep.verification == "inconclusive":
+        # Not finished is not failed: z3 said `unknown`, or the clock ran out.
+        # Nothing was found wrong, so it is no bug report and no INVALID --
+        # but nothing was confirmed either, and the reading says so.
+        res.meta["self_check"] = "inconclusive: " + (rep.reason or "unknown")
+        print(t("cli.selfcheck.inconclusive", kind=cert.kind,
+                reason=rep.reason or "unknown"), file=sys.stderr)
+        return None
 
     # Loud, and on stderr: this is certo failing, not the user's spec.
     print(t("cli.selfcheck.failed", kind=cert.kind), file=sys.stderr)

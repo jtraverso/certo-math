@@ -2120,7 +2120,7 @@
   "profile.timeout": "TIEMPO AGOTADO: la búsqueda del perfil agotó el presupuesto de {ms} ms antes de tener el perfil completo. Inconcluso -- sin certificado; sube --timeout-ms, o entrega los segmentos y las fuentes para comprobarlos",
   "lean.theorem.bad_name": "`{name}` no es un identificador de Lean por el que se pueda citar un teorema (letras, dígitos, `_`, partes separadas por puntos; ninguna palabra reservada)",
   "lean.theorem.nothing": "no hay ningún `example` en este archivo al que llamar `{name}`",
-  "scope.cegis": "comprobado en el dominio acotado de entradas {domain}, no más allá",
+  "scope.cegis": "comprobado en el dominio de entrada {domain}, y en ningún otro",
   "scope.cegis_none": "ninguna implementación con {impl} cumple el contrato en las entradas {domain}",
   "engine.check.over_integers": "(cada variable real leída como entera)",
   "cli.regime.inhabited": "régimen {name}{over}: las hipótesis están habitadas ahí ({witness})",
@@ -2285,7 +2285,7 @@
   "evidence.audit": "una AUDITORÍA: qué hipótesis necesita una prueba",
   "evidence.computation": "un CÁLCULO EXACTO: un valor o una estructura, comprobados",
   "spec.synth_scope_keys": "SynthSpec.scope no conoce {bad}; acepta {known}",
-  "spec.synth_scope_ce": "SynthSpec.scope counterexamples es \"realisable\" o \"relaxation\", no {got!r}",
+  "spec.synth_scope_ce": "SynthSpec.scope counterexamples es \"realisable\" o \"relaxation\" (SynthSpec.CE_REALISABLE / CE_RELAXATION), no {got!r}; el texto libre va en scope[\"note\"]",
   "engine.synth.relaxed_none": "Los contraejemplos son de un modelo RELAJADO: ningún candidato cumple el contrato relajado, lo que no refuta el objeto que relaja",
   "verify.synth.model": "sobre un MODELO: {model} -- no el objeto mismo",
   "verify.synth.relaxed": "sobreaproximado: {names}",
@@ -2691,5 +2691,13 @@
   "verify.pfamily.piece_ok": "{vars} valor(es) básico(s), {frontiers} frontera(s)",
   "verify.pfamily.region": "solo donde vale la región declarada: {names}",
   "verify.pfamily.detail": "{n} pieza(s), factible en {box}",
-  "pfamily.uncovered": "la pieza {i} tiene una condición de frontera que ninguna otra pieza de su caja complementa: lo que deja fuera no lo cubre nadie"
+  "pfamily.uncovered": "la pieza {i} tiene una condición de frontera que ninguna otra pieza de su caja complementa: lo que deja fuera no lo cubre nadie",
+  "cli.selfcheck.inconclusive": "-- autoverificación NO CONCLUYENTE: el certificado {kind} no se pudo volver a comprobar dentro de los límites ({reason}). No se encontró nada incorrecto y nada quedó confirmado; `certo verify` con más margen puede terminarla.",
+  "engine.farkas.eq_goal": "la meta es una igualdad ({lhs} = {rhs}): una combinación de Farkas refuta un semiespacio, y su negación son dos. Demuestra `{lhs} <= {rhs}` y `{lhs} >= {rhs}` como dos metas, o usa `prove`",
+  "engine.synth.vacuous": "VACUO: el dominio del candidato es vacío -- ninguna entrada cumple el comportamiento, así que todo contrato se cumple ({rounds} rondas). Revisa las hipótesis",
+  "engine.synth.found_unbounded": "no queda ningún contraejemplo en TODO el dominio de entrada, no acotado en {names} ({rounds} rondas, {ces} contraejemplos); el candidato es de la plantilla",
+  "verify.cegis.witness_shape": "cada testigo de helpers asigna exactamente los helpers declarados, con su sort",
+  "verify.cegis.no_ce_witnesses": "no queda ningún contraejemplo: cada entrada la salva uno de los {n} testigos de helpers registrados (sin cuantificadores)",
+  "verify.cegis.witnesses_open": "los testigos de helpers registrados no cerraron el dominio ({got}); se comprobó con la consulta cuantificada",
+  "verify.cegis.vacuous": "vacuo: ninguna entrada cumple el comportamiento para este candidato, así que el contrato no se cumple sobre nada"
 }

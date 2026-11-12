@@ -6,6 +6,73 @@ payload — each such change says so and what still reads the old shape.
 
 ## [Unreleased]
 
+## [0.40.0] — 2026-11-12
+
+**CEGIS without quantifiers, and a check that did not finish is not a bug.**
+The 0.39 sessions -- about 110 of them, some 10 000 certificates replayed --
+found no wrong answer, and most of what went wrong had one cause: the
+`forall helpers` inside the counterexample search and inside its check. No
+new commands (62) and no new kinds (67); the schema stays 5, every payload
+change an optional field: `cegis.helper_witnesses`, `cegis.vacuous`. New API
+`api.SelfCheckInconclusive`, `api.run(receipt_dir=)`,
+`SynthSpec.CE_REALISABLE` / `CE_RELAXATION`, `scope["note"]`. New outputs
+`meta["helper_search"]`, `meta["stalled"]`, `meta["input_domain"]`,
+`meta["vacuous"]`, `meta["work"]`, and `phases_ms` split by step.
+
+### Changed
+
+- **The counterexample search asks no quantified query** when the helpers
+  appear only in the correctness: an input no known helper value saves, then
+  a helper value that saves it, until none does (a real counterexample) or
+  every input is saved. The quantified query is the fallback after 64 tries.
+  A shape where z3 answered `incomplete quantifiers` now finds its optimum in
+  under a second (`examples/synth_helpers.py`).
+- **The `cegis` certificate keeps the strategy** (`helper_witnesses`):
+  `verify` checks that every input is saved by one of the recorded helper
+  values with ONE quantifier-free query -- the same answer under load, where
+  the quantified replay was not -- and falls back to the quantified check
+  when they do not close. A witness must assign exactly the declared helpers.
+- **An optimised synthesis counts every search at the top**: `iterations`,
+  `counterexamples` and `trace` (each row with its `search`) are all of them;
+  `last_candidate` keeps the search that found the optimum, and
+  `better_value_refutation` gains the `inputs` that block a better value and
+  the `decisive` few. Three sessions read `iterations: 1, counterexamples: 0`
+  off runs of eight searches.
+- **A cegis scope line says "the input domain"**, not "the bounded input
+  domain": when the inputs are unbounded the check still covered them all.
+
+### Added
+
+- **`api.SelfCheckInconclusive`** -- a self-check that could not be FINISHED
+  (z3 `unknown`, or the clock) raises this subclass of `SelfCheckFailed`
+  instead of reporting a bug; the CLI says it on stderr without a bug report,
+  and the reading is `UNCHECKED`. `api.run(receipt_dir=...)` writes the
+  result, the certificate and the report there before either exception. The
+  message lists each failing check WITH what it saw.
+- **A vacuous synthesis is said**: a candidate whose domain is empty meets
+  every contract -- headline `VACUOUS`, payload `vacuous`, and `verify` warns.
+- **`meta["input_domain"]`** -- the inputs a found candidate's domain leaves
+  unbounded; the reading then says "works on every input of the domain", not
+  "on the bounded domain only".
+- **`meta["stalled"]`** on an inconclusive synthesis: the step that did not
+  finish (candidate, counterexample, helpers, quantified, domain verifier,
+  rounds, clock), z3's reason, the round, the sizes, the rlimit spent and the
+  candidate it was examining; `phases_ms` adds `search.<step>`.
+- **`SynthSpec.scope["note"]`**, free text; `SynthSpec.CE_REALISABLE` and
+  `CE_RELAXATION` for `counterexamples`, and the refusal names both.
+- **`farkas` splits a conjunction** given as one premise into one row per
+  conjunct (`name[1]`, `name[2]`, ...), and says before running that an
+  EQUALITY goal is two inequalities to prove (or `prove`).
+
+### Fixed
+
+- **A self-check z3 could not decide was reported as a bug in certo** and
+  turned the verdict `invalid`; its message named the check but not what it
+  saw ("fails its own verifier: the core really is unsatisfiable").
+- **`catalogue.commands()` returned an empty `help` for all 62 commands**.
+- **Which named obligation a counterexample breaks** is decided without a
+  quantifier once the input is concrete.
+
 ## [0.39.0] — 2026-11-02
 
 **A witness found elsewhere gets in, and an inconclusive says why.** The P1

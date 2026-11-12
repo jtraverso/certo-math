@@ -163,6 +163,14 @@ búsqueda, extracción, comprobación, autochequeo -- donde el motor las mide
 (`nonneg`, `parametric`, `synth`, `cases`, el fortalecimiento); una fase nunca
 se estima.
 
+Una autoverificación que no se pudo TERMINAR -- z3 dijo `unknown` al
+repetirla, o se acabó el reloj -- no es un fallo *(0.40)*. Hasta la 0.39 se
+informaba como un bug de certo y el veredicto pasaba a `invalid`; ahora se lee
+`UNCHECKED` ("volver a comprobarlo no terminó"), `meta["self_check"]` es
+`inconclusive: <razón>`, y la biblioteca levanta `SelfCheckInconclusive` en
+vez de `SelfCheckFailed` (una subclase suya, así que el código que se detiene
+ante cualquiera de las dos se sigue deteniendo).
+
 ## Alcance: sobre qué es concluyente una respuesta
 
 Un veredicto concluyente lo es **sobre lo que se preguntó**, que no siempre es

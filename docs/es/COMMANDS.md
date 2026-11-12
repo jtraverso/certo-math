@@ -158,6 +158,13 @@ paso desde los sorts de la afirmación. Si ni así existe certificado, el
 mensaje dice que es la RELAJACIÓN REAL la que no lo tiene, y `prove` decide
 sobre los enteros.
 
+**Conjunciones e igualdades** *(0.40)*. Una premisa `And(a >= 0, b >= 0)`
+se separa en una fila por conjunto, con nombre `nombre[1]`, `nombre[2]`, ...;
+antes se rechazaba como "not a comparison". Una meta que es una IGUALDAD son
+dos semiespacios, que una combinación de Farkas no puede refutar: se dice
+antes de correr el motor, con las dos desigualdades que demostrar en su lugar,
+o `prove`.
+
 ### `certo induct`
 
 **Pregunta** — ¿Vale para todo `n ≥ n₀`?
@@ -2389,9 +2396,9 @@ decisivos ("estas entradas lo fuerzan"), y `verify` comprueba que solo ellos
 ya no dejan candidato y que ninguno se puede quitar. `--prove-candidate` ahora
 funciona también tras `minimize` y `maximize`.
 
-**Dos escalas, con nombre** *(0.35.1)*. En una síntesis optimizada
-`iterations`, `counterexamples` y `trace` son la búsqueda que HALLÓ el
-óptimo, y `rounds` todas las búsquedas juntas. Ahora van tipadas:
+**Dos escalas, con nombre** *(0.35.1; el nivel superior cambió en 0.40,
+abajo)*. En una síntesis optimizada `iterations`, `counterexamples` y `trace`
+eran la búsqueda que HALLÓ el óptimo, y `rounds` todas las búsquedas juntas. Ahora van tipadas:
 `last_candidate` (esa búsqueda) y `optimization` (`total_rounds`,
 `improvements`, `path`, cada búsqueda, y `better_value_refutation`, la que no
 halló nada mejor).
@@ -2410,6 +2417,39 @@ refutación `cegis_none` lleva los candidatos rechazados como exclusiones, así
 que es RELATIVA a las respuestas del verificador -- y lo dice. Un verificador
 que lanza una excepción da no concluyente, nunca una refutación.
 `examples/synth_domain_verifier.py`.
+
+
+**Helpers sin cuantificadores** *(0.40)*. Un contraejemplo es una entrada
+que NINGÚN valor de los helpers salva -- `exists x . forall h . not
+correctness`, una consulta cuantificada, y z3 respondía `incomplete
+quantifiers` o `canceled` en dominios de pocos valores. Cuando los helpers
+aparecen solo en la corrección, la búsqueda ahora hace consultas simples: una
+entrada que ningún helper CONOCIDO salva, y luego -- con esa entrada fija --
+un valor de helpers que la salve; si no hay, es un contraejemplo real; si lo
+hay, se une a los testigos y el ciclo pregunta de nuevo. La consulta
+cuantificada queda como respaldo tras 64 intentos (`meta["helper_search"]`
+dice cuántos testigos y si se volvió al respaldo). Los testigos son la
+ESTRATEGIA, y el certificado `cegis` los guarda (`helper_witnesses`): `verify`
+comprueba con una consulta sin cuantificadores que cada entrada la salva uno
+de ellos -- lo que se repite igual bajo carga -- y vuelve a la consulta
+cuantificada si no cierran. Un testigo debe asignar exactamente los helpers
+declarados. `examples/synth_helpers.py`.
+
+**Lo que el resultado dice de sí mismo** *(0.40)*. Un candidato cuyo dominio
+es VACÍO cumple todo contrato: el titular dice `VACUOUS`, el payload lleva
+`vacuous`, y `verify` lo advierte diga lo que diga. `meta["input_domain"]`
+dice qué entradas deja sin cota el dominio; si hay alguna, el resultado se lee
+"vale en toda entrada del dominio" -- la comprobación las cubrió todas, y solo
+la plantilla estaba acotada. Una síntesis no concluyente dice DÓNDE se detuvo
+(`meta["stalled"]`: el paso -- candidato, contraejemplo, helpers,
+cuantificada, verificador de dominio, rondas, reloj -- con la razón de z3, la
+ronda, los tamaños, el rlimit gastado y el candidato que examinaba), y
+`phases_ms` separa la búsqueda por paso. En una síntesis optimizada
+`iterations`, `counterexamples` y `trace` son ahora TODAS las búsquedas
+juntas (cada fila de la traza dice cuál); `last_candidate` guarda la que halló
+el óptimo, y `better_value_refutation` las entradas que impiden un valor
+mejor, con las pocas decisivas. `scope` acepta una `note` de texto libre;
+`counterexamples` sigue siendo `SynthSpec.CE_REALISABLE` o `CE_RELAXATION`.
 
 ### `certo compose`
 

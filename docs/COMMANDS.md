@@ -158,6 +158,12 @@ step from the claim's sorts. When no certificate exists even so, the message
 says it is the REAL RELAXATION that has none, and `prove` decides over the
 integers.
 
+**Conjunctions and equalities** *(0.40)*. A premise `And(a >= 0, b >= 0)`
+is split into one row per conjunct, named `name[1]`, `name[2]`, ...; it was
+refused as "not a comparison". A goal that is an EQUALITY is two
+half-spaces, which one Farkas combination cannot refute: it is said before
+the engine runs, with the two inequalities to prove instead, or `prove`.
+
 ### `certo induct`
 
 **Question** — Does this hold for every `n ≥ n₀`?
@@ -2381,9 +2387,9 @@ force it"), and `verify` checks that it alone leaves no candidate and that
 none of it can be dropped. `--prove-candidate` now works after `minimize` and
 `maximize` too.
 
-**Two scales, named** *(0.35.1)*. In an optimised synthesis
-`iterations`, `counterexamples` and `trace` are the search that FOUND the
-optimum, and `rounds` is every search together. Both are now typed:
+**Two scales, named** *(0.35.1; the top level changed in 0.40, below)*. In
+an optimised synthesis `iterations`, `counterexamples` and `trace` were the
+search that FOUND the optimum, and `rounds` is every search together. Both are now typed:
 `last_candidate` (that search) and `optimization` (`total_rounds`,
 `improvements`, `path`, every search, and `better_value_refutation`, the
 search that found nothing better).
@@ -2401,6 +2407,37 @@ re-run. None: the `cegis_none` refutation carries the rejected candidates as
 exclusions, so it is RELATIVE to the verifier's answers -- and says so. A
 verifier that raises is inconclusive, never a refutation.
 `examples/synth_domain_verifier.py`.
+
+**Helpers without quantifiers** *(0.40)*. A counterexample is an input NO
+helper value saves -- `exists x . forall h . not correctness`, a quantified
+query, and z3 answered `incomplete quantifiers` or `canceled` on domains of a
+few values. When the helpers appear only in the correctness, the search now
+asks plain queries instead: an input no KNOWN helper value saves, then -- that
+input fixed -- a helper value that saves it; none is a real counterexample,
+one joins the witnesses and the loop asks again. The quantified query stays
+as the fallback after 64 tries (`meta["helper_search"]` says how many
+witnesses, and whether it fell back). The witnesses are the STRATEGY, and the
+`cegis` certificate keeps them (`helper_witnesses`): `verify` checks that
+every input is saved by one of them with one quantifier-free query, which
+repeats the same way under load, and falls back to the quantified check when
+they do not close. A witness must assign exactly the declared helpers.
+`examples/synth_helpers.py`.
+
+**What the result says about itself** *(0.40)*. A candidate whose domain is
+EMPTY meets every contract: the headline says `VACUOUS`, the payload carries
+`vacuous`, and `verify` warns whatever it claims. `meta["input_domain"]` says
+which inputs the domain leaves unbounded; when some are, the result reads
+"works on every input of the domain" -- the check covered all of them, and
+only the template was bounded. An inconclusive synthesis says WHERE it
+stopped (`meta["stalled"]`: the step -- candidate, counterexample, helpers,
+quantified, domain verifier, rounds, clock -- with z3's reason, the round,
+the sizes, the rlimit spent and the candidate it was examining), and
+`phases_ms` splits the search by step. In an optimised synthesis
+`iterations`, `counterexamples` and `trace` are now EVERY search together
+(each trace row says which); `last_candidate` keeps the search that found
+the optimum, and `better_value_refutation` the inputs that block a better
+value, with the decisive few. `scope` takes a free-text `note`;
+`counterexamples` stays `SynthSpec.CE_REALISABLE` or `CE_RELAXATION`.
 
 ### `certo compose`
 

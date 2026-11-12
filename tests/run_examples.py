@@ -92,6 +92,7 @@ CASES = [
     ("walkthrough_proof.py", "compose", []),
     ("packing_mixed.py", "opt", ["--by-type"]),
     ("synth_constant.py", "synth", []),
+    ("synth_helpers.py", "synth", []),
     ("synth_none.py", "synth", []),
     ("clique_partition.py", "exists", ["--max-parts", "3"]),
     ("clique_partition_minimum.py", "cover", ["--minimum"]),

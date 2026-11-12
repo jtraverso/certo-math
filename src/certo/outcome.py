@@ -56,6 +56,8 @@ def _state(res):
     cert = res.certificate
     kind = getattr(cert, "kind", None)
     meta = res.meta or {}
+    if str(meta.get("self_check", "")).startswith("inconclusive") and cert is not None:
+        return "UNCHECKED", "the certificate is written; re-checking it did not finish"
     if v == "inconclusive" and meta.get("proof_state") == "unchecked" and cert is not None:
         return "UNCHECKED", "the certificate is written; its check stopped on the clock"
     if v == "inconclusive":
@@ -68,6 +70,17 @@ def _state(res):
         if kind == "synth_optimum":
             return "PARAMETER_OPTIMUM", "optimal within the template and domain"
         if kind == "cegis":
+            if meta.get("vacuous"):
+                return "PARAMETER_SYNTHESIZED", "vacuous: the candidate's domain is empty"
+            dom = meta.get("input_domain") or {}
+            if dom.get("unbounded"):
+                # The template is bounded; the inputs are not -- and the
+                # check covered all of them. "Bounded domain" said less than
+                # was proved, and named the wrong thing as bounded.
+                return ("PARAMETER_SYNTHESIZED",
+                        "works on every input of the domain (unbounded in {}); "
+                        "the candidate is the template's".format(
+                            ", ".join(dom["unbounded"])))
             return "PARAMETER_SYNTHESIZED", "works on the bounded domain only"
         if kind == "cegis_none" or v == "unsatisfiable":
             return "NO_PARAMETER", "no candidate in the template on the domain"

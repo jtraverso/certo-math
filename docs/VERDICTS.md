@@ -162,6 +162,13 @@ feasible` at the same time. Each is right about something different, and
 A cover, a design or a packing found and checked is now `OBJECT_EXHIBITED`
 -- an object you have, not shown optimal -- rather than `THEOREM_PROVED`.
 
+A self-check that could not be FINISHED -- z3 said `unknown` on the replay,
+or the clock ran out -- is not a failure *(0.40)*. Until 0.39 it was reported
+as a bug in certo and the verdict became `invalid`; it now reads `UNCHECKED`
+("re-checking it did not finish"), `meta["self_check"]` is `inconclusive:
+<reason>`, and the library raises `SelfCheckInconclusive` rather than
+`SelfCheckFailed` (a subclass of it, so code that stops on either still stops).
+
 ## Why it is not an answer *(0.39)*
 
 Every inconclusive result carries `why`, one word from a fixed list -- in

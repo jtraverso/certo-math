@@ -271,7 +271,11 @@ devolver un certificado que no pasa su propio verificador. Eso cubre los
 certificados sin solver; uno cuya comprobación vuelve a llamar a un solver
 (`unsat_core`, `model`, …) vuelve sin comprobar, sin `meta["self_check"]`:
 llama a `certo.verify` sobre él cuando importe, o pasa `self_check="all"`. Cuesta menos del 1% de un
-`opt`. Pon `self_check=False` solo después de medirlo.
+`opt`. Pon `self_check=False` solo después de medirlo. Una comprobación que no
+se pudo TERMINAR (z3 dijo `unknown`, o se acabó el reloj) no es un bug: levanta
+`api.SelfCheckInconclusive`, una subclase, así que el código que se detiene
+ante fallos se sigue deteniendo; `receipt_dir=` escribe ahí el resultado antes
+de cualquiera de las dos excepciones.
 
 Los módulos de `certo.engines` siguen siendo privados; la promesa son `run`,
 `runnable` y `options`. Los comandos que leen un directorio o el entorno

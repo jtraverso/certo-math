@@ -32,12 +32,17 @@ def commands() -> list:
 
     sub = [a for a in build_parser()._actions
            if isinstance(a, argparse._SubParsersAction)][0]
+    # The one-line help lives on the subparser's ACTION, not on the parser:
+    # `parser.description` is empty for every command, and a session read
+    # the empty catalogue as "these commands are undocumented".
+    helps = {a.dest: a.help or "" for a in sub._choices_actions}
     seen, out = {}, []
     for name, parser in sub.choices.items():
         if id(parser) in seen:
             seen[id(parser)]["aliases"].append(name)
             continue
-        row = {"name": name, "aliases": [], "help": parser.description or ""}
+        row = {"name": name, "aliases": [],
+               "help": helps.get(name) or parser.description or ""}
         seen[id(parser)] = row
         out.append(row)
     return out

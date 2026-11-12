@@ -238,6 +238,21 @@ def as_row(e):
     raise NotPolynomial("unsupported comparison: {}".format(e))
 
 
+def _flat(assumptions):
+    """`(name, f)` with every conjunction split into its conjuncts, named
+    `name[1]`, `name[2]`, ... -- a premise `And(a >= 0, b >= 0)` is two rows,
+    and refusing it as "not a comparison" sent a session to split it by hand."""
+    for name, f in assumptions:
+        if z3.is_and(f):
+            parts = list(f.children())
+            stack = []
+            for i, g in enumerate(parts, 1):
+                stack.extend(_flat([("{}[{}]".format(name, i), g)]))
+            yield from stack
+        else:
+            yield name, f
+
+
 def rows_of(spec):
     """Named hypotheses plus the NEGATED goal, all as `p REL 0`.
 
@@ -245,7 +260,7 @@ def rows_of(spec):
     multipliers, and an equality's multiplier is free in sign.
     """
     out = []
-    for name, f in spec.assumptions:
+    for name, f in _flat(spec.assumptions):
         p, rel = as_row(f)
         if rel == "=":
             out.append((name, p, "<="))

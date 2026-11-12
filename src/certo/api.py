@@ -39,6 +39,13 @@ those too -- it asks the solver again -- which is what would have caught a
 `prove` answer whose own certificate did not verify. It costs 0.7% of an `opt` and it is what caught the defects in
 0.11.3. Pass `self_check=False` in a hot loop if you have measured that it
 matters; you will be turning off the thing that reads certo's own output.
+
+A check that could not be FINISHED -- z3 answered `unknown`, or the clock ran
+out -- is not a failure and not a bug: it raises `SelfCheckInconclusive`, a
+subclass, so code that stops on `SelfCheckFailed` still stops, and code that
+wants to tell the two apart catches the subclass first. `receipt_dir=` writes
+the result, the certificate and the report there BEFORE raising, so a run
+that ends in either exception keeps what it found.
 """
 from __future__ import annotations
 
@@ -54,16 +61,34 @@ class SelfCheckFailed(RuntimeError):
 
     This is a bug in certo, never a result about your spec. It carries both
     the `Result` and the `VerifyReport` so a caller that catches it can say
-    which check failed.
+    which check failed, and `receipt` -- where they were written, when
+    `run(receipt_dir=...)` asked for it.
     """
 
-    def __init__(self, result, report):
+    lead = "the {kind} certificate certo just produced fails its own verifier"
+
+    def __init__(self, result, report, receipt=None):
         self.result = result
         self.report = report
-        failed = [name for name, ok, _ in report.checks if not ok]
-        super().__init__(
-            "the {} certificate certo just produced fails its own verifier: "
-            "{}".format(result.certificate.kind, ", ".join(failed) or "?"))
+        self.receipt = receipt
+        # Each failing check WITH what it saw: the name alone read as the
+        # claim -- "fails its own verifier: the core really is unsatisfiable".
+        failed = ["{} ({})".format(name, detail) if detail else name
+                  for name, ok, detail in report.checks if not ok]
+        msg = self.lead.format(kind=result.certificate.kind) + ": " +             ("; ".join(failed) or "?")
+        if receipt:
+            msg += " -- written to " + str(receipt)
+        super().__init__(msg)
+
+
+class SelfCheckInconclusive(SelfCheckFailed):
+    """The check of what certo produced could not be FINISHED: a solver
+    answered `unknown`, or the time ran out. Nothing was found wrong -- it is
+    neither a bug nor a refutation -- and nothing was confirmed either.
+    `report.reason` says why; `certo verify` with more room may finish it."""
+
+    lead = ("the {kind} certificate certo just produced could not be "
+            "re-checked within the limits (inconclusive, not a failure)")
 
 
 #: Commands `run` reaches that `routing.RUNNERS` does not carry.
@@ -150,7 +175,7 @@ def options(command: str, spec=None) -> list:
 
 
 def run(command: str, spec, limits=None, *, spec_path=None,
-        self_check=True, **kwargs) -> Result:
+        self_check=True, receipt_dir=None, **kwargs) -> Result:
     """Run one command on one spec, in this process. Returns a `Result`.
 
     `limits` is a `Limits`, or None for the defaults. `spec_path` stamps the
@@ -162,8 +187,10 @@ def run(command: str, spec, limits=None, *, spec_path=None,
     swallowed, because an option silently ignored is an answer to a different
     question.
 
-    Raises `SelfCheckFailed` if the certificate does not verify; see the
-    module docstring.
+    Raises `SelfCheckFailed` if the certificate does not verify, and
+    `SelfCheckInconclusive` if its check could not be finished; see the
+    module docstring. `receipt_dir`, a directory, keeps the result there
+    before either is raised.
     """
     missing = [k for k in REQUIRED.get(command, ()) if k not in kwargs]
     if missing:
@@ -200,7 +227,7 @@ def run(command: str, spec, limits=None, *, spec_path=None,
     if res.certificate is not None and spec_path is not None:
         res.certificate.stamp(spec_path)
     if self_check and res.certificate is not None:
-        _check(res, limits, every=self_check == "all")
+        _check(res, limits, every=self_check == "all", receipt_dir=receipt_dir)
 
     # The in-process surface is the one a model sweeping a route space uses,
     # so it is the one whose unanswered questions are worth the most. Silent
@@ -211,7 +238,7 @@ def run(command: str, spec, limits=None, *, spec_path=None,
     return res
 
 
-def _check(res, limits, every=False) -> None:
+def _check(res, limits, every=False, receipt_dir=None) -> None:
     """The CLI's self-check, with an exception where it has an exit code.
 
     The CLI prints to stderr and returns 1, and the caller decides. In a
@@ -231,6 +258,32 @@ def _check(res, limits, every=False) -> None:
     # caller timing `api.run(self_check="all")` can tell them apart.
     res.meta["self_check_ms"] = round((_time.perf_counter() - t0) * 1000, 2)
     res.meta.setdefault("phases_ms", {})["self_check"] = res.meta["self_check_ms"]
-    res.meta["self_check"] = "ok" if report.ok else "FAILED"
-    if not report.ok:
-        raise SelfCheckFailed(res, report)
+    if report.ok:
+        res.meta["self_check"] = "ok"
+        return
+    unfinished = report.verification == "inconclusive"
+    res.meta["self_check"] = ("inconclusive: " + (report.reason or "unknown")
+                              if unfinished else "FAILED")
+    receipt = _write_receipt(res, report, receipt_dir) if receipt_dir else None
+    raise (SelfCheckInconclusive if unfinished else SelfCheckFailed)(
+        res, report, receipt)
+
+
+def _write_receipt(res, report, directory):
+    """The result, its certificate and the report, as one JSON file in
+    `directory`, BEFORE the exception: a session that did not catch it lost
+    the only copy of what the engine had found. Returns the path."""
+    import hashlib
+    import json
+    from pathlib import Path
+
+    d = Path(directory)
+    d.mkdir(parents=True, exist_ok=True)
+    body = {"result": res.to_dict(), "verification": report.verification,
+            "reason": report.reason, "report": report.to_dict()}
+    text = json.dumps(body, indent=2, default=str, ensure_ascii=False)
+    name = "{}_{}.selfcheck.json".format(
+        res.command, hashlib.sha256(text.encode("utf-8")).hexdigest()[:12])
+    path = d / name
+    path.write_text(text, encoding="utf-8")
+    return path

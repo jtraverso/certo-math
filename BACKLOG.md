@@ -8,7 +8,7 @@ Items marked *(user feedback)* come from an external user's report after real
 use; those carry more weight than anything on this list that was invented in
 the abstract.
 
-Last updated: 2026-11-02, at **0.39.0**.
+Last updated: 2026-11-12, at **0.40.0**.
 
 **This file went stale and it cost somebody a review.** A competent reader
 worked through the repository at 0.10.0, found this list still saying "at
@@ -110,6 +110,17 @@ the shape of the corpus LPs all changed the moment they were measured.
 
 | | Item | Effort | Confidence | Radius | Unblocks |
 |---|---|---|---|---|---|
+| **P1** | `CoverSpec.repair` tied to the BALANCE: scalar cost variables bound to the owners a repair withdraws, under one resource id (r243's acceptance test: setting `F_used = 0` must be refused even though the final cover alone is valid); a declared total balance and final-cost bound for a whole chain; a per-owner summary (kept, withdrawn, inserted, freed, consumed); `frozen_withdrawn` naming the stage that froze the owner | **M** | med | high | the 0.39 sessions: about 75 of 110 files ask for a relative-reconstruction ledger, and several found `repair` already does most of it -- the bridge to the scalar books is what is missing |
+| **P1** | A certificate that a FINITE DOMAIN, or a quotient by symmetry, is complete: the domain declared (generators, bounds, dependent intervals, parity fibres), an explicit permutation action that preserves the data, representatives, a case-to-cover map, and completeness and no-duplicates checked without trusting the generator | **M-L** | med | high | about 60 of the 0.39 files: external auditors checking 12 k to millions of orbits or fibres; `DomainSpec`, `atlas` and `covering` were tried and do not fit |
+| **P1** | A guide for COMBINATORIAL ACCOUNTING: `CoverSpec.repair` with chained stages, the non-vacuity check `prove` already makes, `assign` for integral Hall, `exists`, with three runnable end-to-end examples (synth + repair, Hall + repair, a 3-stage chain) | **S** | high | med | the 0.39 sessions rediscovered `repair` late (r172, r231 withdrew their requests) and ran a non-vacuity guard by hand in five files; nobody used any 0.39 addition |
+| **P2** | Hall and matchings on LITERAL lists: a matching or the deficient cut, per-type quotas and capacities, a partial SDR with a certified deficit, a prescribed partial matching, Konig witnesses; cuts and matching over one option matrix | **M** | med | med | about 37 of the 0.39 files |
+| **P2** | The synthesis strategy as a TABLE: input -> helper values over a small finite domain, checked by evaluation (0.40 records the witness SET; which witness saves which input is not yet written) | **S-M** | high | med | 11 of the 0.39 files; 0.40's `helper_witnesses` is the half that makes the check quantifier-free |
+| **P2** | CEGIS seeded and resumed: `SynthSpec(seed_counterexamples=...)` and the candidate, counterexamples and witnesses of an inconclusive run written to disk, reused by the next | **S-M** | high | med | r145, r187; joins the resumable-searches row |
+| **P2** | Hypothesis provenance as typed labels -- assumed, derived, external theorem (with version and statement), conditional or global -- carried into the certificate | **M** | med | med | about 30 of the 0.39 files; joins the imported-hypotheses row |
+| **P2** | Recurrence, DP-by-mask and generating-function tables certified over a complete domain | **M-L** | low | med | about 19 of the 0.39 files; today an external stdlib auditor |
+| **P2** | Batches sealed by hash and cardinality: missing tails, prefixes and duplicates flagged, keep going after REFUTED, proved / refuted / unknown / wrapper-failure kept apart | **S-M** | high | low | 12 of the 0.39 files; an r345 run covered 660 of 738 certificates |
+| **P3** | Cheap prechecks before a synthesis: pigeonhole on demands against values (r174), small bounded Int helpers made finite, `Distinct` and symmetry breaking documented | **S** | high | low | r159, r174 |
+| **P3** | A ledger of shared resources: the same base across layers counted once (union, not a sum of per-layer bounds), the `min` of alternative bounds on one residual, an exclusive consumer selector | **M** | low | med | about 24 of the 0.39 files; joins the exchange-contract row |
 | **P3** | HiGHS's MIP cuts read back as certificates. (Warm starts across nodes: MEASURED in 0.34 and not worth it -- HiGHS is 0.03 s of a node; the rest is the exact check) | **M** | low | med | `highspy` is installed and only reached through PuLP |
 | **P2** | Rigorous numerics from FLINT (Arb/Acb): root isolation with error balls plus Sturm counts (comparing algebraic numbers), certified eigenvalue enclosures (spectral bounds of graphs), rigorous integrals in `bounds` | **M** | med | med | `complex_roots`, `acb_mat.eig`, `acb.integral` checked available in python-flint 0.9 |
 | **P3** | Proposers from scipy and networkx: weighted assignment by the Hungarian method (its dual potentials ARE the certificate), graph isomorphism maps by VF2 (checked edge by edge), Bron-Kerbosch for `cliques_of` | **S each** | high | low | installed, unused |
@@ -406,6 +417,7 @@ the cost is being paid somewhere else.
 
 | Item | Where |
 |---|---|
+| CEGIS without quantifiers: the counterexample search over helpers as plain queries, the strategy kept in the certificate (`helper_witnesses`) and checked with one quantifier-free query; a self-check that did not finish is `SelfCheckInconclusive`, not a bug, with `receipt_dir`; vacuous candidates, unbounded inputs and where a synthesis stalled, said; an optimum's counters at one scale; `farkas` with conjunctions and equality goals; the catalogue's help | **0.40.0** |
 | Supplied multipliers, products of conditions on demand and imported Bernstein forests in `nonneg`; a family of bases, `parametric_family`; a domain verifier inside CEGIS; CEGIS for induction (`StrengthenSpec`) and recurrences in `induct`; `why` and phase times on every result; the coverage map and the first one read; a wheel that knows its commit; `entails` in three states | **0.39.0** |
 | Inconclusive kept apart from invalid (`verification`, `reason`, exit 2); LP infeasibility decided exactly or not concluded; the parametric primal binding; `OBJECT_EXHIBITED` and `reading`; `--cert` case collisions; `lp_view`, `nonneg_leaves`, `Poly.to_sympy`; lint for hidden hypotheses, negated goals and zero identities; counterexamples against the original domain | **0.38.0** |
 | A DRUP checker with watched literals that checks the core backwards, and a CDCL that deletes and logs; an UNCHECKED proof kept rather than thrown away; `verify --expect/--complete` and the `claim` view; `NonnegSpec.degree`; an id-free canonical form for formulas; the parametric binding reading the whole claim; exact numbers past 4300 digits; sympy read exactly | **0.37.0** |

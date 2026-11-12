@@ -743,7 +743,7 @@ def cegis_none_certificate(smt2, implementation_vars, inputs, helpers,
 
 
 def cegis_certificate(impl, counterexamples, smt2, iterations,
-                      helpers=None) -> Certificate:
+                      helpers=None, helper_witnesses=None) -> Certificate:
     payload = {
         "implementation": impl,
         "counterexamples": counterexamples,
@@ -754,6 +754,12 @@ def cegis_certificate(impl, counterexamples, smt2, iterations,
         # Optional: the existential helpers, by name and sort, so `verify`
         # quantifies them the way the contract does.
         payload["helpers"] = helpers
+    if helper_witnesses:
+        # Optional (0.40): helper values, each `{name: [sort, value]}`, such
+        # that every input of the domain is saved by one of them -- the
+        # strategy, written down. `verify` checks it with one quantifier-free
+        # query, and falls back to the quantified one if it does not close.
+        payload["helper_witnesses"] = helper_witnesses
     return Certificate(kind="cegis", solver_free=False, payload=payload,
                        note_key="cert.note.cegis")
 
@@ -6624,7 +6630,7 @@ def _rows_match_smt2(rows, smt2: str) -> bool:
         return False
 
     want = []
-    for f in formulas:
+    for _n, f in linarith._flat([("", g) for g in formulas]):
         try:
             poly, rel = linarith.as_row(f)
         except Exception:
@@ -7163,15 +7169,55 @@ def _verify_cegis(cert, limits) -> VerifyReport:
     # without them is checked the old way -- for every helper value, which is
     # the stronger statement and still a proof of the weaker one.
     helpers = [_const(z3, n, srt) for n, srt in (p.get("helpers") or [])]
+    warn = []
+    ok2, r2 = False, None
+    wits = p.get("helper_witnesses")
+    if wits and helpers:
+        # THE STRATEGY FIRST: every input saved by one of the recorded helper
+        # values. A witness must assign exactly the declared helpers, in their
+        # sorts -- one that fixed an INPUT instead would turn the correctness
+        # into something else, and could close the query for a wrong reason.
+        decl = {n: srt for n, srt in p["helpers"]}
+        shaped = isinstance(wits, list) and all(
+            isinstance(w, dict) and set(w) == set(decl)
+            and all(isinstance(v, (list, tuple)) and len(v) == 2 and v[0] == decl[n]
+                    for n, v in w.items())
+            for w in wits)
+        checks.append((t("verify.cegis.witness_shape"), shaped,
+                       "{} witness(es)".format(len(wits) if isinstance(wits, list) else 0)))
+        if shaped:
+            s = z3.Solver()
+            lim.apply_to(s)
+            s.add(behav, *fix)
+            for w in wits:
+                subs = [(_const(z3, n, v[0]), _value(z3, v[0], v[1])) for n, v in w.items()]
+                s.add(z3.Not(z3.substitute(corr, *subs)))
+            r2 = s.check()
+            ok2 = r2 == z3.unsat
+            if ok2:
+                checks.append((t("verify.cegis.no_ce_witnesses", n=len(wits)), True, str(r2)))
+            else:
+                warn.append(t("verify.cegis.witnesses_open", got=str(r2)))
+        else:
+            return VerifyReport(False, "cegis", False, checks=checks,
+                                detail=t("verify.cegis.witness_shape"))
+    if not ok2:
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.add(behav, (z3.ForAll(helpers, z3.Not(corr)) if helpers else z3.Not(corr)),
+              *fix)
+        r2 = s.check()
+        ok2 = r2 == z3.unsat
+        checks.append((t("verify.cegis.no_ce"), ok2, str(r2)))
+        if r2 == z3.unknown:
+            open_.append((t("verify.cegis.no_ce"), s.reason_unknown()))
+    # A CANDIDATE WITH NO INPUTS meets every contract. Not a failure -- the
+    # statement is true -- but said, whatever the payload claims.
     s = z3.Solver()
     lim.apply_to(s)
-    s.add(behav, (z3.ForAll(helpers, z3.Not(corr)) if helpers else z3.Not(corr)),
-          *fix)
-    r2 = s.check()
-    ok2 = r2 == z3.unsat
-    checks.append((t("verify.cegis.no_ce"), ok2, str(r2)))
-    if r2 == z3.unknown:
-        open_.append((t("verify.cegis.no_ce"), s.reason_unknown()))
+    s.add(behav, *fix)
+    if s.check() == z3.unsat:
+        warn.append(t("verify.cegis.vacuous"))
 
     dom = p.get("domain_check")
     dom_notes = [t("verify.cegis.domain", verifier=dom.get("verifier", "?"),
@@ -7181,7 +7227,7 @@ def _verify_cegis(cert, limits) -> VerifyReport:
         if isinstance(dom, dict) else []
     rep = VerifyReport(
         ok1 and ok2, "cegis", False, checks=checks,
-        warnings=_synth_scope_notes(p, found=True) + dom_notes,
+        warnings=_synth_scope_notes(p, found=True) + dom_notes + warn,
         detail=t("verify.cegis.detail", iterations=p["iterations"],
                  ces=len(p["counterexamples"])),
     )

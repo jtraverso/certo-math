@@ -2120,7 +2120,7 @@
   "profile.timeout": "TIMEOUT: the profile search ran out of the {ms} ms budget before it had the whole profile. Inconclusive -- no certificate; raise --timeout-ms, or give the segments and sources to check",
   "lean.theorem.bad_name": "`{name}` is not a Lean identifier a theorem can be cited by (letters, digits, `_`, dotted parts; no reserved word)",
   "lean.theorem.nothing": "there is no `example` in this file to name `{name}`",
-  "scope.cegis": "checked on the bounded input domain {domain}, not beyond it",
+  "scope.cegis": "checked on the input domain {domain}, and nowhere else",
   "scope.cegis_none": "no implementation with {impl} meets the contract on the inputs {domain}",
   "engine.check.over_integers": "(every real variable read as an integer)",
   "cli.regime.inhabited": "regime {name}{over}: the hypotheses are inhabited there ({witness})",
@@ -2285,7 +2285,7 @@
   "evidence.audit": "an AUDIT: which hypotheses a proof needs",
   "evidence.computation": "an EXACT COMPUTATION: a value or a structure, checked",
   "spec.synth_scope_keys": "SynthSpec.scope does not know {bad}; it takes {known}",
-  "spec.synth_scope_ce": "SynthSpec.scope counterexamples is \"realisable\" or \"relaxation\", not {got!r}",
+  "spec.synth_scope_ce": "SynthSpec.scope counterexamples is \"realisable\" or \"relaxation\" (SynthSpec.CE_REALISABLE / CE_RELAXATION), not {got!r}; free text goes in scope[\"note\"]",
   "engine.synth.relaxed_none": "The counterexamples belong to a RELAXED model: no candidate meets the relaxed contract, which does not refute the object it relaxes",
   "verify.synth.model": "about a MODEL: {model} -- not the object itself",
   "verify.synth.relaxed": "over-approximated: {names}",
@@ -2691,5 +2691,13 @@
   "verify.pfamily.piece_ok": "{vars} basic value(s), {frontiers} frontier(s)",
   "verify.pfamily.region": "only where the declared region holds: {names}",
   "verify.pfamily.detail": "{n} piece(s), feasible on {box}",
-  "pfamily.uncovered": "piece {i} has a frontier condition no other piece on its box complements: what it leaves out is covered by nothing"
+  "pfamily.uncovered": "piece {i} has a frontier condition no other piece on its box complements: what it leaves out is covered by nothing",
+  "cli.selfcheck.inconclusive": "-- self-check INCONCLUSIVE: the {kind} certificate could not be re-checked within the limits ({reason}). Nothing was found wrong and nothing was confirmed; `certo verify` with more room may finish it.",
+  "engine.farkas.eq_goal": "the goal is an equality ({lhs} = {rhs}): one Farkas combination refutes one half-space, and its negation is two. Prove `{lhs} <= {rhs}` and `{lhs} >= {rhs}` as two goals, or use `prove`",
+  "engine.synth.vacuous": "VACUOUS: the candidate's domain is empty -- no input satisfies the behaviour, so every contract holds ({rounds} rounds). Check the hypotheses",
+  "engine.synth.found_unbounded": "no counterexample left on the WHOLE input domain, unbounded in {names} ({rounds} rounds, {ces} counterexamples); the candidate is the template's",
+  "verify.cegis.witness_shape": "each helper witness assigns exactly the declared helpers, in their sorts",
+  "verify.cegis.no_ce_witnesses": "no counterexample remains: every input is saved by one of the {n} recorded helper witnesses (quantifier-free)",
+  "verify.cegis.witnesses_open": "the recorded helper witnesses did not close the domain ({got}); checked with the quantified query instead",
+  "verify.cegis.vacuous": "vacuous: no input satisfies the behaviour for this candidate, so the contract holds for nothing"
 }

@@ -124,6 +124,122 @@ def _no_helper_saves(behav, corr, helper_vars):
     return z3.And(behav, z3.ForAll(list(helper_vars), z3.Not(corr)))
 
 
+#: Helper witnesses tried for ONE candidate before the counterexample search
+#: falls back to the quantified query. Each try is two quantifier-free calls.
+WITNESS_ROUNDS = 64
+#: The witnesses kept across candidates (each is a constraint on every later
+#: counterexample query); past this the oldest are no longer added.
+WITNESS_POOL = 512
+#: An input bounded by this is called bounded: the reading of a result whose
+#: inputs are not (`input_domain`).
+BIG = 10 ** 15
+
+
+def _rlimit(s) -> int:
+    """z3's deterministic work counter for this solver so far (0 if absent)."""
+    try:
+        st = s.statistics()
+        return int(st.get_key_value("rlimit count")) if "rlimit count" in st.keys() else 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _helpers_in(expr, helper_vars) -> bool:
+    names = {str(h) for h in helper_vars}
+    return any(str(c) in names for c in z3util.free_consts(expr))
+
+
+def _with(corr, witness):
+    """`corr` with the helpers replaced by one witness's values."""
+    return z3.substitute(corr, *witness) if witness else corr
+
+
+def _ce_search(behav, corr, fixed, input_vars, helper_vars, pool, lim,
+               deadline, work, ms):
+    """A counterexample for the candidate `fixed` WITHOUT QUANTIFIERS.
+
+    `exists x . behav AND forall h . not corr` is the classic 2QBF, and z3's
+    quantifier engine answered `incomplete quantifiers` or `canceled` on
+    domains of four values (5..8). The same question as a loop of plain
+    queries: an input no KNOWN helper value saves; then, with that input
+    concrete, a helper value that saves it. None -> a real counterexample;
+    one -> it joins the witnesses and the loop asks again. With finitely many
+    helper values it ends; the witnesses that closed it are the certificate's
+    strategy -- `verify` checks them with one quantifier-free query.
+
+    `("none", None)` no counterexample (every input saved by a witness),
+    `("ce", model)`, `("unknown", (phase, reason))`, or `("fallback", None)`
+    when WITNESS_ROUNDS tries did not close it. `pool` is extended in place.
+    """
+    sx = z3.Solver()
+    lim.apply_to(sx)
+    sx.add(behav, *fixed)
+    for w in pool[-WITNESS_POOL:]:
+        sx.add(z3.Not(_with(corr, w)))
+    try:
+        for _ in range(WITNESS_ROUNDS):
+            t1 = time.perf_counter()
+            sx.set("timeout", _remaining_ms(deadline))
+            r = sx.check()
+            ms["counterexample"] += (time.perf_counter() - t1) * 1000
+            if r == z3.unsat:
+                return "none", None
+            if r != z3.sat:
+                return "unknown", ("counterexample", sx.reason_unknown())
+            m = sx.model()
+            point = [x == m.eval(x, model_completion=True) for x in input_vars]
+            sh = z3.Solver()
+            lim.apply_to(sh)
+            sh.set("timeout", _remaining_ms(deadline))
+            sh.add(*fixed, *point, corr)
+            t1 = time.perf_counter()
+            r2 = sh.check()
+            ms["helpers"] += (time.perf_counter() - t1) * 1000
+            work["rlimit"] += _rlimit(sh)
+            if r2 == z3.unsat:
+                return "ce", m
+            if r2 != z3.sat:
+                return "unknown", ("helpers", sh.reason_unknown())
+            hm = sh.model()
+            w = [(h, hm.eval(h, model_completion=True)) for h in helper_vars]
+            pool.append(w)
+            sx.add(z3.Not(_with(corr, w)))
+        return "fallback", None
+    finally:
+        work["rlimit"] += _rlimit(sx)
+
+
+def _input_domain(behav, fixed, input_vars, lim, deadline):
+    """Which inputs the candidate's domain leaves UNBOUNDED (beyond BIG).
+    One query when every input is bounded, the common case; one per input
+    otherwise. `{"bounded": bool, "unbounded": [names]}`, or None when a
+    query was not decided -- then nothing is said."""
+    nums = [x for x in input_vars if x.sort() in (z3.IntSort(), z3.RealSort())]
+    if not nums:
+        return {"bounded": True, "unbounded": []}
+
+    def big(xs):
+        s = z3.Solver()
+        lim.apply_to(s)
+        s.set("timeout", max(1, min(1000, _remaining_ms(deadline))))
+        s.add(behav, *fixed, z3.Or(*[z3.Or(x > BIG, x < -BIG) for x in xs]))
+        return s.check()
+
+    r = big(nums)
+    if r == z3.unsat:
+        return {"bounded": True, "unbounded": []}
+    if r != z3.sat or len(nums) > 64:
+        return None
+    out = []
+    for x in nums:
+        r = big([x])
+        if r == z3.unknown:
+            return None
+        if r == z3.sat:
+            out.append(str(x))
+    return {"bounded": not out, "unbounded": out}
+
+
 def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     """CEGIS over the spec's bounded domain.
 
@@ -162,6 +278,16 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     # any helper" is the stronger statement; complete only with the order
     # of the quantifiers kept.
     ce_solver.add(_no_helper_saves(behav, corr, helper_vars))
+    # ...asked WITHOUT the quantifier when the helpers are only in the
+    # correctness (`_ce_search`); the quantified query stays as the fallback.
+    by_witness = bool(helper_vars) and not _helpers_in(behav, helper_vars)
+    pool = []               # helper values that saved some input
+    work = {"rlimit": 0}
+    ms = {"candidate": 0.0, "counterexample": 0.0, "helpers": 0.0,
+          "quantified": 0.0, "decisive": 0.0, "which_fail": 0.0,
+          "domain_verifier": 0.0}
+    fallbacks = 0
+    impl_assign = None
 
     counterexamples = []
     ce_points = []          # the same, as (z3 var, value) pairs
@@ -183,13 +309,35 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
 
     built = time.perf_counter()
 
-    def done(status, verdict, detail, cert=None, k=0, impl=None):
+    def done(status, verdict, detail, cert=None, k=0, impl=None, stalled=None):
+        work["rlimit"] += _rlimit(impl_solver) + _rlimit(ce_solver)
         meta = {"iterations": k, "counterexamples": len(counterexamples),
                 "domain": domain, "trace": trace,
                 # construction: the contract normalised and the solvers set
-                # up; search: the rounds, the certificate written with them
+                # up; search: the rounds, the certificate written with them --
+                # and inside it, where the time went, by step
                 "phases_ms": {"construction": round((built - t0) * 1000, 2),
-                              "search": round((time.perf_counter() - built) * 1000, 2)}}
+                              "search": round((time.perf_counter() - built) * 1000, 2),
+                              **{"search." + n: round(v, 2) for n, v in ms.items() if v}},
+                "work": {"rlimit": work["rlimit"]}}
+        if helper_vars:
+            meta["helper_search"] = {"witnesses": len(pool),
+                                     "quantifier_free": by_witness,
+                                     "fallbacks": fallbacks}
+        if stalled is not None:
+            # WHERE it stopped, not only that it did: the step, the round,
+            # the sizes, and the last candidate it was examining.
+            phase, reason = stalled
+            meta["stalled"] = {"phase": phase, "reason": reason or "unknown",
+                               "round": k + 1,
+                               "counterexamples": len(counterexamples),
+                               "witnesses": len(pool),
+                               "inputs": len(input_vars),
+                               "helpers": len(helper_vars),
+                               "rlimit": work["rlimit"]}
+            if impl_assign is not None:
+                meta["stalled"]["candidate"] = {n: v for n, (_, v)
+                                                in impl_assign.items()}
         if domain_log:
             meta["domain_verifier"] = {
                 "calls": len(domain_log),
@@ -240,12 +388,15 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
     for k in range(lim.max_iterations):
         if time.perf_counter() >= deadline:
             return done(Status.TIMEOUT, Verdict.INCONCLUSIVE,
-                        t("engine.synth.timeout", rounds=k), k=k)
+                        t("engine.synth.timeout", rounds=k), k=k,
+                        stalled=("clock", "timeout"))
 
 
         # --- 1. proponer una implementacion compatible con lo visto -------
         impl_solver.set("timeout", _remaining_ms(deadline))
+        t1 = time.perf_counter()
         r = impl_solver.check()
+        ms["candidate"] += (time.perf_counter() - t1) * 1000
         if r == z3.unsat:
             # THE NEGATIVE CARRIES ITS PROOF: the constraints and one instance
             # per counterexample are contradictory, and every instance is a
@@ -262,9 +413,11 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             # sentence a write-up wants. Checked again by `verify`. Not when
             # the domain verifier excluded candidates: those exclusions are
             # part of the refutation, and the subset alone would not be one.
+            t1 = time.perf_counter()
             decisive = None if rejected else _decisive(
                 impl_cons, behav, corr, input_vars, helper_vars,
                 counterexamples, lim)
+            ms["decisive"] += (time.perf_counter() - t1) * 1000
             detail = t("engine.synth.none", ces=len(counterexamples))
             if rejected:
                 detail = detail.rstrip(". ") + ". " + t(
@@ -281,7 +434,8 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
             st = classify_unknown(impl_solver.reason_unknown())
             return done(st, Verdict.INCONCLUSIVE,
                         t("engine.synth.impl_unknown",
-                          reason=impl_solver.reason_unknown()), k=k)
+                          reason=impl_solver.reason_unknown()), k=k,
+                        stalled=("candidate", impl_solver.reason_unknown()))
 
         model = impl_solver.model()
         impl_assign = z3util.assignment(model, impl_vars)
@@ -291,19 +445,45 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
         ce_solver.push()
         try:
             ce_solver.add(*fixed)
-            ce_solver.set("timeout", _remaining_ms(deadline))
-            r2 = ce_solver.check()
+            how, got, ce_model = "quantified", None, None
+            if by_witness:
+                how, got = _ce_search(behav, corr, fixed, input_vars, helper_vars,
+                                      pool, lim, deadline, work, ms)
+            if how == "none":
+                r2 = z3.unsat
+            elif how == "ce":
+                r2, ce_model = z3.sat, got
+            elif how == "unknown":
+                phase, why_ = got
+                st = classify_unknown(why_)
+                return done(st, Verdict.INCONCLUSIVE,
+                            t("engine.synth.ce_unknown", reason=why_), k=k,
+                            stalled=(phase, why_))
+            else:
+                # no helper search, or it did not close in WITNESS_ROUNDS:
+                # the quantified query, as before
+                fallbacks += how == "fallback"
+                ce_solver.set("timeout", _remaining_ms(deadline))
+                t1 = time.perf_counter()
+                r2 = ce_solver.check()
+                ms["quantified" if helper_vars else "counterexample"] += \
+                    (time.perf_counter() - t1) * 1000
+                if r2 == z3.sat:
+                    ce_model = ce_solver.model()
 
             if r2 == z3.unsat and getattr(spec, "domain_verifier", None) is not None:
                 # THE MODEL ACCEPTS IT; NOW THE REAL PROBLEM. A candidate the
                 # domain verifier rejects is excluded, and the search goes on.
+                t1 = time.perf_counter()
                 valid, dce, record = _domain_check(spec, impl_assign)
+                ms["domain_verifier"] += (time.perf_counter() - t1) * 1000
                 record["round"] = k + 1
                 domain_log.append(record)
                 if valid is None:
                     return done(Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                                 t("engine.synth.domain_error",
-                                  error=record.get("error", "")), k=k)
+                                  error=record.get("error", "")), k=k,
+                                stalled=("domain_verifier", record.get("error", "")))
                 if not valid:
                     rejected.append(dict(record, implementation=impl_assign))
                     trace.append({"round": k + 1, "implementation": impl_assign,
@@ -331,25 +511,61 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
                     # of the candidate that survived.
                     on_round({"round": k + 1, "implementation": impl_assign,
                               "counterexample": None, "accepted": True})
+                witnesses = None
+                exact = all(z3.is_int_value(v) or z3.is_rational_value(v)
+                            or z3.is_true(v) or z3.is_false(v)
+                            for w in pool for _h, v in w)
+                # an algebraic helper value (a root of 2) has no exact text:
+                # then no strategy is written, and `verify` quantifies
+                if how == "none" and helper_vars and exact:
+                    # THE STRATEGY, written down: these helper values save
+                    # every input of the domain -- checked by `verify` with
+                    # one quantifier-free query instead of the quantified one
+                    witnesses = [{str(h): [z3util.sort_name(h), z3util.value_repr(v)]
+                                  for h, v in w} for w in pool[-WITNESS_POOL:]]
                 cert = cegis_certificate(impl_assign, counterexamples, spec_smt2, k + 1,
                                          helpers=[[str(h), z3util.sort_name(h)]
-                                                  for h in helper_vars])
-                return done(Status.SAT, Verdict.PROVED,
-                            t("engine.synth.found", rounds=k + 1,
-                              ces=len(counterexamples)),
-                            cert, k + 1, impl=impl_assign)
+                                                  for h in helper_vars],
+                                         helper_witnesses=witnesses)
+                # NOTHING TO SATISFY: a candidate whose domain is empty passes
+                # every contract. Said in the headline, as `prove` does.
+                vs = z3.Solver()
+                lim.apply_to(vs)
+                vs.set("timeout", max(1, min(1000, _remaining_ms(deadline))))
+                vs.add(behav, *fixed)
+                vacuous = vs.check() == z3.unsat
+                inputs_dom = _input_domain(behav, fixed, input_vars, lim, deadline)
+                if vacuous:
+                    cert.payload["vacuous"] = True
+                    detail = t("engine.synth.vacuous", rounds=k + 1)
+                elif inputs_dom is not None and not inputs_dom["bounded"]:
+                    detail = t("engine.synth.found_unbounded", rounds=k + 1,
+                               ces=len(counterexamples),
+                               names=", ".join(inputs_dom["unbounded"]))
+                else:
+                    detail = t("engine.synth.found", rounds=k + 1,
+                               ces=len(counterexamples))
+                res = done(Status.SAT, Verdict.PROVED, detail,
+                           cert, k + 1, impl=impl_assign)
+                res.meta["vacuous"] = vacuous
+                if inputs_dom is not None:
+                    res.meta["input_domain"] = inputs_dom
+                return res
             if r2 != z3.sat:
                 st = classify_unknown(ce_solver.reason_unknown())
                 return done(st, Verdict.INCONCLUSIVE,
                             t("engine.synth.ce_unknown",
-                              reason=ce_solver.reason_unknown()), k=k)
+                              reason=ce_solver.reason_unknown()), k=k,
+                            stalled=("quantified" if helper_vars else "counterexample",
+                                     ce_solver.reason_unknown()))
 
-            ce_model = ce_solver.model()
             ce_assign = z3util.assignment(ce_model, input_vars)
             ce_concrete = [
                 (x, ce_model.eval(x, model_completion=True)) for x in input_vars
             ]
+            t1 = time.perf_counter()
             breaks = _which_fail(spec, behav, fixed, ce_concrete, helper_vars, lim)
+            ms["which_fail"] += (time.perf_counter() - t1) * 1000
         finally:
             ce_solver.pop()  # (d) del original: el pop faltaba en dos ramas
 
@@ -377,7 +593,7 @@ def synth(spec, limits: Limits | None = None, on_round=None) -> Result:
 
     return done(Status.UNKNOWN_SOLVER, Verdict.INCONCLUSIVE,
                 t("engine.synth.max_iter", n=lim.max_iterations),
-                k=lim.max_iterations)
+                k=lim.max_iterations, stalled=("rounds", "max_iterations"))
 
 
 def _instance(behav, corr, input_vars, helper_vars, ce, i):
@@ -425,14 +641,22 @@ def _which_fail(spec, behav, fixed, ce_concrete, helper_vars, lim):
     if not names:
         return None
     out = []
+    quantified = bool(helper_vars) and _helpers_in(behav, helper_vars)
     for name in names:
         s = z3.Solver()
         lim.apply_to(s)
         s.add(*fixed)
         s.add(*[x == v for x, v in ce_concrete])
         s.add(behav)
-        s.add(_no_helper_saves(behav, spec.correctness[name], helper_vars))
-        if s.check() == z3.sat:
+        if quantified:
+            s.add(_no_helper_saves(behav, spec.correctness[name], helper_vars))
+            if s.check() == z3.sat:
+                out.append(name)
+            continue
+        # The input is concrete: "no helper saves obligation i" is "the
+        # obligation is unsatisfiable over the helpers" -- no quantifier.
+        s.add(spec.correctness[name])
+        if s.check() == z3.unsat:
             out.append(name)
     return out
 
@@ -456,11 +680,15 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
     base = spec.impl_constraints if spec.impl_constraints is not None else z3.BoolVal(True)
     plain = dataclasses.replace(spec, minimize=None, maximize=None)
     best, rounds, path, searches = None, 0, [], []
+    all_trace, all_ces = [], 0
     where = {"inside": 0, "outside": 0, "undecided": 0}   # over every search
     current = plain
     for _ in range(max(1, lim.max_iterations)):
         res = synth(current, lim, on_round)
         rounds += res.meta.get("iterations", 0)
+        all_ces += res.meta.get("counterexamples", 0)
+        for row in res.meta.get("trace") or []:
+            all_trace.append(dict(row, search=len(searches) + 1))
         searches.append({"iterations": res.meta.get("iterations", 0),
                          "counterexamples": res.meta.get("counterexamples", 0),
                          "verdict": res.verdict.value})
@@ -487,20 +715,29 @@ def synth_optimal(spec, limits=None, on_round=None) -> Result:
                 cert.payload["scope"] = found.certificate.payload["scope"]
             meta = dict(found.meta, value=value, sense=sense, path=path,
                         rounds=rounds)
-            # TWO SCALES, NAMED. `iterations`, `counterexamples` and `trace`
-            # (kept, for readers of 0.34) are the search that FOUND the
-            # optimum; `rounds` is every search together. A consumer logging
-            # `iterations` reported 5 where 19 rounds had run.
+            # ONE SCALE AT THE TOP. `iterations`, `counterexamples` and
+            # `trace` are every search together (each trace row says which
+            # search, 1-based); the search that found the optimum keeps its
+            # own under `last_candidate`. 0.34-0.39 put that one at the top,
+            # and three sessions summarising jobs read `iterations: 1,
+            # counterexamples: 0` off a run of eight searches.
             meta["last_candidate"] = {
                 "iterations": found.meta.get("iterations", 0),
                 "counterexamples": found.meta.get("counterexamples", 0),
-                "trace": "the search that found the optimum, only"}
+                "trace": found.meta.get("trace") or []}
+            meta.update(iterations=rounds, counterexamples=all_ces, trace=all_trace)
             meta["optimization"] = {
                 "total_rounds": rounds, "improvements": len(path), "path": path,
                 "searches": searches,
                 "better_value_refutation": {
                     "iterations": res.meta.get("iterations", 0),
-                    "counterexamples": res.meta.get("counterexamples", 0)}}
+                    "counterexamples": res.meta.get("counterexamples", 0),
+                    # WHAT blocks a better value: the inputs that refute every
+                    # candidate past the optimum, and the decisive few
+                    "inputs": [row.get("counterexample") for row
+                               in res.meta.get("trace") or []
+                               if row.get("counterexample") is not None],
+                    "decisive": res.meta.get("decisive")}}
             detail = t("engine.synth.optimum", sense=sense, value=value,
                        steps=len(path), rounds=rounds)
             if getattr(spec, "original", None) is not None:

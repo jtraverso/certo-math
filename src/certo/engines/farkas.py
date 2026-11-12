@@ -155,6 +155,16 @@ def farkas(spec, limits: Limits | None = None, nonlinear: bool = False,
                     title=spec.title)
         spec.integral = integral
 
+    import z3
+
+    goal = getattr(spec, "goal", None)
+    if goal is not None and z3.is_eq(goal) and not z3.is_bool(goal.arg(0)):
+        # `not (a = b)` is two half-spaces, and one Farkas combination refutes
+        # one. Said before the engine runs, with the two ways through.
+        return Result("farkas", Status.OUT_OF_THEORY, Verdict.INCONCLUSIVE,
+                      "certo/farkas", (time.perf_counter() - t0) * 1000, None,
+                      detail=t("engine.farkas.eq_goal", lhs=str(goal.arg(0)),
+                               rhs=str(goal.arg(1))))
     try:
         rows = linarith.rows_of(spec)
     except linarith.NotPolynomial as e:

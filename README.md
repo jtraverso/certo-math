@@ -270,7 +270,10 @@ than hand back a certificate that fails its own verifier. That covers
 solver-free certificates; one whose check calls a solver again (`unsat_core`,
 `model`, …) comes back unchecked, with no `meta["self_check"]` — call
 `certo.verify` on it when it matters, or pass `self_check="all"`. It costs under 1% of an `opt`. Pass
-`self_check=False` only after measuring.
+`self_check=False` only after measuring. A check that could not be FINISHED
+(z3 said `unknown`, or the clock ran out) is not a bug: it raises
+`api.SelfCheckInconclusive`, a subclass, so code that stops on failures still
+stops; `receipt_dir=` writes the result there before either exception.
 
 The engine modules under `certo.engines` stay private; `run`, `runnable` and
 `options` are the promise. Commands that read a directory or the environment
