@@ -72,6 +72,10 @@ change an optional field: `cegis.helper_witnesses`, `cegis.vacuous`. New API
 - **`catalogue.commands()` returned an empty `help` for all 62 commands**.
 - **Which named obligation a counterexample breaks** is decided without a
   quantifier once the input is concrete.
+- **HiGHS 1.16 printed its banner to standard output** from its constructor,
+  before any option could silence it: `--oneline` and `--json` gained two
+  lines. Its construction and PuLP's HiGHS solves now run with the process's
+  stdout pointed elsewhere.
 
 ## [0.39.0] — 2026-11-02
 

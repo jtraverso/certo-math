@@ -47,9 +47,40 @@ def available() -> bool:
     return _HS[0] is not None
 
 
+def quiet_stdout():
+    """A context in which the PROCESS's standard output (file descriptor 1)
+    goes nowhere. HiGHS 1.16 prints its banner from the constructor -- in C,
+    before any option can turn it off -- and `--oneline` and `--json` read
+    stdout: one line became three on every CI runner, and on no machine with
+    1.15. Python's own `sys.stdout` is flushed first and restored after."""
+    import contextlib
+    import os
+    import sys
+
+    @contextlib.contextmanager
+    def ctx():
+        try:
+            sys.stdout.flush()
+            saved = os.dup(1)
+        except Exception:  # noqa: BLE001 -- no descriptor 1 to redirect
+            yield
+            return
+        null = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(null, 1)
+            yield
+        finally:
+            os.dup2(saved, 1)
+            os.close(saved)
+            os.close(null)
+
+    return ctx()
+
+
 def _model(rows, b, c, integer=(), seconds=None):
     hs = _HS[0]
-    h = hs.Highs()
+    with quiet_stdout():
+        h = hs.Highs()
     h.setOptionValue("output_flag", False)
     if seconds:
         h.setOptionValue("time_limit", float(seconds))

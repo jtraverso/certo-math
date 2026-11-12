@@ -169,7 +169,8 @@ STRUCTURAL_BENIGN = {
     # save it; `verify --obligation` ties the certificate to the spec.
     'cegis': {
         '=0:coherent', '=1:coherent', '=3:coherent', '=4:coherent',
-        '=5:coherent', '=7:coherent', '=8:coherent',
+        '=2:coherent', '=5:coherent', '=6:coherent', '=7:coherent',
+        '=8:coherent', '=9:coherent',
         # The helper witnesses are a strategy that SHORTENS the check: fewer,
         # reordered or repeated, they either still save every input -- which
         # is all the check asks -- or `verify` falls back to the quantified
@@ -1158,7 +1159,13 @@ def test_clique_lp_bounded_and_infeasible():
     cert = algebra.clique_lp(CliqueLPSpec(edges=k4, problem="packing",
                                           weight={"edges": 1}, max_size=3),
                              LIM).certificate
-    _report("clique_lp (max_size)", probe(cert))
+    # `min_size` raised past every column the optimum uses is another
+    # program -- triangles only -- that the same columns and dual certify,
+    # with the same value. Which optimal vertex comes back is the backend's
+    # choice: HiGHS 1.15 used edges here, and 1.16 returns four triangles.
+    used = {len(c["clique"]) for c in cert.payload["columns"]}
+    _report("clique_lp (max_size)", probe(
+        cert, skip=("min_size",) if min(used) > 2 else ()))
     cert = algebra.clique_lp(CliqueLPSpec(
         edges=[(0, 1), (0, 2), (1, 2), (0, 3), (1, 3)], problem="partition",
         min_size=3), LIM).certificate

@@ -70,7 +70,11 @@ def _solve(prob, solver) -> str:
     """The solve, and why it stopped, as PuLP 3 named it. A stop PuLP 3 had
     no name for -- a time or node limit -- keeps PuLP 4's, and is not
     "Optimal", which is all the callers ask."""
-    out = prob.solve(solver)
+    from ..highs_direct import quiet_stdout
+
+    # PuLP's HiGHS builds a `Highs()`, whose banner 1.16 prints to stdout
+    with quiet_stdout():
+        out = prob.solve(solver)
     code = getattr(out, "status", out)
     # CBC's own line "Optimal (within gap tolerance)" is what PuLP 3 read as
     # Optimal and PuLP 4 reports as GapLimit. Same solve, same point; and
@@ -129,7 +133,10 @@ def _clock_cap(own):
 
 def _highs_available() -> bool:
     try:
-        return bool(pulp.HiGHS(msg=False).available())
+        from ..highs_direct import quiet_stdout
+
+        with quiet_stdout():
+            return bool(pulp.HiGHS(msg=False).available())
     except Exception:  # noqa: BLE001 -- absent, or present and broken
         return False
 
