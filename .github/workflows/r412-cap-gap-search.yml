@@ -1,0 +1,42 @@
+name: R412 Certo cap-gap search (pinned v0.40.0)
+on:
+  push:
+    branches:
+      - research/r412-certo-v040-exp175
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  cap-search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Certo-math v0.40.0 and recommended dependencies
+        run: |
+          python -m pip install -e ".[mcp,numerics]"
+      - name: Install optional enumerators and polyhedra backend where available
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq nauty libcdd-dev libgmp-dev || true
+          python -m pip install "pycddlib>=3.0" || echo "::warning::Optional pycddlib unavailable"
+      - name: Installation and capabilities
+        run: |
+          certo --version
+          certo doctor
+      - name: Lint and certify 256 ternary gadget triangle families
+        run: |
+          mkdir -p out/r412
+          certo lint research/R412/ternary_two_layer.py
+          certo sweep research/R412/ternary_two_layer.py --cert out/r412/ternary_256.json --cert-all
+          certo verify out/r412/ternary_256.json
+      - name: Preserve certificates
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r412-certo-v040-ternary-two-layer
+          path: out/r412/
+          if-no-files-found: warn
