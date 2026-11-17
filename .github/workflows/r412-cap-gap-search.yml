@@ -23,6 +23,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq nauty libcdd-dev libgmp-dev || true
           python -m pip install "pycddlib>=3.0" || echo "::warning::Optional pycddlib unavailable"
+          if command -v nauty-geng >/dev/null; then sudo ln -sf "$(command -v nauty-geng)" /usr/local/bin/geng; fi
+          sudo apt-get install -y -qq cadical || true
       - name: Installation and capabilities
         run: |
           certo --version
@@ -33,6 +35,13 @@ jobs:
           certo lint research/R412/ternary_two_layer.py
           certo sweep research/R412/ternary_two_layer.py --cert out/r412/ternary_256.json --cert-all
           certo verify out/r412/ternary_256.json
+      - name: Certify F23 digit obstructions and enumerate every normalized 11-digit alphabet
+        run: |
+          python research/R412/certify_motifs23.py
+          g++ -O3 -std=c++17 research/R412/cover_motifs23.cpp -o /tmp/r412_motif_cover
+          /tmp/r412_motif_cover research/R412/motifs23.txt
+          certo pack out/r412/motifs -o out/r412/motifs23.zip
+          certo verify out/r412/motifs23.zip
       - name: Preserve certificates
         if: always()
         uses: actions/upload-artifact@v4
