@@ -52,7 +52,7 @@ def check(mask):
 
 def spec():
     return DomainSpec(
-        items=range(256),
+        items=range(1,256),
         predicate=check,
         key=lambda mask: f"mask-{mask:03d}",
-        title="Every triangle family on K(2,2,2) has integral maximum packing")
+        title="All nonempty triangle families on K(2,2,2) have integral maximum packing")
