@@ -1,0 +1,29 @@
+name: R419 Certo exact 3-colour gap gadget
+on:
+  push:
+    branches: [research/r412-certo-v040-exp175]
+  workflow_dispatch:
+permissions: {contents: read}
+jobs:
+  R419:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "3.12"}
+      - run: python -m pip install -e ".[mcp,numerics]"
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq cadical
+      - name: Verify fractional witness
+        run: python research/R419/fractional_tripartite.py
+      - name: Certify noncompletability with DRAT
+        run: |
+          mkdir -p out/R419
+          certo lint research/R419/latin5_no_completion.py
+          certo cases research/R419/latin5_no_completion.py --solver-binary /usr/bin/cadical --cert out/R419/latin_unsat.json
+          certo verify out/R419/latin_unsat.json --obligation research/R419/latin5_no_completion.py --expect universal --complete
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: r419-certo-3colors-certificates
+          path: out/R419/
