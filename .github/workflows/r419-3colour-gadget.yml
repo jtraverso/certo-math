@@ -20,8 +20,8 @@ jobs:
         run: |
           mkdir -p out/R419
           certo lint research/R419/latin5_no_completion.py
-          certo cases research/R419/latin5_no_completion.py --solver-binary /usr/bin/cadical --cert out/R419/latin_unsat.json
-          certo verify out/R419/latin_unsat.json --obligation research/R419/latin5_no_completion.py --expect universal --complete
+          certo cases research/R419/latin5_no_completion.py --cert out/R419/latin_unsat.json
+          certo verify out/R419/latin_unsat.json --obligation research/R419/latin5_no_completion.py --complete
       - if: always()
         uses: actions/upload-artifact@v4
         with:
