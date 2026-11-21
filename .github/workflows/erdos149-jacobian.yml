@@ -1,0 +1,54 @@
+name: Erdos149 Certo + Jacobian research
+
+on:
+  push:
+    branches:
+      - research/erdos149-arco3-cegis-s594
+    paths:
+      - 'research/erdos149/**'
+      - '.github/workflows/erdos149-jacobian.yml'
+      - 'examples/erdos149_arco3_palette_path.json'
+  workflow_dispatch:
+
+jobs:
+  independent-exact-lp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Jacobian and Certo from explicit mathematical packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'jacobian==0.23.0' -e '.[numerics]'
+      - name: Discover Jacobian exact mathematical contract
+        run: jacobian inspect optimization.linear.rational_general_optimum.compute
+      - name: Certo primal/dual exact certificate
+        run: |
+          mkdir -p out
+          certo lint examples/erdos149_arco3_cegis_degree.py
+          certo opt examples/erdos149_arco3_palette_path.json --cert out/erdos149_path_certo.json
+          certo verify out/erdos149_path_certo.json
+      - name: Jacobian independent exact physical-LP solve
+        run: python research/erdos149/verify_with_jacobian.py
+      - name: Bundle audit summary
+        if: always()
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("out/STATUS.json").write_text(json.dumps({
+            "conjecture":"Erdos-Nesetril #149",
+            "scope":"finite 7-edge path palette LP only",
+            "universal_gate":"OPEN",
+            "status":"see CI steps, do not infer result from workflow completion"
+          }, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: erdos149-certo-jacobian
+          path: out/
