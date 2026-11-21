@@ -110,6 +110,7 @@ jobs:
         run: |
           python research/erdos149/s600_neartight_fixture.py
           python research/erdos149/s600_nonbip_core_falsation.py
+          python research/erdos149/s600_root_c5_absorb.py
       - name: S600 Certo root mass gap and five-cycle shielding
         run: |
           for f in examples/erdos149_s600_root_margin.py \
