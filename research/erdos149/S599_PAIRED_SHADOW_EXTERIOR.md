@@ -356,19 +356,21 @@ In S591's hardest residual we already know:
 - 0<a+b<1/6 hence ab<1/144;
 - B=max(r_s,r_t)<3/4.
 
-Therefore
+A sharper estimate uses the ROOT ROWS themselves:
+r_s+ab<=x<3/4 and r_t+ab<=y<3/4 imply B+ab<3/4.
+Since beta=Q_H>K-ab, this gives
 
-    B/Q_H < (3/4)/(K-1/144)
-          = (3/4)/(179/144) = 108/179,
+    B/Q_H < (3/4-ab)/(5/4-ab) < 3/5
 
-and hence every G1 obstruction must satisfy the purely
-uniform NECESSARY condition
+for every ab>0. Combining this with the failed C15-P
+mixture inequality yields the stronger uniform NECESSARY bound
 
-    K-Q_H < (108/179)*ab.                         (S599.uniform)
+    K-Q_H < (3/5)*ab.                            (S599.uniform)
 
-The former easy condition only forced K-Q_H<ab.
-The residual window for the old-palette slack has been
-cut to at most 60.34% of its previous width.
+Thus the old residual window K-Q_H<ab has been reduced to
+strictly less than 60% of its previous width. This estimate
+does NOT require a+b<1/6; only the root rows and beta>K-ab.
+The weaker intermediate constant 108/179 is superseded.
 
 For the standard rational slice B=133/200, ab=1/400,
 K=5/4, solving sigma*(K-sigma)=ab*B gives
