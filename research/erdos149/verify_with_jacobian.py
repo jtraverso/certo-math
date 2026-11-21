@@ -26,7 +26,7 @@ def main():
     source=ROOT/"examples"/"erdos149_arco3_palette_path.json"
     lp=json.loads(source.read_text(encoding="utf8"))
     names=lp["var_names"]
-    vars=[{"name":name,"lower_bound":q(0),"upper_bound":q(K)} for name in names]
+    vars=[{"name":name,"lower_bound":q(0)} for name in names]  # budget equality implies c_M <= K
     objective={"sense":"MAXIMIZE","coefficients":[q(lp["obj"].get(v,0)) for v in names]}
     rel={"==":"EQ","<=":"LE",">=":"GE"}
     rows=[{"label":name,"coefficients":[q(coeff.get(v,0)) for v in names],
