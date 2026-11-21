@@ -63,6 +63,10 @@ jobs:
           certo verify out/s597_root_hall.json
       - name: S597 replay 23-node and 18-node exact global palettes
         run: python research/erdos149/s597_verify_static_palettes.py
+      - name: S597 Certo heavy-cycle mass shielding
+        run: |
+          certo prove examples/erdos149_s597_cycle_shielding.py --cert out/s597_cycle_shielding.json
+          certo verify out/s597_cycle_shielding.json
       - name: S597 Certo universal parametric absorber inequality
         run: |
           certo prove examples/erdos149_s597_twoscale_budget.py --cert out/s597_twoscale_budget.json
