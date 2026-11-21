@@ -29,7 +29,9 @@ def normalize(v):
         if a:return tuple(GF4[INV[a]][z] for z in v)
     raise ValueError("zero vector")
 
-def build():
+def build(eps=Q(1,100000)):
+    eps=Q(str(eps))
+    assert 0<eps<=Q(1,1000)
     points=sorted({normalize(x) for x in product(range(4),repeat=3)
                    if x!=(0,0,0)})
     assert len(points)==21
@@ -48,7 +50,7 @@ def build():
         w=f"W{i}";mass[w]=Q(1,100)
         a=f"sa{i}" if i<4 else f"ta{i-4}"
         edges.extend(((a,w),(w,u),(w,v)))
-    eps=Q(1,100000);delta=eps/2;c=(1-eps)/2
+    delta=eps/2;c=(1-eps)/2
     for i in range(5):
         mass[f"C{i}"]=c;mass[f"omega{i}"]=delta
         edges.extend(((f"C{i}",f"C{(i+1)%5}"),
@@ -64,8 +66,10 @@ def build():
             "edges":[list(e) for e in edges],"s":"s","t":"t",
             "a":"1/20","b":"1/20"}
 
-def budget():
-    eps=Q(1,100000);delta=eps/2;c=(1-eps)/2
+def budget(eps=Q(1,100000)):
+    eps=Q(str(eps))
+    assert 0<eps<=Q(1,1000)
+    delta=eps/2;c=(1-eps)/2
     q_c5=5*c*c
     connector=5*delta*(c+Q(19,50))
     arc=Q(29,400)   # x*a + a*b + b*y
@@ -74,7 +78,7 @@ def budget():
     upper_f=max(Q(1)+arc,q_c5)+connector
     assert lower>K-Q(1,400)
     assert upper_f<K and upper<=upper_f
-    assert upper_f==Q(1249997,1000000)
+    assert upper_f==K-Q(3,10)*eps
     return {"QH_lower":str(lower),"QH_upper":str(upper),
             "QF_upper":str(upper_f),"arc_band":str(arc),
             "connector_band":str(connector),"K":"5/4",
