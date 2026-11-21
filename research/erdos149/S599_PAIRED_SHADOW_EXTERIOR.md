@@ -290,3 +290,116 @@ both failed simpler filters, and the rational C15 margin.
 **Status:** C15 is a universal CONDITIONAL CRITERION; it is NOT
 proved that every H satisfies the C15.1 hypothesis.
 G1 universal and Erdős #149 remain OPEN.
+
+
+## Theorem C15-P: a stronger CONSTRUCTIVE two-palette interpolation
+
+This theorem is independent of the C15 dual formula. It requires only
+two explicit operations on exact physical fractional palettes, and is
+particularly useful in the near-K regime.
+
+Fix a complete exact palette P0 of H of width beta<=K. Let its
+joint root-star overlap be alpha. Trivially
+
+    r_s+r_t-beta <= alpha <= m=min(r_s,r_t).
+
+Construct a second exact full palette P1 of H as follows:
+- synchronize both root stars by the Hall theorem S597 in
+  a root band of width B=max(r_s,r_t), with overlap m;
+- restrict P0 to ALL nonroot old edges by removing root
+  edges from each matching; retain its width beta;
+- put the two bands in DISJOINT time intervals.
+P1 has exact demand coverage, width B+beta and overlap m.
+All conflicts are physical; P1 is not required to fit in K.
+
+Put sigma=K-beta. If sigma<=B, take the convex combination
+
+    P=(1-theta)P0+theta P1,  theta=sigma/B.
+
+It has exactly the old demands because BOTH P0 and P1 are full
+palettes, and its width equals
+
+    (1-theta)*beta+theta*(B+beta) = beta+sigma = K.
+
+Its joint overlap satisfies
+
+    J(P)=(1-theta)*alpha+theta*m
+         >= r_s+r_t-K + (sigma*beta)/B.
+
+If sigma>B, the entire P1 has width beta+B<K and already
+satisfies J=m>=D, so no interpolation is needed.
+
+Consequently the new **universal sufficient criterion**
+
+    (K-beta)*beta >= ab*B  ==>  Jmax(H;K)>=D.       (C15-P)
+
+This argument constructs a complete valid palette, rather than
+merely excluding a dual. It does NOT require a bound on far-edge
+mass, a low weighted conflict core or a clique absorber.
+
+The argument may be sharpened with any known old palette's ACTUAL
+joint overlap alpha instead of the minimal
+r_s+r_t-beta. Another strengthening is to replace the restricted
+interior palette of width beta by an independently certified
+interior-only palette of width q_I<=beta; in that case P1 has
+width B+q_I and interpolation gains a larger theta.
+
+### New necessary narrow-slack region for every G1 obstruction
+
+Take beta=Q_H (a fractional optimum, attained by an exact palette).
+If G1 fails, then
+
+    Q_H*(K-Q_H) < ab*max(r_s,r_t).                (S599.narrow)
+
+In S591's hardest residual we already know:
+- Q_H>K-ab (otherwise direct padding reinserts the arc);
+- 0<a+b<1/6 hence ab<1/144;
+- B=max(r_s,r_t)<3/4.
+
+Therefore
+
+    B/Q_H < (3/4)/(K-1/144)
+          = (3/4)/(179/144) = 108/179,
+
+and hence every G1 obstruction must satisfy the purely
+uniform NECESSARY condition
+
+    K-Q_H < (108/179)*ab.                         (S599.uniform)
+
+The former easy condition only forced K-Q_H<ab.
+The residual window for the old-palette slack has been
+cut to at most 60.34% of its previous width.
+
+For the standard rational slice B=133/200, ab=1/400,
+K=5/4, solving sigma*(K-sigma)=ab*B gives
+
+    sigma_* approximately 0.00133141813940951.
+    G1 obstruction requires sigma<sigma_*
+    (equivalently Q_H>1.2486685818605905).
+
+### Strict 70-vertex physical example
+
+For the tuned PG(2,4) instance from C15 above,
+
+    beta=49900051759/40000000000,
+    sigma=99948241/40000000000,
+    B=133/200, ab=1/400,
+
+so theta=sigma/B=99948241/26600000000 and the
+mixing lemma produces the exact LOWER bound
+
+    Jmax>=90107422399121005919/1064000000000000000000
+        =0.084687427066843... > D=33/400.
+
+The exact positive margin over D is
+
+    2327422399121005919/1064000000000000000000.
+
+The older C15 dual minimax lower bound was only
+0.08287416389495...; the constructive palette mixture
+strictly improves it. All arithmetic is rational and
+reproducible in \`s599_c15_tuned_pg4.py\`.
+
+The theorem is UNIVERSAL AS A SUFFICIENT CRITERION, but the
+hypothesis (K-Q_H)Q_H>=ab B is not known for every H.
+The G1 arc-3 universal statement remains OPEN.
