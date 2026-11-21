@@ -31,6 +31,26 @@ jobs:
           certo lint examples/erdos149_arco3_cegis_degree.py
           certo opt examples/erdos149_arco3_palette_path.json --cert out/erdos149_path_certo.json
           certo verify out/erdos149_path_certo.json
+      - name: Certo exact synthesis and scalar gate certificates
+        run: |
+          mkdir -p out
+          certo synth examples/erdos149_arco3_cegis_degree.py --prove-candidate --cert out/arco3_degree_cegis.json
+          certo verify out/arco3_degree_cegis.json
+          certo prove examples/erdos149_arco3_degree4_counterexample.py --cert out/arco3_degree4_refuted.json
+          certo verify out/arco3_degree4_refuted.json
+          for f in examples/erdos149_arco3_degree{4,5}_heavy_diagonal.py \
+                   examples/erdos149_arco3_degree4_heavy_{vertex,slope}.py \
+                   examples/erdos149_arco3_heavy_saturation.py \
+                   examples/erdos149_arco3_no_light_cut.py; do
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
+      - name: Certo connected graph exact palette LP
+        run: |
+          certo opt examples/erdos149_arco3_palette_connected_c5.json --cert out/arco3_connected_c5.json
+          certo verify out/arco3_connected_c5.json
+      - name: S595 physical 617-vertex graph audits
+        run: python tests/test_erdos149_s595.py
       - name: C11 simultaneous blocker exact tests
         run: python research/erdos149/test_s596_c11.py
       - name: Jacobian independent exact physical-LP solve
