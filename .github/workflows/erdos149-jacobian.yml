@@ -35,6 +35,8 @@ jobs:
         run: python research/erdos149/test_s596_c11.py
       - name: Jacobian independent exact physical-LP solve
         run: python research/erdos149/verify_with_jacobian.py
+      - name: Jacobian C11 physical induced-matching relaxation
+        run: python research/erdos149/c11_jacobian_relaxation.py
       - name: Bundle audit summary
         if: always()
         run: |
