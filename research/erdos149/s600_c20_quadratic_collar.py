@@ -45,7 +45,8 @@ def build(data,cycle):
     palette=[]
     for j in C:
         for mask,width in P0:
-            palette.append((frozenset(set(mask)|{j}),width*w[j]/W5))
+            if mask:  # do not scale the K-B empty tail; redistribute only root demand
+                palette.append((frozenset(set(mask)|{j}),width*w[j]/W5))
         palette.append((frozenset((j,)),w[j]*(W5-B)/W5))
     for i in good:
         slot=next(j for j in C if j not in conf[i])
