@@ -26,7 +26,7 @@ def spec():
         z>L,
         35*U<37*L,
         4*delta<L,
-        1-U<4*delta
+        2*L+4*delta==1
     ))
     s.role("consumer")
     s.pending("five_cycle","Fixed-vertex C5 inequality is checked in another Certo spec")
