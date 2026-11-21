@@ -364,3 +364,29 @@ its single crossing edge consume exactly
 
 The other four path edges and the cross-edge A0−B0
 are handled by its independently checked full rational palette.
+
+
+## 9. C19 — Quantitative near-tight five-cycle conflict collar
+
+**Universal local theorem, not G1 closure.** Under the S591 heavy residual, set delta=ab in (0,1/144). Suppose an old physical C5 of five-cycle demand W5 >= 5/4-delta.
+
+**Cycle vertex stability.** Put L=1/2-2delta and U=1/2+2delta. If a C5 vertex has mass z<=1/2, the fixed-vertex theorem S600.2 gives W5<=1+z². Hence z²>=1/4-delta>L² (because 0<delta<1/144), so z>L. For a larger z>1/2 this is automatic. The cycle row m_i+m_(i+2)<=1 then forces every m_i<U. Thus L<m_i<U at all five vertices.
+
+**Induced cycle and neighbor masses.** At each cycle vertex v, its two cycle neighbors already have total mass >2L. Hence the sum of exterior neighbor masses is <1-2L=4delta. A chord would itself have mass >L>4delta, impossible: the near-tight C5 is induced. Every external neighbor u in X=N_H(V(C5))\V(C5) has mass m_u<4delta.
+
+**First and second conflict layers.** Let W1 be the demand of physical edges crossing from V(C5) to X; Horn S600.8 gives W1<=5/4-W5<=delta. Let W2 be the demand of all physical edges with at least one endpoint in X and neither endpoint on C5. Write c(u)=sum of masses of C5 neighbors of u. We have c(u)>L and the row at u gives d_(H-C5)(u)<=1-c(u). Therefore
+
+    W2 <= sum_(u in X) m_u*(1-c(u))
+       < ((1-L)/L)*sum_(u in X)m_u*c(u)
+       = (U/L)*W1
+       < (37/35)*delta,
+
+where U/L<37/35 follows by exact clearing for delta<1/144. All physical edges outside the induced C5 which strongly conflict with a C5 edge belong to the first or second layer, thus
+
+    W1+W2 < (72/35)*ab.                                  (C19)
+
+The bound is exact and valid for ANY physical graph satisfying the stated rows. This is a bound on **demands**, not on the number of edges and not on the chromatic cost of the remaining graph.
+
+Verification: research/erdos149/s600_c5_collar.py checks two physical instances with fractions, while examples/erdos149_s600_c19_collar_scalar.py checks the real-algebra part using Certo. The graph-theoretic double-counting is proved above.
+
+**OPEN:** Neither Q_H nearly 5/4 implies the existence of a near-tight physical C5, nor does a small collar guarantee a global palette preserving the root overlap J. Thus the universal G1 obligation and Erdős #149 remain OPEN.
