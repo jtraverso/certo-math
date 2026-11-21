@@ -82,6 +82,13 @@ jobs:
           certo lint examples/erdos149_s598_dual_negative.py
           certo prove examples/erdos149_s598_dual_negative.py --cert out/s598_dual_negative.json
           certo verify out/s598_dual_negative.json
+      - name: S599 paired-shadow full palette reconstruction
+        run: python research/erdos149/test_s599_paired_shadow.py
+      - name: S599 exact exterior 1/8 barrier (Certo)
+        run: |
+          certo lint examples/erdos149_s599_exterior_budget.py
+          certo prove examples/erdos149_s599_exterior_budget.py --cert out/s599_exterior_budget.json
+          certo verify out/s599_exterior_budget.json
       - name: Bundle audit summary
         if: always()
         run: |
