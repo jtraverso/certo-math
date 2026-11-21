@@ -243,3 +243,124 @@ statement for the remaining connectors and/or non-C5 dual
 supports.** None of the above proves that the entire old
 near-K demand is carried by a single near-tight C5.
 Do not mark G1 or Erdős #149 closed.
+
+
+## 8. New universal Horn–Motzkin–Straus C5 incidence budget (C18)
+
+Let \`v0,...,v4\` be five vertices of a physical 5-cycle, with
+masses \`m_i>=0\` satisfying the physical row inequalities.
+Denote the total weight of the *five cycle edges* by
+
+    W_5 = sum_{i mod 5} m_i*m_(i+1),
+
+and the weight of all physical edges with EXACTLY ONE endpoint
+on those five vertices by \`I_5=w(delta(V(C5)))\`.
+Any chords among the five vertices remain separate demands.
+
+**THEOREM C18-A, global local budget:**
+
+    sum_i m_i - W_5 <= 5/4,
+    W_5 + I_5 <= 5/4.                         (S600.7)
+
+The second inequality is a NONTRIVIAL absorption budget:
+the five pairwise strongly conflicting cycle edges may receive
+disjoint colors of width W_5, and every crossing edge may
+receive its own singleton colors of total width I_5.
+These classes fit within the SAME total K=5/4.
+
+**Algebraic proof of first inequality.**
+Set \`u_i=m_i−1/2\` and \`z_i=1−m_i−m_(i+2)>=0\`
+(modulo five). By the physical row at the intermediate vertex,
+every z_i is nonnegative.
+
+A direct polynomial expansion, verified independently by Certo,
+gives the exact identity
+
+    4*(K - sum_i m_i + W_5)
+       = (sum_i z_i)^2 - 4*sum_i z_i*z_(i+2).
+
+The five edges {i,i+2} form ANOTHER triangle-free 5-cycle.
+For any nonnegative masses z_i on a triangle-free graph,
+the weighted adjacency product sum is at most
+\`(sum_i z_i)^2/4\` (weighted Mantel/Motzkin–Straus).
+
+A self-contained proof is available by pairwise COMPRESSION:
+if i,j are nonadjacent and both masses are positive, the
+edge-energy is affine in the transfer of their combined mass
+between i and j. Move all mass to the vertex whose
+current neighbor-mass sum is larger. The energy cannot decrease,
+the total mass is preserved, and the number of positive
+vertices strictly falls. Repeating leaves support on a
+clique, of size at most two in a triangle-free graph.
+Then AM–GM bounds the sole remaining product by
+one quarter of the square of the total mass.
+This proves the first inequality **for ALL nonnegative reals**.
+Certo checks the five-variable polynomial identity, a
+representative no-loss transfer, and the two-variable AM–GM
+conclusion; the compression induction is the analytic step
+and is not claimed to have been quantified in a single SMT spec.
+
+**Exact row-slack decomposition.**
+Let \`r_i=sum_{v outside C5, v~v_i}m_v\` and
+\`s_i=1−m_(i−1)−m_(i+1)−r_i >=0\`.
+This includes any chord demands as additional slack constraints.
+By the physical rows,
+
+    I_5=sum_i m_i*r_i
+       =sum_i m_i−2 W_5−sum_i m_i*s_i.
+
+Therefore
+
+    K−W_5−I_5
+     =1/4*((sum z_i)^2−4*sum z_i*z_(i+2))
+      +sum_i m_i*s_i >=0.                  (S600.8)
+
+Each term is nonnegative. This identity gives an exact
+quantitative *stability budget*, not just an inequality.
+It is replayed with fractions and a logged Motzkin–Straus
+compression in \`research/erdos149/s600_c5_horn_budget.py\`.
+
+### C18-B, a complete G1 subcase (not universal G1)
+
+Assume the G1 heavy residual S591 and choose a C5 with
+\`W_5 >= K−ab\`. By S600.4, the entire C5 lies at
+physical distance at least 3 from BOTH roots, hence each
+of its five edges is compatible with ALL old root edges.
+Also \`W_5 > K−1/144 >3/4 >B=max(r_s,r_t)\`.
+
+The root-star Hall palette has width B and joint overlap
+\`m=min(r_s,r_t)\`. Overlay it with the five disjoint
+cycle singleton colors in width W_5, padding the root
+palette with empty colors. This is PHYSICALLY legal.
+Add all crossing edges of the cycle in independent
+singleton bands of total width I_5. By C18-A,
+
+    total width <=W_5+I_5<=K,
+    J = min(r_s,r_t) >= D.
+
+Therefore the G1 reinsertion gate is CLOSED for the full
+demand support
+
+    T = old root edges R
+        union the five cycle edges
+        union delta(V(C5)),
+
+even if the crossing edges connect to arbitrary exterior
+vertices. It is important that T need not contain all
+edges of H; if there are chords on C5 or additional
+exterior edges not in T, those demands STILL need to
+be added by a valid extension (peeling, clique-sum,
+or a separate palette proof). The full G1 universal
+statement remains OPEN.
+
+This removes the previous need to estimate each connector
+edge's contribution separately in this support family.
+In the 19-vertex S600 finite witness, the cycle and
+its single crossing edge consume exactly
+
+    W_5 = 999998000001/800000000000,
+    I_5 = 999999/4000000000000,
+    remaining K-W_5-I_5 = 2249999/1000000000000.
+
+The other four path edges and the cross-edge A0−B0
+are handled by its independently checked full rational palette.
