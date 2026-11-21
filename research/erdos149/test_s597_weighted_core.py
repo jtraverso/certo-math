@@ -18,6 +18,7 @@ from s597_weighted_core import analyze,verify
 from s597_pg4_3conn_hard import build,budget
 from s597_clique_absorb import assess as split_c12
 from s597_proof_router import route
+from s597_c13_witnesses import anchored_cross,petersen_bridge
 from erdos149_s595_neartight import build as build_617
 from erdos149_s595_cross_flow import evaluate as c10
 from s596_c11 import evaluate as c11
@@ -36,6 +37,27 @@ for name,data,m,root,heavy in cases:
     assert route(data)["method"]=="weighted_core"
     print(json.dumps({"name":name,"status":p["status"],"peeled":p["removed_count"],
                       "initial_heavy":p["initial_heavy"],"residual_core":0}))
+
+
+# C13-A: persistent nonroot edge anchored to both stars, but the
+# entire anchored budget fits into the root palette's available slack.
+cross=anchored_cross()
+x13=analyze(cross);assert verify(cross,x13)
+assert x13["status"]=="PASS_C13_ANCHORED_BUDGET",x13
+assert x13["core_nonroot"]==x13["anchored_nonroot"]==1,x13
+assert x13["anchored_weight"]=="361/6400",x13
+assert Q(x13["root_band"])==Q(133,200)+Q(361,6400)
+print(json.dumps({"name":"anchored_cross_10","status":x13["status"],
+    "anchored_weight":x13["anchored_weight"],"root_band":x13["root_band"]}))
+
+# C13-B: a persistent Petersen conflict component disjoint from all
+# root-edge conflict components is harmless under original Q_H<=K.
+P=petersen_bridge()
+p13=analyze(P);assert verify(P,p13)
+assert p13["status"]=="PASS_C13_ANCHORED_BUDGET",p13
+assert p13["core_nonroot"]==15 and p13["anchored_nonroot"]==0,p13
+print(json.dumps({"name":"petersen_rootfree_34","status":p13["status"],
+    "root_free_core":p13["root_free_core"],"root_band":p13["root_band"]}))
 
 hard=build();assert len(hard["masses"])==70 and len(hard["edges"])==157
 G=nx.Graph();G.add_nodes_from(hard["masses"]);G.add_edges_from(hard["edges"])
