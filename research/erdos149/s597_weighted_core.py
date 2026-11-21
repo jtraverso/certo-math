@@ -102,14 +102,22 @@ def analyze(data):
         if group&R:anchored|=group
     anchored_nonroot=len((alive-R)&anchored)
     root_free_nonroot=len((alive-R)-anchored)
+    anchored_weight=sum((w[i] for i in (alive-R)&anchored),Q())
+    root_band=max(rs,rt)+anchored_weight
     D=rs+rt+a*b-K
     flow=hall(m,E,w,conf,R,s,t,rs,rt)
     residual=D>0 and Q(1,2)<m[s]<Q(3,4) and Q(1,2)<m[t]<Q(3,4) and m[s]+m[t]>K
-    status="PASS_ROOT_ONLY" if residual and alive==R and flow==min(rs,rt) else "OPEN_KERNEL"
+    if residual and flow==min(rs,rt) and anchored_weight+max(rs,rt)<=K:
+        status="PASS_ROOT_ONLY" if alive==R else "PASS_C13_ANCHORED_BUDGET"
+    else:
+        status="OPEN_KERNEL"
     return {"status":status,"vertices":len(m),"edges":len(E),
             "initial_heavy":heavy,"removed":removed,"removed_count":len(removed),
             "core_nonroot":len(alive-R),"core_edges":[list(E[i]) for i in sorted(alive-R)],
             "anchored_nonroot":anchored_nonroot,"root_free_core":root_free_nonroot,
+            "anchored_weight":str(anchored_weight),
+            "root_band":str(root_band),
+            "anchored_budget_condition":root_band<=K,
             "root_flow":str(flow),"r_s":str(rs),"r_t":str(rt),
             "D":str(D),"residual":residual}
 
@@ -124,10 +132,21 @@ def verify(data,result):
         active.remove(i)
     assert len(active-R)==result["core_nonroot"]
     assert all(sum((w[j] for j in conf[i]&active),Q())>K for i in active-R)
-    if result["status"]=="PASS_ROOT_ONLY":
-        assert active==R and max(rs,rt)<=K
+    if result["status"] in ("PASS_ROOT_ONLY","PASS_C13_ANCHORED_BUDGET"):
         assert hall(m,E,w,conf,R,s,t,rs,rt)==min(rs,rt)
         assert rs+rt+a*b>K
+        components=[];unseen=set(active)
+        while unseen:
+            start=unseen.pop();cc={start};queue=[start]
+            for i in queue:
+                for j in conf[i]&unseen:
+                    unseen.remove(j);cc.add(j);queue.append(j)
+            components.append(cc)
+        anchored=set().union(*(cc for cc in components if cc&R))
+        anchored_weight=sum((w[i] for i in (active-R)&anchored),Q())
+        assert anchored_weight+max(rs,rt)<=K
+        assert str(anchored_weight)==result["anchored_weight"]
+        if result["status"]=="PASS_ROOT_ONLY":assert active==R
     return True
 
 if __name__=="__main__":
