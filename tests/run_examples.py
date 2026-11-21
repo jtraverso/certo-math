@@ -91,6 +91,8 @@ CASES = [
     ("walkthrough_ideal.py", "ideal", []),
     ("walkthrough_proof.py", "compose", []),
     ("packing_mixed.py", "opt", ["--by-type"]),
+    ("erdos149_arco3_cegis_degree.py", "synth", ["--prove-candidate"]),
+    ("erdos149_arco3_degree4_counterexample.py", "prove", []),
     ("synth_constant.py", "synth", []),
     ("synth_helpers.py", "synth", []),
     ("synth_none.py", "synth", []),
