@@ -144,6 +144,16 @@ jobs:
           certo lint examples/erdos149_s600_c20_scalar.py
           certo prove examples/erdos149_s600_c20_scalar.py --cert out/s600_c20_scalar.json
           certo verify out/s600_c20_scalar.json
+      - name: S601 exact C21 balanced near-tight C5 complete collar palette
+        run: python research/erdos149/test_s601_balanced_c5.py
+      - name: S601 Certo Horn nonnegative charge and free-slot inequalities
+        run: |
+          for f in examples/erdos149_s601_horn_row_charge.py \
+                   examples/erdos149_s601_free_slots.py; do
+            certo lint "$f"
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
       - name: Bundle audit summary
         if: always()
         run: |
