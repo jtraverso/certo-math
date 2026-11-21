@@ -32,10 +32,13 @@ def candidate_five_cycles(graph):
 def route(data,max_candidates=100):
     m={v:Q(w) for v,w in data["masses"].items()}
     core=peel(data)
-    if core["status"]=="PASS_ROOT_ONLY":
-        return {"status":"PASS","method":"weighted_core","old_edge_count":core["edges"],
+    if core["status"] in ("PASS_ROOT_ONLY","PASS_C13_ANCHORED_BUDGET"):
+        return {"status":"PASS","method":"weighted_core" if core["status"]=="PASS_ROOT_ONLY" else "C13_anchored_budget",
+                "old_edge_count":core["edges"],
                 "removed":core["removed_count"],"root_flow":core["root_flow"],
-                "gate":"arc3","scope":"one finite physical graph"}
+                "anchored_weight":core["anchored_weight"],
+                "root_free_core":core["root_free_core"],
+                "gate":"arc3","scope":"one finite physical graph, requires Q_H<=5/4"}
     E={canon(e) for e in data["edges"]}
     G=nx.Graph();G.add_nodes_from(m);G.add_edges_from(E)
     candidates=candidate_five_cycles(G)
