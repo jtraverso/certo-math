@@ -17,6 +17,7 @@ from s597_verify_static_palettes import decode
 from s597_weighted_core import analyze,verify
 from s597_pg4_3conn_hard import build,budget
 from s597_clique_absorb import assess as split_c12
+from s597_proof_router import route
 from erdos149_s595_neartight import build as build_617
 from erdos149_s595_cross_flow import evaluate as c10
 from s596_c11 import evaluate as c11
@@ -32,6 +33,7 @@ for name,data,m,root,heavy in cases:
     assert p["edges"]==m and p["core_nonroot"]==0 and p["initial_heavy"]==heavy,p
     assert p["removed_count"]==m-root
     assert Q(p["root_flow"])==min(Q(p["r_s"]),Q(p["r_t"]))
+    assert route(data)["method"]=="weighted_core"
     print(json.dumps({"name":name,"status":p["status"],"peeled":p["removed_count"],
                       "initial_heavy":p["initial_heavy"],"residual_core":0}))
 
@@ -47,6 +49,9 @@ proof12=split_c12(hard,cycle)
 assert proof12["status"]=="PASS_C12" and proof12["L"]==137
 assert proof12["R"]==5 and proof12["C"]==15
 assert proof12["QF_upper"]==masks["QF_upper"]
+smart=route(hard)
+assert smart["status"]=="PASS" and smart["method"]=="C12_clique_absorption",smart
+assert Q(smart["certificate"]["QF_upper"])==Q(1249997,1000000)
 # The decomposition is a parametric mathematical family, not just one fixture.
 for epsilon in (Q(1,1000),Q(1,10000),Q(1,100000),Q(1,1000000)):
     inst=build(epsilon)
