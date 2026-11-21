@@ -57,6 +57,12 @@ jobs:
         run: python research/erdos149/verify_with_jacobian.py
       - name: Jacobian C11 physical induced-matching relaxation
         run: python research/erdos149/c11_jacobian_relaxation.py
+      - name: S597 universal root-pair Hall algebra
+        run: |
+          certo prove examples/erdos149_s597_root_hall_scalar.py --cert out/s597_root_hall.json
+          certo verify out/s597_root_hall.json
+      - name: S597 replay 23-node and 18-node exact global palettes
+        run: python research/erdos149/s597_verify_static_palettes.py
       - name: Bundle audit summary
         if: always()
         run: |
