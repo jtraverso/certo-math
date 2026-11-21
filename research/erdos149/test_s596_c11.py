@@ -24,3 +24,20 @@ check("nonzero_heavy_blocker",nonzero,"PASS",1)
 r=evaluate(nonzero,0)
 assert r["status"]=="UNKNOWN" and r["reason"]=="matching_enumeration_budget_exhausted",r
 print("budget_exhaustion",r["status"],"not PASS")
+
+
+# The previously expensive 617-vertex two-connected adversary now has only
+# four opposite-root types and is decided by exact type-cover branching.
+import importlib.util
+large=HERE.parent/"erdos149_s595_neartight.py"
+module_spec=importlib.util.spec_from_file_location("s595_large",str(large))
+module=importlib.util.module_from_spec(module_spec)
+module_spec.loader.exec_module(module)
+large_result=evaluate(module.build(),100000)
+assert large_result["status"]=="INCONCLUSIVE",large_result
+assert large_result["heavy"]==170,large_result
+for side,info in large_result["by_side"].items():
+    assert info["hard_total"]=="2587/4000"
+    assert all(row["B"]=="2587/4000" for row in info["roots"])
+print("two_connected_617_exact",large_result["status"],
+      "heavy",large_result["heavy"],"not a counterexample")
