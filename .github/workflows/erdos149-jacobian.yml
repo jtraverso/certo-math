@@ -1,0 +1,189 @@
+name: Erdos149 Certo + Jacobian research
+
+on:
+  push:
+    branches:
+      - research/erdos149-arco3-cegis-s594
+    paths:
+      - 'research/erdos149/**'
+      - '.github/workflows/erdos149-jacobian.yml'
+      - 'examples/erdos149_arco3_palette_path.json'
+  workflow_dispatch:
+
+jobs:
+  independent-exact-lp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Jacobian and Certo from explicit mathematical packages
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'jacobian==0.23.0' -e '.[numerics]'
+      - name: Discover Jacobian exact mathematical contract
+        run: jacobian inspect optimization.linear.rational_general_optimum.compute
+      - name: Certo primal/dual exact certificate
+        run: |
+          mkdir -p out
+          certo lint examples/erdos149_arco3_cegis_degree.py
+          certo opt examples/erdos149_arco3_palette_path.json --cert out/erdos149_path_certo.json
+          certo verify out/erdos149_path_certo.json
+      - name: Certo exact synthesis and scalar gate certificates
+        run: |
+          mkdir -p out
+          certo synth examples/erdos149_arco3_cegis_degree.py --prove-candidate --cert out/arco3_degree_cegis.json
+          certo verify out/arco3_degree_cegis.json
+          certo prove examples/erdos149_arco3_degree4_counterexample.py --cert out/arco3_degree4_refuted.json
+          certo verify out/arco3_degree4_refuted.json
+          for f in examples/erdos149_arco3_degree{4,5}_heavy_diagonal.py \
+                   examples/erdos149_arco3_degree4_heavy_{vertex,slope}.py \
+                   examples/erdos149_arco3_heavy_saturation.py \
+                   examples/erdos149_arco3_no_light_cut.py; do
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
+      - name: Certo connected graph exact palette LP
+        run: |
+          certo opt examples/erdos149_arco3_palette_connected_c5.json --cert out/arco3_connected_c5.json
+          certo verify out/arco3_connected_c5.json
+      - name: S595 physical 617-vertex graph audits
+        run: python tests/test_erdos149_s595.py
+      - name: C11 simultaneous blocker exact tests
+        run: python research/erdos149/test_s596_c11.py
+      - name: Jacobian independent exact physical-LP solve
+        run: python research/erdos149/verify_with_jacobian.py
+      - name: Jacobian C11 physical induced-matching relaxation
+        run: python research/erdos149/c11_jacobian_relaxation.py
+      - name: S597 universal root-pair Hall algebra
+        run: |
+          certo prove examples/erdos149_s597_root_hall_scalar.py --cert out/s597_root_hall.json
+          certo verify out/s597_root_hall.json
+      - name: S597 replay 23-node and 18-node exact global palettes
+        run: python research/erdos149/s597_verify_static_palettes.py
+      - name: S597 Certo heavy-cycle mass shielding
+        run: |
+          certo prove examples/erdos149_s597_cycle_shielding.py --cert out/s597_cycle_shielding.json
+          certo verify out/s597_cycle_shielding.json
+      - name: S597 Certo universal parametric absorber inequality
+        run: |
+          certo prove examples/erdos149_s597_twoscale_budget.py --cert out/s597_twoscale_budget.json
+          certo verify out/s597_twoscale_budget.json
+      - name: S597 weighted core exact replay and near-tight 3-connected adversary
+        run: python research/erdos149/test_s597_weighted_core.py
+      - name: S598 true-twin and false-twin exact quotient replay
+        run: |
+          python research/erdos149/test_s598_conflict_twins.py
+          python research/erdos149/test_s598_false_twins.py
+      - name: S598 Certo dual-negative localization inequality
+        run: |
+          certo lint examples/erdos149_s598_dual_negative.py
+          certo prove examples/erdos149_s598_dual_negative.py --cert out/s598_dual_negative.json
+          certo verify out/s598_dual_negative.json
+      - name: S599 paired-shadow full palette reconstruction
+        run: python research/erdos149/test_s599_paired_shadow.py
+      - name: S599 exact exterior 1/8 barrier (Certo)
+        run: |
+          certo lint examples/erdos149_s599_exterior_budget.py
+          certo prove examples/erdos149_s599_exterior_budget.py --cert out/s599_exterior_budget.json
+          certo verify out/s599_exterior_budget.json
+      - name: S599 exact global C15 dual contradiction
+        run: |
+          certo lint examples/erdos149_s599_c15_slack_exterior.py
+          certo prove examples/erdos149_s599_c15_slack_exterior.py --cert out/s599_c15_slack_exterior.json
+          certo verify out/s599_c15_slack_exterior.json
+      - name: S599 tuned 3-connected old-palette slack certificate
+        run: python research/erdos149/s599_c15_tuned_pg4.py
+      - name: S599 Certo proof of constructive global palette mixing
+        run: |
+          certo lint examples/erdos149_s599_c15_primal_mix.py
+          certo prove examples/erdos149_s599_c15_primal_mix.py --cert out/s599_c15_primal_mix.json
+          certo verify out/s599_c15_primal_mix.json
+      - name: S599 Certo uniform 3/5 necessary slack window
+        run: |
+          certo lint examples/erdos149_s599_uniform_three_fifths.py
+          certo prove examples/erdos149_s599_uniform_three_fifths.py --cert out/s599_uniform_three_fifths.json
+          certo verify out/s599_uniform_three_fifths.json
+      - name: S600 exact physical clique-cut and nonbipartite falsation
+        run: |
+          python research/erdos149/s600_neartight_fixture.py
+          python research/erdos149/s600_nonbip_core_falsation.py
+          python research/erdos149/s600_root_c5_absorb.py
+      - name: S600 Certo root mass gap and five-cycle shielding
+        run: |
+          for f in examples/erdos149_s600_root_margin.py \
+                   examples/erdos149_s600_c5_fixed_vertex.py \
+                   examples/erdos149_s600_c5_distance.py \
+                   examples/erdos149_s600_c5_adjacent_capfree.py; do
+            certo lint "$f"
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
+      - name: S600 weighted Mantel Horn polynomial and compression checks
+        run: |
+          python research/erdos149/s600_c5_horn_budget.py
+          for f in examples/erdos149_s600_horn_identity.py \
+                   examples/erdos149_s600_mantel_compression.py; do
+            certo lint "$f"
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
+      - name: S600 C19 exact thin-collar physical two-layer test
+        run: python research/erdos149/s600_c5_collar.py
+      - name: S600 C19 Certo scalar near-half and 37/35 bound
+        run: |
+          certo lint examples/erdos149_s600_c19_collar_scalar.py
+          certo prove examples/erdos149_s600_c19_collar_scalar.py --cert out/s600_c19_collar_scalar.json
+          certo verify out/s600_c19_collar_scalar.json
+      - name: S600 C20 physically complete rational 2-layer collar palette
+        run: python research/erdos149/s600_c20_quadratic_collar.py
+      - name: S600 C20 Certo cycle slot and exceptional quadratic bounds
+        run: |
+          certo lint examples/erdos149_s600_c20_scalar.py
+          certo prove examples/erdos149_s600_c20_scalar.py --cert out/s600_c20_scalar.json
+          certo verify out/s600_c20_scalar.json
+      - name: S601 exact C21 balanced near-tight C5 complete collar palette
+        run: python research/erdos149/test_s601_balanced_c5.py
+      - name: S601 Certo Horn nonnegative charge and free-slot inequalities
+        run: |
+          for f in examples/erdos149_s601_horn_row_charge.py \
+                   examples/erdos149_s601_free_slots.py; do
+            certo lint "$f"
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
+      - name: S602 exact signed C5 full collar palette (mass >1/2)
+        run: python research/erdos149/test_s602_general_c5.py
+      - name: S602 Certo signed Horn exact cancellation
+        run: |
+          certo lint examples/erdos149_s602_signed_horn_budget.py
+          certo prove examples/erdos149_s602_signed_horn_budget.py --cert out/s602_signed_horn_budget.json
+          certo verify out/s602_signed_horn_budget.json
+      - name: S603 full-H G1 remote completion, all physical conflicts
+        run: python research/erdos149/test_s603_full_far.py
+      - name: S603 Certo remote demand threshold
+        run: |
+          certo lint examples/erdos149_s603_remote_threshold.py
+          certo prove examples/erdos149_s603_remote_threshold.py --cert out/s603_remote_threshold.json
+          certo verify out/s603_remote_threshold.json
+      - name: Bundle audit summary
+        if: always()
+        run: |
+          mkdir -p out
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          Path("out/STATUS.json").write_text(json.dumps({
+            "conjecture":"Erdos-Nesetril #149",
+            "scope":"finite 7-edge path palette LP only",
+            "universal_gate":"OPEN",
+            "status":"see CI steps, do not infer result from workflow completion"
+          }, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: erdos149-certo-jacobian
+          path: out/
