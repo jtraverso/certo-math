@@ -145,3 +145,148 @@ rows and yield exact rational full palettes and J=133/200.
 **What remains OPEN:** the universal G1 statement
 Jmax(A*;K)≥D for arbitrary physically realizable anchored cores
 with the two necessary properties above. G2–G5 are unchanged.
+
+
+## Theorem C15: quantitative global stability from palette slack and far mass
+
+This is a NEW analytic G1 certificate coupling the partial near-root palette
+to a complete old palette via the exact LP dual. It does **not** assume the
+conclusion G1, and it can pass when all elementary C14 and exterior-budget
+tests are inconclusive.
+
+Under the same S591 hypotheses, let A* be S597's root-anchored conflict
+support, and let W be the total demand on its FAR interior edges, i.e.
+those with at least one endpoint outside N_H(s)∪N_H(t).
+Assume we have ANY old exact palette of H of width beta<=K=5/4
+(not necessarily optimal). Put
+
+    sigma = K-beta >= 0,
+    B = max(r_s,r_t),  m = min(r_s,r_t),
+    D = r_s+r_t+ab-K >0.
+
+For sigma+W>0, the following bound is UNIVERSALLY valid:
+
+    Jmax(H;K) >= m - W*(beta-B)/(W+sigma).      (C15.0)
+
+When sigma=W=0, the near-root palette directly shows Jmax=m.
+
+Equivalently, a sufficient condition for G1 is
+
+    sigma*(K-B-ab) >= (ab-sigma)*W.              (C15.1)
+
+**Proof (all quantities exact).** S597.5 permits the entire LP to be
+restricted to A*, with original physical conflicts. Its dual variables
+are tau>=0 and unrestricted lambda_e, with constraints
+
+    tau + sum_{e in M}lambda_e >= h(M)
+
+for every physical induced matching M on A*. Write Phi for
+K*tau+sum_e lambda_e*w_e.
+
+(1) The root+NEAR partial palette from C14-C, padded with empty
+colors to width K, has joint overlap m and covers R plus every near
+edge of A* exactly. Integrating dual inequalities over it gives
+
+    K*tau+sum_{R union near}lambda_e*w_e >= m.
+
+The singleton matching of each far edge has h=0 and therefore
+lambda_e>=-tau. Consequently
+
+    Phi >= m-tau*W.                              (C15.a)
+
+(2) Restrict the old complete beta-palette of H to A*.
+The two root stars still occupy measures r_s,r_t and their
+intersection has width >=r_s+r_t-beta=m+B-beta (inclusion-exclusion).
+Integration gives
+
+    beta*tau+sum_{e in A*}lambda_e*w_e >= m+B-beta.
+
+Thus, putting sigma=K-beta,
+
+    Phi >= m+B-beta+sigma*tau.                   (C15.b)
+
+By strong linear programming duality,
+Jmax(H;K)=min Phi. For every tau>=0, Phi is bounded below
+by the maximum of the two affine functions in (C15.a,b).
+For W+sigma>0, their intersection is
+
+    tau_*=(beta-B)/(W+sigma)>=0,
+
+because beta>=B (all root edges must be covered).
+The minimum of their maximum occurs at tau_* and equals
+m-W*(beta-B)/(W+sigma), proving C15.0.
+
+The inequality C15.0 >= D is equivalent to
+
+    W*(beta-B) <= (K-B-ab)*(W+sigma),
+    W*(ab-sigma) <= sigma*(K-B-ab),
+
+which is C15.1. If beta<=K-ab (sigma>=ab), this specializes to
+the standard easy reinsertion by extra empty colors. QED.
+
+**Dual necessary interval.** If G1 fails with sigma>0, every
+obstructive dual must satisfy BOTH
+
+    tau*W > K-B-ab,
+    sigma*tau < ab-sigma.
+
+A certificate passes whenever these intervals are disjoint.
+Certo's \`examples/erdos149_s599_c15_slack_exterior.py\` verifies
+the universal real-algebra contradiction under C15.1.
+The combinatorial root/near construction and LP integration
+are proved above, not encoded as graph quantifiers by Certo.
+
+### Strict finite control: tuned 3-connected 70-vertex PG(2,4) profile
+
+Keep S597's physical incidence graph (70 vertices, 157 edges,
+3-vertex-connected), with x=y=7/10, a=b=1/20.
+Choose C5 cycle masses c=999/2000 and tiny positive
+connector masses delta=1/100000000. All degree rows remain feasible.
+
+C12's independent physical old-graph split verifies an
+upper bound beta on Q_H:
+
+    beta = 5c^2+5delta*(c+19/50)
+         = 49900051759/40000000000.
+
+The C5 strong clique alone has demand 998001/800000, which is
+strictly GREATER than K-ab=499/400; hence Q_H>K-ab:
+the trivial spare-budget criterion is UNAVAILABLE.
+
+The exact S597 rooted-core extractor leaves 111 nonroot
+ANCHORED edges, no root-free components, and gives
+
+    W_far(A*)=38741/10000 > 1/8.
+
+The old S597 peeling and C14 paired-shadow peeling
+both remain OPEN on this graph. Nevertheless
+
+    sigma=K-beta=99948241/40000000000,
+    K-B-ab=233/400,
+    D=33/400,
+
+and, with exact rational arithmetic,
+
+    sigma*(K-B-ab) = 23287940153/16000000000000,
+    (ab-sigma)*W  = 2005195419/400000000000000.
+
+The first is strictly greater than the second.
+Consequently C15 proves G1 for this PHYSICAL GRAPH without
+needing a palettisation of the complete graph F:
+
+    Jmax >= 128507950607231/1550639482410000
+         = 0.0828741638949527... > D=0.0825.
+
+Its exact positive margin over D is
+
+    290096654203/775319741205000.
+
+The independent script
+\`research/erdos149/s599_c15_tuned_pg4.py\` checks the
+70-vertex original physical rows and 3-connectivity,
+C12's upper bound on Q_H, the anchored core, far mass,
+both failed simpler filters, and the rational C15 margin.
+
+**Status:** C15 is a universal CONDITIONAL CRITERION; it is NOT
+proved that every H satisfies the C15.1 hypothesis.
+G1 universal and Erdős #149 remain OPEN.
