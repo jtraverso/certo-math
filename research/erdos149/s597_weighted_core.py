@@ -88,6 +88,20 @@ def analyze(data):
             loads[j]-=w[i]
             if j not in R and loads[j]<=K:heapq.heappush(heap,(loads[j],j))
     assert all(loads[i]>K for i in alive-R)
+    # Conflict components of the retained kernel. Components without
+    # terminal root edges can be superposed at width K when Q_H<=K.
+    components=[];unseen=set(alive)
+    while unseen:
+        seed=unseen.pop();group={seed};queue=[seed]
+        for i in queue:
+            for j in conf[i]&unseen:
+                unseen.remove(j);group.add(j);queue.append(j)
+        components.append(group)
+    anchored=set()
+    for group in components:
+        if group&R:anchored|=group
+    anchored_nonroot=len((alive-R)&anchored)
+    root_free_nonroot=len((alive-R)-anchored)
     D=rs+rt+a*b-K
     flow=hall(m,E,w,conf,R,s,t,rs,rt)
     residual=D>0 and Q(1,2)<m[s]<Q(3,4) and Q(1,2)<m[t]<Q(3,4) and m[s]+m[t]>K
@@ -95,6 +109,7 @@ def analyze(data):
     return {"status":status,"vertices":len(m),"edges":len(E),
             "initial_heavy":heavy,"removed":removed,"removed_count":len(removed),
             "core_nonroot":len(alive-R),"core_edges":[list(E[i]) for i in sorted(alive-R)],
+            "anchored_nonroot":anchored_nonroot,"root_free_core":root_free_nonroot,
             "root_flow":str(flow),"r_s":str(rs),"r_t":str(rt),
             "D":str(D),"residual":residual}
 
