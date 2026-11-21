@@ -161,6 +161,13 @@ jobs:
           certo lint examples/erdos149_s602_signed_horn_budget.py
           certo prove examples/erdos149_s602_signed_horn_budget.py --cert out/s602_signed_horn_budget.json
           certo verify out/s602_signed_horn_budget.json
+      - name: S603 full-H G1 remote completion, all physical conflicts
+        run: python research/erdos149/test_s603_full_far.py
+      - name: S603 Certo remote demand threshold
+        run: |
+          certo lint examples/erdos149_s603_remote_threshold.py
+          certo prove examples/erdos149_s603_remote_threshold.py --cert out/s603_remote_threshold.json
+          certo verify out/s603_remote_threshold.json
       - name: Bundle audit summary
         if: always()
         run: |
