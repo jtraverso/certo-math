@@ -160,11 +160,19 @@ row at z gives p+q≤1−x and the two neighboring
 cycle rows give z+c≤1,z+d≤1. Thus
     w(C5)=p(z+c)+q(z+d)+cd
           ≤p+q+cd.
-Using the minimal-model cap c,d<3/4,
-    w(C5)<1−x+9/16 ≤17/16<K−ab,
-since ab<1/144. Contradiction.
-Alternatively the earlier weaker but cap-free sharp bound
-w(C5)≤1+(1−x)²/4≤17/16 suffices.
+A cap-free inequality, valid for every physical C5, says
+
+    w(C5)≤1+(p+q)²/4≤1+(1−x)²/4≤17/16<K−ab.
+
+To derive it, maximize c,d for fixed z,p,q using the
+cycle rows: c=1−max(z,q), d=1−max(z,p). Reflecting
+the cycle assume p≤q. If z≥q, w(C5)=p+q+(1−z)²
+≤1+(p+q)²/4. If z≤p, w(C5)=1−pq+z(p+q)
+≤1+p²≤1+(p+q)²/4. If p≤z≤q,
+w(C5)=1+p²−(z−p)(1−p−q)
+≤1+p²≤1+(p+q)²/4, using p+q≤1/2.
+Thus no minimal-model vertex mass cap is needed for
+this distance-one case. Contradiction.
 
 (iii) s is at distance two from C5. Choose s−w−v
 with v∈C5. Since the row at w includes both x and
@@ -189,7 +197,8 @@ demand automatically.
 Certo specifications (real algebra only):
 - \`examples/erdos149_s600_root_margin.py\`;
 - \`examples/erdos149_s600_c5_fixed_vertex.py\`;
-- \`examples/erdos149_s600_c5_distance.py\`.
+- \`examples/erdos149_s600_c5_distance.py\`;
+- \`examples/erdos149_s600_c5_adjacent_capfree.py\`.
 
 Each is an implication with explicit hypotheses, not a
 quantified proof that all near-K fractional chromatic graphs
