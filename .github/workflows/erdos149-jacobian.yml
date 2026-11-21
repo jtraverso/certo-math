@@ -63,6 +63,10 @@ jobs:
           certo verify out/s597_root_hall.json
       - name: S597 replay 23-node and 18-node exact global palettes
         run: python research/erdos149/s597_verify_static_palettes.py
+      - name: S597 Certo universal parametric absorber inequality
+        run: |
+          certo prove examples/erdos149_s597_twoscale_budget.py --cert out/s597_twoscale_budget.json
+          certo verify out/s597_twoscale_budget.json
       - name: S597 weighted core exact replay and near-tight 3-connected adversary
         run: python research/erdos149/test_s597_weighted_core.py
       - name: Bundle audit summary
