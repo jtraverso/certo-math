@@ -94,6 +94,8 @@ CASES = [
     ("erdos149_arco3_palette_path.json", "opt", [], 0),
     ("erdos149_arco3_palette_connected_c5.json", "opt", [], 0),
     ("erdos149_arco3_degree5_heavy_diagonal.py", "prove", [], 0),
+    ("erdos149_arco3_heavy_saturation.py", "prove", [], 0),
+    ("erdos149_arco3_no_light_cut.py", "prove", [], 0),
     ("erdos149_arco3_degree4_heavy_diagonal.py", "prove", [], 0),
     ("erdos149_arco3_degree4_heavy_slope.py", "prove", [], 0),
     ("erdos149_arco3_degree4_heavy_vertex.py", "prove", [], 0),
