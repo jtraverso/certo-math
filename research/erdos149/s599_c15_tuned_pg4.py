@@ -62,6 +62,12 @@ rhs=(a*b-sigma)*Wfar
 assert Wfar>F(1,8) and lhs>rhs
 Jlower=B-Wfar*(beta-B)/(Wfar+sigma)
 assert Jlower>D
+# New C15-P constructive two-palette mixing, independent of W_far.
+assert sigma*beta >= a*b*B
+theta=sigma/B
+assert 0<theta<1
+J_mix_lower=r_s+r_t-K+sigma*beta/B
+assert J_mix_lower>D
 assert analyze(H)["status"]=="OPEN_KERNEL"
 assert prove_instance(H,make_palette=False)["status"]=="OPEN_KERNEL"
 print(json.dumps({
@@ -69,7 +75,10 @@ print(json.dumps({
  "vertices":70,"edges":157,
  "beta_upper_old_H":str(beta),"simple_gap_K_minus_ab":str(K-a*b),
  "slack_sigma":str(sigma),"J_lower":str(Jlower),"target_D":str(D),
- "J_margin":str(Jlower-D),"far_weight_rooted_core":str(Wfar),
+ "J_margin":str(Jlower-D),"J_mix_lower_C15P":str(J_mix_lower),
+ "mixing_fraction_theta":str(theta),"J_mix_margin":str(J_mix_lower-D),
+ "C15P_lhs":str(sigma*beta),"C15P_rhs":str(a*b*B),
+ "far_weight_rooted_core":str(Wfar),
  "C15_left":str(lhs),"C15_right":str(rhs),
  "S597":"OPEN_KERNEL","S599_C14":"OPEN_KERNEL",
  "universal_G1":"OPEN","global_Erdos149":"OPEN"
