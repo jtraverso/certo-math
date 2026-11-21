@@ -91,6 +91,8 @@ CASES = [
     ("walkthrough_ideal.py", "ideal", []),
     ("walkthrough_proof.py", "compose", []),
     ("packing_mixed.py", "opt", ["--by-type"]),
+    ("erdos149_arco3_palette_path.json", "opt", [], 0),
+    ("erdos149_arco3_palette_connected_c5.json", "opt", [], 0),
     ("erdos149_arco3_cegis_degree.py", "synth", ["--prove-candidate", "--trace"], 0),
     ("erdos149_arco3_degree4_counterexample.py", "prove", [], 0),
     ("synth_constant.py", "synth", []),
