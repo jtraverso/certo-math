@@ -25,7 +25,7 @@ def spec():
     p.assume("root_t_bound",rt+ab<=y)
     p.assume("obstruction",j<rs+rt+ab-K)
     p.assume("exact_root_exclusive_flow",nu>=rs+rt-2*j)
-    p.claim(nu>z3.RealVal("5/2")-x-y)
+    p.claim(z3.And(nu>2*K-rs-rt-2*ab, nu>z3.RealVal("5/2")-x-y))
     p.role("consumer")
     p.pending("physical_recolor", "Combinatorial heavy-saturation lemma proved on paper, not encoded in SMT")
     return p
