@@ -120,6 +120,15 @@ jobs:
             certo prove "$f" --cert "out/$(basename "$f" .py).json"
             certo verify "out/$(basename "$f" .py).json"
           done
+      - name: S600 weighted Mantel Horn polynomial and compression checks
+        run: |
+          python research/erdos149/s600_c5_horn_budget.py
+          for f in examples/erdos149_s600_horn_identity.py \
+                   examples/erdos149_s600_mantel_compression.py; do
+            certo lint "$f"
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
       - name: Bundle audit summary
         if: always()
         run: |
