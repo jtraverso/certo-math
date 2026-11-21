@@ -199,3 +199,66 @@ universal a tamaño finito los experimentos permanecen finitos.
 arco de dos aristas OPEN; separadores ponderados ramificados
 OPEN; núcleo 3-conexo universal OPEN; conversión entera OPEN;
 Erdős–Nešetřil #149 OPEN.
+
+
+## Teorema 5. Igualdad EXACTA de óptimos al reducir al núcleo ANCLADO
+
+Defina `Jmax(T;K)` como el máximo ancho de colores con ambas raíces
+entre todas las paletas exactas de ancho K que cubren las demandas
+de un conjunto T de aristas, calculando los conflictos fuertes siempre
+en el grafo físico original H.
+
+Aplique el peeling del teorema 2 a todas las aristas interiores
+(`E(H)\R`), manteniendo siempre las dos estrellas R.
+Sea `T*` el punto fijo y `A*` la unión de las componentes del
+GRAFO DE CONFLICTOS de `T*` que contienen alguna arista de R.
+Las otras componentes forman `B*=T*\A*`.
+
+**Teorema:** suponiendo `Q_H≤K`,
+
+`Jmax(E(H);K)=Jmax(A*;K)`.                 (S597.5)
+
+La definición de J en el lado derecho conserva las dos estrellas
+de raíces (todas están en A*).
+
+**Demostración ≤:** de cualquier paleta exacta de H, retire todas
+las aristas fuera de A* de cada color; el matching sigue inducido,
+la demanda de A* sigue exacta, el ancho sigue K (completando con
+vacío) y J no cambia. Por tanto `Jmax(H)≤Jmax(A*)`.
+
+**Demostración ≥:** tome una paleta exacta óptima de A* de ancho K.
+Como `Q_H≤K`, existe al menos una paleta exacta de H de ancho K.
+Restrínjala a B*; dado que por construcción no hay ninguna
+incompatibilidad fuerte entre una arista de A* y una de B*,
+podemos superponer las paletas arbitrariamente sobre el mismo
+intervalo de ancho K, dividiéndolas cuando sea necesario.
+Cada color combinado sigue siendo matching inducido físico.
+Recupere todas las aristas borradas por peeling en orden INVERSO,
+usando el teorema 2. Cada reposición preserva las demandas, K y
+la marca de las dos estrellas, por lo que J no cambia. Se obtiene
+paleta de todo H con el mismo J de la paleta inicial óptima
+de A*, así `Jmax(H)≥Jmax(A*)`.
+
+Con la hipótesis `Q_H≤K`, ambas optimizaciones existen, son
+compactas y alcanzan su máximo. QED.
+
+**Consecuencias:**
+1. Un núcleo interior pesado desconectado por conflictos de las
+   raíces puede ser IGNORADO completamente al buscar Jmax;
+   para restaurarlo sólo se necesita Q_H≤K.
+2. C13 es consecuencia inmediata: Hall de las dos estrellas
+   y singletons para A*\R dan una paleta de ancho
+   `max(r_s,r_t)+W_A`; si ese valor ≤K, Jmax(A*)=min(r_s,r_t).
+3. En 34 vértices con Petersen la reducción lleva A*=R,
+   pese a que B* contiene 15 aristas pesadas; el óptimo J es
+   exactamente `133/200`.
+4. El adversario de PG(2,4) tiene 111 aristas interiores
+   dentro de A*, por lo que **no** es eliminado por esta
+   igualdad; lo cierra C12.
+5. En cómputo exacto NO se debe reemplazar el grafo físico
+   por el subgrafo A*: se eliminan demandas, NO las aristas
+   físicas de incidencia que fijan conflictos. Éste es
+   un detalle crítico para los certificados de Jacobian/Certo.
+
+El crux universal se ha localizado ahora de forma
+exacta al núcleo A*, aunque éste puede seguir siendo grande.
