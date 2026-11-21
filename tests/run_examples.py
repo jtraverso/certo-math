@@ -91,8 +91,8 @@ CASES = [
     ("walkthrough_ideal.py", "ideal", []),
     ("walkthrough_proof.py", "compose", []),
     ("packing_mixed.py", "opt", ["--by-type"]),
-    ("erdos149_arco3_cegis_degree.py", "synth", ["--prove-candidate"]),
-    ("erdos149_arco3_degree4_counterexample.py", "prove", []),
+    ("erdos149_arco3_cegis_degree.py", "synth", ["--prove-candidate", "--trace"], 0),
+    ("erdos149_arco3_degree4_counterexample.py", "prove", [], 0),
     ("synth_constant.py", "synth", []),
     ("synth_helpers.py", "synth", []),
     ("synth_none.py", "synth", []),
@@ -194,6 +194,8 @@ def run(args, label, expect=None):
     p = subprocess.run([sys.executable, "-m", "certo.cli", *args],
                        cwd=ROOT, capture_output=True, text=True, env=ENV,
                        encoding="utf-8", errors="replace", timeout=900)
+    if "erdos149" in label.lower():
+        print("[ERDOS149 CERTO] {} exit={}\\n{}".format(label, p.returncode, (p.stdout + p.stderr)[-1800:]))
     if expect is not None:
         # An example that exists to be REJECTED has to be rejected: a linter
         # whose failing case starts passing is the failure that hides itself.
