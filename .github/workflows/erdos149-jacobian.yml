@@ -130,6 +130,13 @@ jobs:
             certo prove "$f" --cert "out/$(basename "$f" .py).json"
             certo verify "out/$(basename "$f" .py).json"
           done
+      - name: S600 C19 exact thin-collar physical two-layer test
+        run: python research/erdos149/s600_c5_collar.py
+      - name: S600 C19 Certo scalar near-half and 37/35 bound
+        run: |
+          certo lint examples/erdos149_s600_c19_collar_scalar.py
+          certo prove examples/erdos149_s600_c19_collar_scalar.py --cert out/s600_c19_collar_scalar.json
+          certo verify out/s600_c19_collar_scalar.json
       - name: Bundle audit summary
         if: always()
         run: |
