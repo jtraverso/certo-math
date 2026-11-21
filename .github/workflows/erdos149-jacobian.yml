@@ -89,6 +89,13 @@ jobs:
           certo lint examples/erdos149_s599_exterior_budget.py
           certo prove examples/erdos149_s599_exterior_budget.py --cert out/s599_exterior_budget.json
           certo verify out/s599_exterior_budget.json
+      - name: S599 exact global C15 dual contradiction
+        run: |
+          certo lint examples/erdos149_s599_c15_slack_exterior.py
+          certo prove examples/erdos149_s599_c15_slack_exterior.py --cert out/s599_c15_slack_exterior.json
+          certo verify out/s599_c15_slack_exterior.json
+      - name: S599 tuned 3-connected old-palette slack certificate
+        run: python research/erdos149/s599_c15_tuned_pg4.py
       - name: Bundle audit summary
         if: always()
         run: |
