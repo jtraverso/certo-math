@@ -45,7 +45,7 @@ def run():
     assert old_cost==F(23541,32000)<1
     core=analyze(d)
     assert core["core_nonroot"]>0 and core["anchored_nonroot"]>0
-    support={key(e) for e in core["core_nonroot_edges"]}
+    support={key(e) for e in core["core_edges"]}
     support|={e for e in E if d["s"] in e or d["t"] in e}
     V={v for e in support for v in e}
     physical=nx.Graph();physical.add_nodes_from(V)
