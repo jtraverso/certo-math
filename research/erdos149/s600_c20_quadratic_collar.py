@@ -12,7 +12,7 @@ from s600_c5_collar import check as collar
 
 def canon(e):return tuple(sorted(map(str,e)))
 
-def build(data,cycle):
+def build(data,cycle,balanced=False):
     m={str(v):F(str(w)) for v,w in data["masses"].items()}
     E,w,conf,S,T,ab=load_model(data)
     ix={e:i for i,e in enumerate(E)}
@@ -31,13 +31,57 @@ def build(data,cycle):
     second=[i for i,e in enumerate(E) if not(V&set(e)) and (X&set(e))]
     good=[i for i in second if any(j not in conf[i] for j in C)]
     bad=[i for i in second if i not in good]
+    # C21 mode: all cycle masses <=1/2. Classify exterior vertices
+    # by their number of physical cycle neighbors; near-tightness
+    # forbids three or more such neighbors.
+    if balanced:
+        assert all(m[v]<=F(1,2) for v in cycle)
+        near={u:set(adj[u]&V) for u in X}
+        X1={u for u in X if len(near[u])==1}
+        X2={u for u in X if len(near[u])==2}
+        assert X==X1|X2
+        first1=[i for i in first if any(u in X1 for u in E[i])]
+        first2=[i for i in first if any(u in X2 for u in E[i])]
+        assert set(first)==set(first1+first2)
+        bad_ds=[i for i in bad if len(set(E[i])&X1)==1 and len(set(E[i])&X2)==1]
+        bad_dd=[i for i in bad if set(E[i])<=X2]
+        assert set(bad)==set(bad_ds+bad_dd)
     W1=sum((w[i] for i in first),F())
     Wgood=sum((w[i] for i in good),F())
     Wbad=sum((w[i] for i in bad),F())
     assert Wbad<F(144,35)*ab*ab
+    if balanced:
+        # Exact Horn dual decomposition. alpha_i>=0 is the
+        # nonnegative price for a cycle row. Every X2-X2 edge
+        # is paid by these prices, regardless of which C5 slots
+        # it blocks; X1-X2 bad edges cost <= all X1 crossing demand.
+        alpha={v:(1-2*m[v])/4 for v in cycle}
+        assert all(q>=0 for q in alpha.values())
+        caps={v:1-sum((m[q] for q in (adj[v]&V)),F()) for v in cycle}
+        assert all(q>=0 for q in caps.values())
+        Horn=K-sum((m[v] for v in cycle),F())+W5
+        assert Horn==sum((alpha[v]*caps[v] for v in cycle),F())
+        charge=sum((m[u]*(1-sum((m[v] for v in near[u]),F()))/2 for u in X2),F())
+        Wbad_dd=sum((w[i] for i in bad_dd),F())
+        Wbad_ds=sum((w[i] for i in bad_ds),F())
+        Wfirst1=sum((w[i] for i in first1),F())
+        M1=sum((m[u] for u in X1),F())
+        M2=sum((m[u] for u in X2),F())
+        L=F(1,2)-2*ab
+        assert 2*L*M2<=W1
+        assert Wbad_ds<=M1*M2<=Wfirst1
+        assert Wbad_dd<=charge<=Horn<=K-W5-W1
+        insert_free=good+first1
+        insert_paid=first2+bad
+    else:
+        insert_free=good
+        insert_paid=first+bad
     free_min=min((w[j]*(W5-B)/W5 for j in C))
-    assert Wgood<free_min
-    if W5+W1+Wbad>K:
+    free_demand=sum((w[i] for i in insert_free),F())
+    assert free_demand<free_min
+    paid_demand=sum((w[i] for i in insert_paid),F())
+    if balanced:assert W5+paid_demand<=K
+    if W5+paid_demand>K:
         return {"status":"INCONCLUSIVE","exceptional_mass":str(Wbad),
                 "free_budget":str(K-W5-W1)}
     # Root Hall colors replicated proportionally over each C5 color slot,
@@ -48,7 +92,7 @@ def build(data,cycle):
             if mask:  # do not scale the K-B empty tail; redistribute only root demand
                 palette.append((frozenset(set(mask)|{j}),width*w[j]/W5))
         palette.append((frozenset((j,)),w[j]*(W5-B)/W5))
-    for i in good:
+    for i in insert_free:
         slot=next(j for j in C if j not in conf[i])
         need=w[i];other=[]
         for M,width in palette:
@@ -60,7 +104,7 @@ def build(data,cycle):
             else:other.append((M,width))
         assert need==0,(i,E[i])
         palette=other
-    for i in first+bad:palette.append((frozenset((i,)),w[i]))
+    for i in insert_paid:palette.append((frozenset((i,)),w[i]))
     remaining=K-sum((width for _,width in palette),F())
     assert remaining>=0
     if remaining:palette.append((frozenset(),remaining))
@@ -75,12 +119,25 @@ def build(data,cycle):
     assert set(got)==demand and all(got[i]==w[i] for i in demand)
     assert sum((v for _,v in palette),F())==K
     assert J==min(rs,rt)>=D
-    return {"status":"PASS_C20_SUPPORT","vertices":len(m),"edges":len(E),
+    return {"status":"PASS_C21_BALANCED_SUPPORT" if balanced else "PASS_C20_SUPPORT",
+        "balanced_mode":balanced,"vertices":len(m),"edges":len(E),
         "covered":len(demand),"uncovered":len(E)-len(demand),
         "W5":str(W5),"W1":str(W1),"W2_good":str(Wgood),
         "W2_exceptional":str(Wbad),"spare":str(remaining),
+        "C21_Horn_slack":str(Horn) if balanced else None,
+        "C21_bad_DD":str(Wbad_dd) if balanced else None,
+        "C21_bad_DS":str(Wbad_ds) if balanced else None,
         "J":str(J),"D":str(D),"palette_classes":len(palette),
         "universal_G1":"OPEN unless uncovered=0"}
+
+def build_balanced(data,cycle):
+    """Universal C21 support constructor when all 5 cycle masses <=1/2.
+
+    It never needs the old C20 exceptional budget check; all physical
+    annulus edges are paid by the Horn-Mantel row identity or by
+    relocating one-contact crossing edges into C5 colors.
+    """
+    return build(data,cycle,balanced=True)
 
 def fixture():
     eps=F(1,1000);c=(1-eps)/2
