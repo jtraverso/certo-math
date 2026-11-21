@@ -31,6 +31,8 @@ jobs:
           certo lint examples/erdos149_arco3_cegis_degree.py
           certo opt examples/erdos149_arco3_palette_path.json --cert out/erdos149_path_certo.json
           certo verify out/erdos149_path_certo.json
+      - name: C11 simultaneous blocker exact tests
+        run: python research/erdos149/test_s596_c11.py
       - name: Jacobian independent exact physical-LP solve
         run: python research/erdos149/verify_with_jacobian.py
       - name: Bundle audit summary
