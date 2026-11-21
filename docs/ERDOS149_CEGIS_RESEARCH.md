@@ -61,3 +61,78 @@ At eps=1/1000000, exact fractions:
 Yet in the **full graph F with arc s-u-v-t**, the tree side stays bipartite (its cycle has length 14) and gluing at the articulation again yields `Q_F=5c²<K`. Therefore this is a falsification of the hoped-for SUFFICIENCY of the scalar filters, **not** a falsification of Erdős #149.
 
 The proper next CEGIS search must enforce *2-connectivity / absence of clique separators* in addition to the physical rows, exact reserve LP and the already proved short-arc reduction constraints. Without a universal finite reduction, bounded graph exploration cannot close Erdős #149.
+
+
+## NEW conditional analytical closure: old degree 4 with heavier root >= 7/10
+
+**Mathematical status: PASS conditional on the S593 directed-blocker lemma (593.6).**
+This is a new universal **subcase** of the arc-3 local gate, not the global
+arc-3 theorem, and not a proof of Erdős #149. Certo files certify three
+algebraic obligations, NOT the S593 recoloring premise.
+
+Let `x=max(m_s,m_t)` (swap roots so x>=y), and consider the S591 heavy
+residual: `1/2<=y<=x<3/4`, `a,b>=0`, `a+b<1/6`, `D>0`,
+`J<D`, `p<=1-a`. Assume `deg_H(s)<=4` and `x>=7/10`.
+
+**Pigeonhole:** from `J<D`, the total root-s-exclusive measure is
+`r_s-J > K-y`. Each class contains exactly one old s-root edge, and each
+root edge `sw` consumes total at most `x*m_w`. Thus at least one
+neighbor `w` whose root-edge has positive exclusive measure satisfies
+
+`m_w >= m0=(K-y)/(4*x)`.
+
+The directed-blocker lemma (S593, Eq. 593.6), a **conditional premise**,
+says this same neighbor must obey
+
+`(1-x)*(1-a-m_w) + y*a*b/m_w > 1/4`.
+
+Its left side is decreasing in `m_w>0`; it suffices to prove for `m0`:
+
+`f=(1-x)*(1-a-m0)+y*a*b/m0-1/4 <= 0`.
+
+Using `b<=1/6-a`, put `t=1-x`, `m0=(5/4-y)/(4x)`. Complete the square:
+
+`f <= t*(1-m0)-1/4 + a*(y/(6*m0)-t) - y*a*a/m0`
+
+`    <= B(x,y)=t*(1-m0)-1/4 + y/(144*m0)-t/12+t*t*m0/(4*y)`.
+
+The stationary point is positive throughout the region, because
+
+`2*x*y-3*(1-x)*(5/4-y)>0`.
+
+Independently, B is strictly increasing in y on
+`x in [7/10,3/4], y in [1/2,x]`, since
+
+`dB/dy= t/(4*x)*(1-5*t/(16*y*y)) + 5*x/(9*(4*y-5)**2)>0.`
+
+The first parenthesis is at least `5/8`; the second term is positive.
+Thus `B(x,y) <= B(x,x)` and an exact simplification gives
+
+`B(x,x)=N(x)/(576*x*x*(4*x-5))`
+`N(x)= -2896*x**4 + 6840*x**3-5349*x*x +1710*x-225`.
+
+The denominator is negative for x<5/4. The numerator is positive on
+`[7/10,3/4]`, by exact elementary differentiation:
+
+- `N'''(x) = -69504*x+41040 < 0`,
+- `N''(3/4)=534 >0`, so N''>0 on this interval,
+- `N'(7/10)=37861/125>0`, so N'>0,
+- `N(7/10)=4451/2500>0`, so N>0.
+
+Therefore `B(x,y) <= B(x,x) <0`. This contradicts S593 (593.6).
+**Conditional conclusion: any graph with old degree<=4 at its heavier
+root and x>=7/10 passes the arc-3 reinsertion gate.**
+
+Certo exact fragments:
+- `certo prove examples/erdos149_arco3_degree4_heavy_vertex.py`
+  certifies positivity of the stationary point condition.
+- `certo prove examples/erdos149_arco3_degree4_heavy_slope.py`
+  certifies the positive factor in dB/dy.
+- `certo prove examples/erdos149_arco3_degree4_heavy_diagonal.py`
+  certifies the quartic N(x)>0 on [7/10,3/4].
+
+All 3 run in `tests/run_examples.py` with conclusive-only assertions.
+
+**Remaining OPEN cases** include the old-degree-4 slice
+`x<7/10`, all higher degrees, and the universal assumption behind
+S593. The whole Erdős–Nešetřil conjecture is OPEN.
