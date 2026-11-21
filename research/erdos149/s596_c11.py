@@ -5,7 +5,7 @@ induced matching containing r must carry heavy edges blocking every
 compatible t-root type that appears t-exclusive. This is stronger than
 the pairwise capacities underlying C10.
 
-The test is exact rational, exhaustive within max_states, and returns
+The test is exact rational, searches 2**k opposite-root target masks, and returns
 UNKNOWN (never PASS) if the state budget is hit. A PASS additionally
 requires Q_H <= 5/4, which must be certified separately.
 """
@@ -61,24 +61,54 @@ def evaluate(data,max_states=500000):
                 if compatible(e,root):
                     qidx=frozenset(i for i,q in enumerate(good) if not compatible(e,q))
                     if qidx:cand.append((e,qidx))
+            # Exact type-cover branch-and-bound: at most k selected heavy
+            # edges are needed to cover k opposite-root types. Enumerate
+            # 2**k target masks, NOT all matchings of heavy edges.
             best=F();witness=();states=[0]
-            def rec(j,sel,covered):
-                nonlocal best,witness
-                states[0]+=1
-                if states[0]>max_states:return
-                val=sum((w[good[k]] for k in covered),F())
-                if val>best:
-                    best=val;witness=tuple(sel)
-                for i in range(j,len(cand)):
-                    e,cover=cand[i]
-                    if all(compatible(e,f) for f in sel):
-                        rec(i+1,sel+[e],covered|cover)
-                        if states[0]>max_states:return
-            rec(0,[],frozenset())
-            if states[0]>max_states:
-                return {"status":"UNKNOWN","side":side,"root":list(root),
-                        "reason":"matching_enumeration_budget_exhausted",
-                        "visited":states[0],"limit":max_states}
+            k=len(good)
+            n=len(cand)
+            if n and k:
+                masks=[sum(1<<j for j in cover) for _,cover in cand]
+                cmasks=[sum((1<<j for j,(f,_) in enumerate(cand)
+                             if i!=j and compatible(e,f)),0)
+                        for i,(e,_) in enumerate(cand)]
+                hitters=[sum((1<<i for i,mask in enumerate(masks)
+                              if mask & (1<<j)),0) for j in range(k)]
+                def weight(mask):
+                    return sum((w[good[j]] for j in range(k)
+                                if mask & (1<<j)),F())
+                def exists(needed,available):
+                    states[0]+=1
+                    if states[0]>max_states:raise OverflowError()
+                    if needed==0:return ()
+                    targets=[j for j in range(k) if needed & (1<<j)]
+                    target=min(targets,
+                               key=lambda j:(hitters[j]&available).bit_count())
+                    bits=hitters[target]&available
+                    while bits:
+                        bit=bits&-bits
+                        i=bit.bit_length()-1
+                        bits-=bit
+                        rest=exists(needed & ~masks[i],available & cmasks[i])
+                        if rest is not None:return (i,)+rest
+                    return None
+                try:
+                    for target in sorted(range(1<<k),key=weight,reverse=True):
+                        seq=exists(target,(1<<n)-1)
+                        if seq is not None:
+                            best=weight(target)
+                            witness=tuple(cand[i][0] for i in seq)
+                            break
+                except OverflowError:
+                    return {"status":"UNKNOWN","side":side,"root":list(root),
+                            "reason":"matching_enumeration_budget_exhausted",
+                            "visited":states[0],"limit":max_states}
+            else:
+                states[0]=1
+                if states[0]>max_states:
+                    return {"status":"UNKNOWN","side":side,"root":list(root),
+                            "reason":"matching_enumeration_budget_exhausted",
+                            "visited":states[0],"limit":max_states}
             critical=direct+best>K-x
             if critical:hard_total+=w[root]
             results.append({"root":list(root),"weight":str(w[root]),"I":str(direct),
