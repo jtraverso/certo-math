@@ -119,6 +119,8 @@ jobs:
       - name: run every example and verify its certificate
         shell: bash
         run: python tests/run_examples.py
+      - name: exact physical cross-flow tests (Erdos149 S595)
+        run: python tests/test_erdos149_s595.py
 
   # `certo export --lean` claims its output compiles. That claim is the one
   # most likely to be wrong -- it took three rounds against a real compiler to
