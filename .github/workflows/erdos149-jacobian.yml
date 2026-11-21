@@ -73,6 +73,15 @@ jobs:
           certo verify out/s597_twoscale_budget.json
       - name: S597 weighted core exact replay and near-tight 3-connected adversary
         run: python research/erdos149/test_s597_weighted_core.py
+      - name: S598 true-twin and false-twin exact quotient replay
+        run: |
+          python research/erdos149/test_s598_conflict_twins.py
+          python research/erdos149/test_s598_false_twins.py
+      - name: S598 Certo dual-negative localization inequality
+        run: |
+          certo lint examples/erdos149_s598_dual_negative.py
+          certo prove examples/erdos149_s598_dual_negative.py --cert out/s598_dual_negative.json
+          certo verify out/s598_dual_negative.json
       - name: Bundle audit summary
         if: always()
         run: |
