@@ -12,7 +12,8 @@ from s600_c5_collar import check as collar
 
 def canon(e):return tuple(sorted(map(str,e)))
 
-def build(data,cycle,balanced=False):
+def build(data,cycle,balanced=False,signed=False):
+    if signed:balanced=True
     m={str(v):F(str(w)) for v,w in data["masses"].items()}
     E,w,conf,S,T,ab=load_model(data)
     ix={e:i for i,e in enumerate(E)}
@@ -31,11 +32,12 @@ def build(data,cycle,balanced=False):
     second=[i for i,e in enumerate(E) if not(V&set(e)) and (X&set(e))]
     good=[i for i in second if any(j not in conf[i] for j in C)]
     bad=[i for i in second if i not in good]
-    # C21 mode: all cycle masses <=1/2. Classify exterior vertices
+    # C21 mode: masses <=1/2; C22 signed mode allows all C5 masses.
+    # Classify exterior vertices
     # by their number of physical cycle neighbors; near-tightness
     # forbids three or more such neighbors.
     if balanced:
-        assert all(m[v]<=F(1,2) for v in cycle)
+        if not signed:assert all(m[v]<=F(1,2) for v in cycle)
         near={u:set(adj[u]&V) for u in X}
         X1={u for u in X if len(near[u])==1}
         X2={u for u in X if len(near[u])==2}
@@ -56,7 +58,7 @@ def build(data,cycle,balanced=False):
         # is paid by these prices, regardless of which C5 slots
         # it blocks; X1-X2 bad edges cost <= all X1 crossing demand.
         alpha={v:(1-2*m[v])/4 for v in cycle}
-        assert all(q>=0 for q in alpha.values())
+        if not signed:assert all(q>=0 for q in alpha.values())
         caps={v:1-sum((m[q] for q in (adj[v]&V)),F()) for v in cycle}
         assert all(q>=0 for q in caps.values())
         Horn=K-sum((m[v] for v in cycle),F())+W5
@@ -70,7 +72,26 @@ def build(data,cycle,balanced=False):
         L=F(1,2)-2*ab
         assert 2*L*M2<=W1
         assert Wbad_ds<=M1*M2<=Wfirst1
-        assert Wbad_dd<=charge<=Horn<=K-W5-W1
+        if signed:
+            # Signed Horn charge. Every negative alpha contribution
+            # is canceled by the row slack or by the one-contact
+            # crossing-edge credit. No alpha_i>=0 hypothesis needed.
+            Q1={v:sum((m[u] for u in X1 if v in near[u]),F()) for v in cycle}
+            Q2={v:sum((m[u] for u in X2 if v in near[u]),F()) for v in cycle}
+            slack={v:caps[v]-Q1[v]-Q2[v] for v in cycle}
+            assert all(x>=0 for x in slack.values())
+            gamma={v:m[v]+alpha[v] for v in cycle}
+            assert all(x>0 for x in gamma.values())
+            assert Horn==sum((alpha[v]*(Q1[v]+Q2[v]+slack[v]) for v in cycle),F())
+            assert K-W5-W1==Horn+sum((m[v]*slack[v] for v in cycle),F())
+            Wfirst2=sum((w[i] for i in first2),F())
+            credit=sum((gamma[v]*(Q1[v]+slack[v]) for v in cycle),F())
+            assert Wbad_dd<=charge
+            assert K-W5-Wfirst2-Wbad_dd>=credit
+            assert Wbad_ds<=M1*M2<=sum((gamma[v]*Q1[v] for v in cycle),F())
+            assert K-W5-Wfirst2-Wbad_dd-Wbad_ds>=0
+        else:
+            assert Wbad_dd<=charge<=Horn<=K-W5-W1
         insert_free=good+first1
         insert_paid=first2+bad
     else:
@@ -119,14 +140,15 @@ def build(data,cycle,balanced=False):
     assert set(got)==demand and all(got[i]==w[i] for i in demand)
     assert sum((v for _,v in palette),F())==K
     assert J==min(rs,rt)>=D
-    return {"status":"PASS_C21_BALANCED_SUPPORT" if balanced else "PASS_C20_SUPPORT",
-        "balanced_mode":balanced,"vertices":len(m),"edges":len(E),
+    return {"status":"PASS_C22_SIGNED_SUPPORT" if signed else ("PASS_C21_BALANCED_SUPPORT" if balanced else "PASS_C20_SUPPORT"),
+        "balanced_mode":balanced,"signed_mode":signed,"vertices":len(m),"edges":len(E),
         "covered":len(demand),"uncovered":len(E)-len(demand),
         "W5":str(W5),"W1":str(W1),"W2_good":str(Wgood),
         "W2_exceptional":str(Wbad),"spare":str(remaining),
         "C21_Horn_slack":str(Horn) if balanced else None,
         "C21_bad_DD":str(Wbad_dd) if balanced else None,
         "C21_bad_DS":str(Wbad_ds) if balanced else None,
+        "C22_signed_credit":str(credit) if signed else None,
         "J":str(J),"D":str(D),"palette_classes":len(palette),
         "universal_G1":"OPEN unless uncovered=0"}
 
@@ -138,6 +160,15 @@ def build_balanced(data,cycle):
     relocating one-contact crossing edges into C5 colors.
     """
     return build(data,cycle,balanced=True)
+
+def build_general(data,cycle):
+    """C22 universal TWO-RING support constructor for any near-tight C5.
+
+    Uses signed alpha_i=(1-2m_i)/4 and its exact cancellation with
+    one-contact crossing credit and row slacks. Original C20/C21
+    implementations and their input contracts remain unchanged.
+    """
+    return build(data,cycle,signed=True)
 
 def fixture():
     eps=F(1,1000);c=(1-eps)/2
