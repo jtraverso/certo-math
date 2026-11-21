@@ -1,0 +1,58 @@
+"""S597 exact weighted-core and adversarial graph checks.
+
+Everything is checked using Fraction (no floating point), except the
+independent 3-connectivity test via NetworkX.  Inconclusive filters
+must remain INCONCLUSIVE; they are not falsifications of Erdős #149.
+"""
+import sys,json
+from pathlib import Path
+from fractions import Fraction as Q
+import networkx as nx
+
+HERE=Path(__file__).resolve().parent
+ROOT=HERE.parents[1]
+sys.path.insert(0,str(HERE))
+sys.path.insert(0,str(HERE.parent))
+from s597_verify_static_palettes import decode
+from s597_weighted_core import analyze,verify
+from s597_pg4_3conn_hard import build,budget
+from erdos149_s595_neartight import build as build_617
+from erdos149_s595_cross_flow import evaluate as c10
+from s596_c11 import evaluate as c11
+
+cases=[
+    ("tree23",decode("tree23"),22,4,8),
+    ("core18",decode("core18"),39,8,2),
+    ("nearK_617",build_617(),1049,8,170),
+]
+for name,data,m,root,heavy in cases:
+    p=analyze(data);assert verify(data,p)
+    assert p["status"]=="PASS_ROOT_ONLY",(name,p)
+    assert p["edges"]==m and p["core_nonroot"]==0 and p["initial_heavy"]==heavy,p
+    assert p["removed_count"]==m-root
+    assert Q(p["root_flow"])==min(Q(p["r_s"]),Q(p["r_t"]))
+    print(json.dumps({"name":name,"status":p["status"],"peeled":p["removed_count"],
+                      "initial_heavy":p["initial_heavy"],"residual_core":0}))
+
+hard=build();assert len(hard["masses"])==70 and len(hard["edges"])==157
+G=nx.Graph();G.add_nodes_from(hard["masses"]);G.add_edges_from(hard["edges"])
+assert nx.node_connectivity(G)>=3
+assert min(dict(G.degree()).values())>=3
+assert not nx.is_bipartite(G)
+assert all(Q(w)>0 and Q(w)<Q(3,4) for w in hard["masses"].values())
+masks=budget()
+assert Q(masks["QH_lower"])>Q(5,4)-Q(1,400)
+assert Q(masks["QF_upper"])<Q(5,4)
+p=analyze(hard);assert verify(hard,p)
+assert p["status"]=="OPEN_KERNEL",p
+assert p["core_nonroot"]==p["anchored_nonroot"]==111,p
+assert p["removed_count"]==38,p
+r10=c10(hard);r11=c11(hard,100000)
+assert r10["status"]=="INCONCLUSIVE" and r10["nu_cross"]=="133/100",r10
+assert r11["status"]=="INCONCLUSIVE" and r11["heavy"]==126,r11
+print(json.dumps({"name":"GF4_70_3conn_nearK","status":"OPEN_KERNEL",
+    "connected":True,"three_connected":True,"bipartite":False,
+    "n":len(G),"m":G.number_of_edges(),
+    "core_nonroot":p["core_nonroot"],"anchored_nonroot":p["anchored_nonroot"],
+    "C10":r10["status"],"C11":r11["status"],"C10_flow":r10["nu_cross"],
+    **masks},ensure_ascii=False))
