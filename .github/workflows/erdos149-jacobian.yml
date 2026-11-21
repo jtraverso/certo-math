@@ -137,6 +137,13 @@ jobs:
           certo lint examples/erdos149_s600_c19_collar_scalar.py
           certo prove examples/erdos149_s600_c19_collar_scalar.py --cert out/s600_c19_collar_scalar.json
           certo verify out/s600_c19_collar_scalar.json
+      - name: S600 C20 physically complete rational 2-layer collar palette
+        run: python research/erdos149/s600_c20_quadratic_collar.py
+      - name: S600 C20 Certo cycle slot and exceptional quadratic bounds
+        run: |
+          certo lint examples/erdos149_s600_c20_scalar.py
+          certo prove examples/erdos149_s600_c20_scalar.py --cert out/s600_c20_scalar.json
+          certo verify out/s600_c20_scalar.json
       - name: Bundle audit summary
         if: always()
         run: |
