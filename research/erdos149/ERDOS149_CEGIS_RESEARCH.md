@@ -1,0 +1,175 @@
+# Erdős #149: Certo / CEGIS, sesion 594 (scope-limited)
+
+This is a **research exercise, not a proof of the open conjecture**.
+The user-supplied document, sessions 591–593, reduces a 3-edge arc to
+finding a palettisation of measure K=5/4 with reserve J>=D.
+
+**Question here:** Can the exact scalar bound of session 593 (593.degree)
+be extended from roots of old degree three to old degree four without any
+new physical constraint?
+
+In the symmetric slice x=y, a=b=1/200 and p=q=1-a, with
+13/20 <= x <= 7/10, put L=5/4-x and m0=L/(d*x).
+The bound asks whether
+
+(1-x)*(p-m0) + x*a*a/m0 <= 1/4.
+
+All denominators d*x*L are positive; the implementation checks the
+equivalent numerator
+
+G(d,x) = ((1-x)*(1-a)-1/4)*d*x*L - (1-x)*L**2
+         + x*a*a*(d*x)**2.
+
+- `certo synth examples/erdos149_arco3_cegis_degree.py --prove-candidate`
+  synthesizes the largest integer d in [1,6] passing the finite instances
+  x=13/20, 7/10 and *separately* attempts to prove the chosen d for **all**
+  real x in [13/20,7/10]. Distinguish the two certificate statuses.
+- `certo prove examples/erdos149_arco3_degree4_counterexample.py`
+  finds that d=4 is not established by this bound at x=13/20.
+
+Exact independent test:
+x=y=13/20, a=b=1/200, p=q=199/200 yields
+D = 1741/40000 >0.
+At d=3 the original inequality has margin
+-390603/41600000 < 0; at d=4 it has margin
+547597/31200000 > 0.
+
+**Mathematical status:** the 3-edge arc universal and Erdos #149 are
+OPEN. A positive G only invalidates the *sufficient scalar test*, not
+the claim itself. The next needed step is to encode physical graph
+incidences and exact palette LP as a domain verifier for CEGIS.
+
+
+## Physical stress family: why scalar filters alone do not close arc-3
+
+For each rational `0<eps<1/100000`, run `python research/erdos149_s594_stress.py 1/1000000 > H.json` (use a rational smaller than the displayed upper bound). The generator produces a **connected** graph with 400 vertices and 400 edges. It is a tree with eight layered branches attached to heavy roots `x=y=13/20`, plus a remotely attached `C5`. It has articulations, so it is *not* an eligible minimal counterexample.
+
+Set `a=b=1/200` and `c=(1-eps)/2` for the cycle masses. The weighted clique-separator lemma and the bipartite bound imply
+
+`Q_H=5c^2=5(1-eps)^2/4`, which lies strictly between `K-ab` and `K`. Indeed, the 5 cycle edges are pairwise conflicting; the pendant edge can share the cycle color for the opposite edge.
+
+At eps=1/1000000, exact fractions:
+
+- `Q_H=999998000001/800000000000`
+- `K-Q_H=1999999/800000000000`
+- `D=1741/40000`
+- S592 global flow: `2587/2000 > 3/5` (no proof).
+- Every S593 directed flow: `2443/4000 > 3/5` (no proof).
+- Both root hard-neighbor masses: `199/200` (no proof).
+- Old root degree 4 (scalar gate no proof); no A-B cross edges.
+
+Yet in the **full graph F with arc s-u-v-t**, the tree side stays bipartite (its cycle has length 14) and gluing at the articulation again yields `Q_F=5c²<K`. Therefore this is a falsification of the hoped-for SUFFICIENCY of the scalar filters, **not** a falsification of Erdős #149.
+
+The proper next CEGIS search must enforce *2-connectivity / absence of clique separators* in addition to the physical rows, exact reserve LP and the already proved short-arc reduction constraints. Without a universal finite reduction, bounded graph exploration cannot close Erdős #149.
+
+
+## NEW conditional analytical closure: old degree 4 with heavier root >= 7/10
+
+**Mathematical status: PASS conditional on the S593 directed-blocker lemma (593.6).**
+This is a new universal **subcase** of the arc-3 local gate, not the global
+arc-3 theorem, and not a proof of Erdős #149. Certo files certify three
+algebraic obligations, NOT the S593 recoloring premise.
+
+Let `x=max(m_s,m_t)` (swap roots so x>=y), and consider the S591 heavy
+residual: `1/2<=y<=x<3/4`, `a,b>=0`, `a+b<1/6`, `D>0`,
+`J<D`, `p<=1-a`. Assume `deg_H(s)<=4` and `x>=7/10`.
+
+**Pigeonhole:** from `J<D`, the total root-s-exclusive measure is
+`r_s-J > K-y`. Each class contains exactly one old s-root edge, and each
+root edge `sw` consumes total at most `x*m_w`. Thus at least one
+neighbor `w` whose root-edge has positive exclusive measure satisfies
+
+`m_w >= m0=(K-y)/(4*x)`.
+
+The directed-blocker lemma (S593, Eq. 593.6), a **conditional premise**,
+says this same neighbor must obey
+
+`(1-x)*(1-a-m_w) + y*a*b/m_w > 1/4`.
+
+Its left side is decreasing in `m_w>0`; it suffices to prove for `m0`:
+
+`f=(1-x)*(1-a-m0)+y*a*b/m0-1/4 <= 0`.
+
+Using `b<=1/6-a`, put `t=1-x`, `m0=(5/4-y)/(4x)`. Complete the square:
+
+`f <= t*(1-m0)-1/4 + a*(y/(6*m0)-t) - y*a*a/m0`
+
+`    <= B(x,y)=t*(1-m0)-1/4 + y/(144*m0)-t/12+t*t*m0/(4*y)`.
+
+The stationary point is positive throughout the region, because
+
+`2*x*y-3*(1-x)*(5/4-y)>0`.
+
+Independently, B is strictly increasing in y on
+`x in [7/10,3/4], y in [1/2,x]`, since
+
+`dB/dy= t/(4*x)*(1-5*t/(16*y*y)) + 5*x/(9*(4*y-5)**2)>0.`
+
+The first parenthesis is at least `5/8`; the second term is positive.
+Thus `B(x,y) <= B(x,x)` and an exact simplification gives
+
+`B(x,x)=N(x)/(576*x*x*(4*x-5))`
+`N(x)= -2896*x**4 + 6840*x**3-5349*x*x +1710*x-225`.
+
+The denominator is negative for x<5/4. The numerator is positive on
+`[7/10,3/4]`, by exact elementary differentiation:
+
+- `N'''(x) = -69504*x+41040 < 0`,
+- `N''(3/4)=534 >0`, so N''>0 on this interval,
+- `N'(7/10)=37861/125>0`, so N'>0,
+- `N(7/10)=4451/2500>0`, so N>0.
+
+Therefore `B(x,y) <= B(x,x) <0`. This contradicts S593 (593.6).
+**Conditional conclusion: any graph with old degree<=4 at its heavier
+root and x>=7/10 passes the arc-3 reinsertion gate.**
+
+Certo exact fragments:
+- `certo prove examples/erdos149_arco3_degree4_heavy_vertex.py`
+  certifies positivity of the stationary point condition.
+- `certo prove examples/erdos149_arco3_degree4_heavy_slope.py`
+  certifies the positive factor in dB/dy.
+- `certo prove examples/erdos149_arco3_degree4_heavy_diagonal.py`
+  certifies the quartic N(x)>0 on [7/10,3/4].
+
+All 3 run in `tests/run_examples.py` with conclusive-only assertions.
+
+**Remaining OPEN cases** include the old-degree-4 slice
+`x<7/10`, all higher degrees, and the universal assumption behind
+S593. The whole Erdős–Nešetřil conjecture is OPEN.
+
+
+## Extension: degree <= 5 above x >= 73/100 (same conditional lemma)
+
+The very same degree-d argument works for arbitrary integer d, with
+`m_d=(5/4-y)/(d*x)` and
+`B_d(x,y)=(1-x)*(1-m_d)-1/4+y/(144*m_d)-(1-x)/12+(1-x)**2*m_d/(4*y)`.
+
+For `1/2<=y<=x<=3/4` and `x>=73/100`, the derivative
+
+`d B_d/d y = (1-x)/(d*x)*(1-5*(1-x)/(16*y**2)) + 5*d*x/(36*(5-4*y)**2)>0`
+
+is positive. For d=5 at y=x, the exact diagonal is
+
+`B_5(x,x)=N_5(x)/(720*x**2*(4*x-5))`
+
+where `N_5=-3460*x**4+7884*x**3-5829*x**2+1710*x-225`.
+The denominator is negative. N5 is positive throughout
+`[73/100,3/4]`: its third derivative is negative; its second derivative
+at 3/4 is 465; its first derivative at 73/100 is 2623847/6250; and its
+value at 73/100 is 7283947/5000000. Every inequality is exact.
+
+The optimal quadratic vertex is positive as
+`5*x*y > 6*(1-x)*(5/4-y)` everywhere in the region.
+
+Therefore, **conditional on S593 (593.6)**,
+
+`deg_H(heavier_root) <= 5, max(x,y)>=73/100 => J >= D.`
+
+Certo tests in the branch: `erdos149_arco3_degree5_heavy_diagonal.py`,
+plus the degree-4 vertex and monotonic tests for the common mechanism.
+The 5-root scalar envelope crosses zero near x=0.7265189136;
+the claim deliberately uses the safer rational threshold 73/100.
+
+For d=6 the diagonal envelope at x=y=3/4 is +1/1728; hence the same
+coarse argument cannot close all degree-6 cases. This DOES NOT imply a
+physical graph counterexample; it only limits the scalar test.
