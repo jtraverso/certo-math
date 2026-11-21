@@ -390,3 +390,140 @@ The bound is exact and valid for ANY physical graph satisfying the stated rows. 
 Verification: research/erdos149/s600_c5_collar.py checks two physical instances with fractions, while examples/erdos149_s600_c19_collar_scalar.py checks the real-algebra part using Certo. The graph-theoretic double-counting is proved above.
 
 **OPEN:** Neither Q_H nearly 5/4 implies the existence of a near-tight physical C5, nor does a small collar guarantee a global palette preserving the root overlap J. Thus the universal G1 obligation and Erdős #149 remain OPEN.
+
+
+## 10. C20 — Quadratic exceptional collar and a constructive two-layer absorber
+
+Maintain all hypotheses of C19: \(\delta=ab\in(0,1/144)\),
+\(W_5\ge K-\delta\), physical rows feasible, roots at distance
+at least 3 from the C5. The cycle is induced and its five
+individual edge demands satisfy
+
+    w(e_i) > L^2,  L=1/2-2delta >35/72.
+
+Let \(X=N_H(C5)\setminus C5\). First-layer edges are all
+edges crossing C5 to X, with total demand W1<=delta.
+Second-layer edges have no endpoint on C5 and at least one
+endpoint in X, with total demand W2<(37/35)delta.
+
+Classify each second-layer edge e:
+- **GOOD:** physically compatible with at least one C5 cycle edge;
+- **BAD:** physically incompatible with all five cycle edges.
+Write Wgood,Wbad for their total demands.
+
+### Universal quadratic bound on BAD edges
+
+For a bad second-layer edge e=uv, both u and v must belong
+to X: if only one endpoint sees C5, its adjacency set contains
+at most two cycle vertices, and those cannot meet all five
+cycle edges. Furthermore the union of the two C5-neighborhoods
+of u,v is a vertex cover of C5, hence has at least 3 vertices.
+Each endpoint has at most two C5 neighbors (three would already
+give neighbor load >3L>1); thus at least one endpoint u has
+T_u=|N_C5(u)|=2.
+
+For every such two-neighbor u, the two C5 masses total >2L,
+so the weighted load of neighbors outside C5 is <1-2L=4delta.
+Therefore the demand of BAD edges obeys
+
+    Wbad <= sum_(u in X: |N_C5(u)|=2) m_u d_(H-C5)(u)
+         < 4delta * sum_(u in X: |N_C5(u)|=2) m_u.
+
+But W1=sum_(u in X)m_u c(u), where
+c(u)=sum_(v in C5, v~u)m_v. For |N_C5(u)|=2,
+c(u)>2L, giving
+
+    Wbad < (2delta/L)*W1
+         <= (2/L)*delta^2
+         < (144/35)*delta^2.                   (C20.1)
+
+This improves C19's O(delta) collar to an O(delta^2)
+*unabsorbable* exceptional set. It does NOT assert that
+this exceptional demand is zero.
+
+### Universal absorption of all GOOD second-layer edges
+
+The Hall palette of the two root stars has width
+B=max(r_s,r_t)<3/4, with overlap m=min(r_s,r_t).
+Since all five cycle edges are compatible with all
+root edges, distribute each root color proportionally
+among the five cycle singleton slots: in C5 slot i
+of width w_i, allocate a scaled copy (factor w_i/W5)
+of the root Hall palette of total width B. This leaves
+a **root-free** subinterval of exact measure
+
+    f_i=w_i*(W5-B)/W5
+       > L^2*(1-(3/4)/(5/4-delta))
+       > (37/35)*delta > W2.
+
+The final strict inequality is elementary rational arithmetic
+on 0<delta<1/144: the left side at delta=1/144
+exceeds 0.0937, while the right side is below 0.00735.
+
+Every GOOD second-layer edge e has at least one cycle
+edge slot compatible with it. Insert its demand into
+root-free colors of that slot, avoiding already inserted
+GOOD edges. The total previously inserted GOOD demand
+is at most Wgood<=W2<f_i, so the measure of compatible
+root-free colors in this slot is at least
+f_i−Wgood>=w_e. Greedy measure subdivision works
+for every edge in any order and preserves all old
+root demands, the five cycle-edge demands and J=m.
+
+Pay the W1 crossing-edge demands and the Wbad exceptional
+demands in separate singleton bands. Thus the entire support
+
+    roots + C5 edges + first layer + second layer
+
+has a legal exact palette with overlap J=m and width
+
+    W5+W1+Wbad.
+
+**C20.2, conditional closure:** if
+
+    Wbad <= K-W5-W1,                              (C20.2)
+
+then this whole support fits in width K=5/4, with J=m>=D.
+For a full G1 instance whose old demands are entirely in this
+support, this **closes G1 completely**. For an arbitrary H
+it remains a partial palette which does NOT cover remote edges.
+
+### Nontrivial exact 20-edge instance
+
+The program
+research/erdos149/s600_c20_quadratic_collar.py
+constructs a graph with two heavy 4-edge root stars,
+an almost uniform C5 (each vertex mass 999/2000),
+three exterior vertices p,q,r of mass 1/1000, and one
+remote vertex h of mass 1/1000.
+Edges p-C0,p-C2,q-C3,q-C4,r-C1 are the first layer;
+p-q is BAD (blocks all five C5 slots), r-h is GOOD
+(compatible with some slots).
+
+Exact values:
+
+    W5=998001/800000,  W1=999/400000,
+    Wbad=Wgood=1/1000000,
+    K-W5-W1-Wbad=1/4000000.
+
+The built physical palette has 33 positive classes,
+covers **all 20 edges** exactly, has width K,
+and J=133/200>D=33/400.
+
+The code performs exact rational checks for ALL physical
+conflicts, all vertex rows, each demanded edge, and full
+palette width. This is a genuine nonzero exceptional example,
+not a universal G1 proof.
+
+### Remaining G1 OPEN
+
+The next obstacle within a near-tight C5 is to prove
+C20.2 for arbitrary physically feasible cycle collars,
+or derive a more flexible way to accommodate the O(delta^2)
+exceptional mass. A second, independent major obstacle is
+to prove that a near-K old fractional optimum necessarily
+has an isolatable near-tight physical C5; this is NOT
+known from S591-S600. Even C20.2 would leave arbitrary
+far remote old demands to be combined globally.
+
+**Do not mark G1 or Erdős #149 as solved.**
