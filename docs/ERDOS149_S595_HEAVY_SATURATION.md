@@ -143,3 +143,88 @@ las reducciones iniciales de S591 y el núcleo global no se recertifican aquí.
 5. Paso exacto de fractional a entero en la ruta ponderada.
 
 Erdős #149 sigue OPEN. Ningún ejemplo finito prueba su cierre universal.
+
+
+## Auditoría adversarial S595: 2-conectividad + coste casi K no fuerzan C10
+
+El generador `research/erdos149_s595_neartight.py` construye, para
+`eps=1/1000000`, un grafo físico H de 617 vértices y 1049 aristas con
+x=y=13/20, a=b=1/200 y D=1741/40000>0. No hay articulaciones
+(verificado por DFS en `tests/test_erdos149_s595.py`). El flujo cruzado
+resulta, con fracciones y mincorte repetido,
+
+    nu_cross = 2587/2000 = r_s+r_t,
+    threshold_exact = 2K-r_s-r_t-2ab = 24129/20000 = 1.20645.
+
+Por tanto C10 es INCONCLUSO aunque H sea 2-conexo. También refuta
+la hipótesis auxiliar `nu_cross<=1` para grafos 2-conexos.
+
+### Paleta legal y acotación exacta Q_H (incluyendo conectores físicos)
+
+El núcleo consta de un bosque bipartito T y un anillo cíclico de 432
+hojas W, agrupadas en 72 bloques consecutivos de seis hojas con el
+mismo padre D. Los extremos vecinos del anillo de bloques distintos
+introducen nuevos conflictos entre ciertas aristas del bosque;
+**no es correcto** aplicar sin más la cota bipartita a T dentro de H.
+
+Eliminamos de T la arista D-W de la **última hoja de cada bloque**.
+Las 72 aristas eliminadas forman un solo matching inducido físico,
+con máxima demanda `(3/4)*(1/8)=3/32`. En el bosque restante T',
+todas las nuevas incompatibilidades debidas al anillo desaparecen:
+cada arista del anillo que conecta bloques distintos toca una hoja
+cuya arista D-W fue retirada. Por lo tanto, la paleta bipartita de T'
+de ancho <=1 sigue siendo físicamente válida en el grafo completo H.
+
+Las aristas del anillo, que tiene longitud 432 divisible por 3, se
+dividen por índice módulo tres en tres matchings inducidos físicos,
+cada uno con demanda `1/64`. Sumando bandas disjuntas:
+
+    Q_core <= 1 + 3/32 + 3/64 = 73/64 < 5/4.
+
+Un C5 adicional de masas `c=(1-eps)/2` se conecta al anillo mediante
+dos caminos disjuntos W--omega--c0 y W'--omega'--c2, con masas
+`m_omega=m_omega'=eps`. Para mantener todas las filas <=1, se
+reducen las masas de los respectivos padres D,D' en eps. No hay
+aristas DIRECTAS entre vértices del núcleo y vértices del C5:
+sólo se conectan mediante los omega.
+
+Por ello la paleta del núcleo y la del C5 se pueden **superponer**
+(familias físicamente compatibles), dando coste
+`max(73/64, 5c^2)=5c^2` para todas las aristas anteriores a los
+conectores. Las cuatro aristas de los dos conectores se pagan
+en porciones disjuntas adicionales de medida total
+
+    E_connectors = 2eps(c+1/8).
+
+El C5 aporta una clique fuerte de cinco aristas, así que
+
+    5c² <= Q_H <= 5c² + 2eps(c+1/8) < 5/4.
+
+A eps=1/1000000 los valores exactos son
+
+    Q_H >= 999998000001/800000000000,
+    Q_H <= 4999995000001/4000000000000,
+    5/4-ab = 49999/40000.
+
+Esto da `5/4-ab < Q_H < 5/4`: no se aplica el cierre fácil
+`Q_H<=K-ab`.
+
+Se puede incluso reinsertar el arco completo en el ejemplo:
+en una banda separada de la paleta del núcleo pagamos las tres
+aristas nuevas, por un total
+`xa+ab+by=261/40000`. Como
+
+    73/64 + 261/40000 < 5c²,
+
+podemos superponer también el arco con la paleta del C5 (no existen
+aristas directas entre esos conjuntos de extremos). Los conectores
+siguen pagando exactamente E_connectors. Así
+
+    Q_F <= 5c² + E_connectors < 5/4.
+
+**Importante:** este grafo no es un contraejemplo a Erdős #149 ni un
+mínimo ponderado: contiene muchos vértices de grado dos y separadores
+de orden dos. Falsifica únicamente la suficiencia de C10 bajo las
+hipótesis 2-conectividad y `Q_H>K-ab`. Para cerrar universalmente el
+arco hay que imponer compatibilidad simultánea de los bloqueadores
+dentro de las paletas, o aprovechar reducciones adicionales.
