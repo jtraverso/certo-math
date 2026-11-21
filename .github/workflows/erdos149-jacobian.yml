@@ -154,6 +154,13 @@ jobs:
             certo prove "$f" --cert "out/$(basename "$f" .py).json"
             certo verify "out/$(basename "$f" .py).json"
           done
+      - name: S602 exact signed C5 full collar palette (mass >1/2)
+        run: python research/erdos149/test_s602_general_c5.py
+      - name: S602 Certo signed Horn exact cancellation
+        run: |
+          certo lint examples/erdos149_s602_signed_horn_budget.py
+          certo prove examples/erdos149_s602_signed_horn_budget.py --cert out/s602_signed_horn_budget.json
+          certo verify out/s602_signed_horn_budget.json
       - name: Bundle audit summary
         if: always()
         run: |
