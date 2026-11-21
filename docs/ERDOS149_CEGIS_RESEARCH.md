@@ -136,3 +136,40 @@ All 3 run in `tests/run_examples.py` with conclusive-only assertions.
 **Remaining OPEN cases** include the old-degree-4 slice
 `x<7/10`, all higher degrees, and the universal assumption behind
 S593. The whole Erdős–Nešetřil conjecture is OPEN.
+
+
+## Extension: degree <= 5 above x >= 73/100 (same conditional lemma)
+
+The very same degree-d argument works for arbitrary integer d, with
+`m_d=(5/4-y)/(d*x)` and
+`B_d(x,y)=(1-x)*(1-m_d)-1/4+y/(144*m_d)-(1-x)/12+(1-x)**2*m_d/(4*y)`.
+
+For `1/2<=y<=x<=3/4` and `x>=73/100`, the derivative
+
+`d B_d/d y = (1-x)/(d*x)*(1-5*(1-x)/(16*y**2)) + 5*d*x/(36*(5-4*y)**2)>0`
+
+is positive. For d=5 at y=x, the exact diagonal is
+
+`B_5(x,x)=N_5(x)/(720*x**2*(4*x-5))`
+
+where `N_5=-3460*x**4+7884*x**3-5829*x**2+1710*x-225`.
+The denominator is negative. N5 is positive throughout
+`[73/100,3/4]`: its third derivative is negative; its second derivative
+at 3/4 is 465; its first derivative at 73/100 is 2623847/6250; and its
+value at 73/100 is 7283947/5000000. Every inequality is exact.
+
+The optimal quadratic vertex is positive as
+`5*x*y > 6*(1-x)*(5/4-y)` everywhere in the region.
+
+Therefore, **conditional on S593 (593.6)**,
+
+`deg_H(heavier_root) <= 5, max(x,y)>=73/100 => J >= D.`
+
+Certo tests in the branch: `erdos149_arco3_degree5_heavy_diagonal.py`,
+plus the degree-4 vertex and monotonic tests for the common mechanism.
+The 5-root scalar envelope crosses zero near x=0.7265189136;
+the claim deliberately uses the safer rational threshold 73/100.
+
+For d=6 the diagonal envelope at x=y=3/4 is +1/1728; hence the same
+coarse argument cannot close all degree-6 cases. This DOES NOT imply a
+physical graph counterexample; it only limits the scalar test.
