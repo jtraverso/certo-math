@@ -12,7 +12,8 @@ from s600_c5_collar import check as collar
 
 def canon(e):return tuple(sorted(map(str,e)))
 
-def build(data,cycle,balanced=False,signed=False):
+def build(data,cycle,balanced=False,signed=False,complete_far=False):
+    if complete_far:assert signed
     if signed:balanced=True
     m={str(v):F(str(w)) for v,w in data["masses"].items()}
     E,w,conf,S,T,ab=load_model(data)
@@ -125,11 +126,34 @@ def build(data,cycle,balanced=False,signed=False):
             else:other.append((M,width))
         assert need==0,(i,E[i])
         palette=other
+    # C23: complete the original H when its ENTIRE remote demand
+    # fits in the C5 color slots that carry no root edges. Remote
+    # means outside C5, its crossing edges and its strong-conflict
+    # second ring; every such physical edge is compatible with ALL
+    # five C5 edges, but may conflict with nearby inserted edges.
+    support=rootset|set(C)|set(first)|set(second)
+    remote=[i for i in range(len(E)) if i not in support]
+    remote_weight=sum((w[i] for i in remote),F())
+    free_insert_weight=sum((w[i] for i in insert_free),F())
+    if complete_far:
+        assert all(not (conf[i]&set(C)) for i in remote)
+        assert remote_weight+free_insert_weight<=W5-B
+        for i in remote:
+            need=w[i];nxt=[]
+            for M,width in palette:
+                if need and (M&set(C)) and not(M&rootset) and not(M&conf[i]):
+                    take=min(need,width)
+                    nxt.append((frozenset(set(M)|{i}),take))
+                    need-=take
+                    if width>take:nxt.append((M,width-take))
+                else:nxt.append((M,width))
+            assert need==0,(i,E[i],need)
+            palette=nxt
     for i in insert_paid:palette.append((frozenset((i,)),w[i]))
     remaining=K-sum((width for _,width in palette),F())
     assert remaining>=0
     if remaining:palette.append((frozenset(),remaining))
-    demand=rootset|set(C)|set(first)|set(second)
+    demand=rootset|set(C)|set(first)|set(second)|(set(remote) if complete_far else set())
     got=defaultdict(F);J=F()
     for M,width in palette:
         assert width>0
@@ -140,8 +164,11 @@ def build(data,cycle,balanced=False,signed=False):
     assert set(got)==demand and all(got[i]==w[i] for i in demand)
     assert sum((v for _,v in palette),F())==K
     assert J==min(rs,rt)>=D
-    return {"status":"PASS_C22_SIGNED_SUPPORT" if signed else ("PASS_C21_BALANCED_SUPPORT" if balanced else "PASS_C20_SUPPORT"),
-        "balanced_mode":balanced,"signed_mode":signed,"vertices":len(m),"edges":len(E),
+    return {"status":"PASS_C23_FULL_G1" if complete_far else ("PASS_C22_SIGNED_SUPPORT" if signed else ("PASS_C21_BALANCED_SUPPORT" if balanced else "PASS_C20_SUPPORT")),
+        "balanced_mode":balanced,"signed_mode":signed,
+        "complete_far_mode":complete_far,"remote_weight":str(remote_weight),
+        "root_free_cycle":str(W5-B),"free_insert_total":str(free_insert_weight),
+        "vertices":len(m),"edges":len(E),
         "covered":len(demand),"uncovered":len(E)-len(demand),
         "W5":str(W5),"W1":str(W1),"W2_good":str(Wgood),
         "W2_exceptional":str(Wbad),"spare":str(remaining),
@@ -169,6 +196,13 @@ def build_general(data,cycle):
     implementations and their input contracts remain unchanged.
     """
     return build(data,cycle,signed=True)
+
+def build_full_far(data,cycle):
+    """C23 EXACT full-H G1 case: near-tight C5, signed Horn collar,
+    and total demand of all remaining remote physical edges small
+    enough for greedy insertion into root-free C5 color slots.
+    """
+    return build(data,cycle,signed=True,complete_far=True)
 
 def fixture():
     eps=F(1,1000);c=(1-eps)/2
