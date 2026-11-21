@@ -19,6 +19,7 @@ from s597_pg4_3conn_hard import build,budget
 from s597_clique_absorb import assess as split_c12
 from s597_proof_router import route
 from s597_c13_witnesses import anchored_cross,petersen_bridge
+from s597_relative_kernel import extract
 from erdos149_s595_neartight import build as build_617
 from erdos149_s595_cross_flow import evaluate as c10
 from s596_c11 import evaluate as c11
@@ -59,6 +60,20 @@ assert p13["core_nonroot"]==15 and p13["anchored_nonroot"]==0,p13
 print(json.dumps({"name":"petersen_rootfree_34","status":p13["status"],
     "root_free_core":p13["root_free_core"],"root_band":p13["root_band"]}))
 
+# Check exact kernel extraction and the physical-edge preservation:
+for name,record,anchor_n,rootfree_n in [
+    ("anchored_cross_10",cross,9,0),
+    ("petersen_34",P,4,15),
+    ("tree23",decode("tree23"),4,0),
+]:
+    kernel=extract(record)
+    assert len(kernel["anchored_demand_edges"])==anchor_n,(name,kernel)
+    assert len(kernel["rootfree_demand_edges"])==rootfree_n,(name,kernel)
+    assert len(kernel["physical_edges"])==len(record["edges"])
+    assert kernel["sha256_of_payload"]
+    print(json.dumps({"name":name,"kernel":"PASS",
+                      "anchored":anchor_n,"rootfree":rootfree_n}))
+
 hard=build();assert len(hard["masses"])==70 and len(hard["edges"])==157
 G=nx.Graph();G.add_nodes_from(hard["masses"]);G.add_edges_from(hard["edges"])
 assert nx.node_connectivity(G)>=3
@@ -83,6 +98,10 @@ for epsilon in (Q(1,1000),Q(1,10000),Q(1,100000),Q(1,1000000)):
     assert Q(report["QH_lower"])>Q(5,4)-Q(1,400)
 assert Q(masks["QH_lower"])>Q(5,4)-Q(1,400)
 assert Q(masks["QF_upper"])<Q(5,4)
+kr=extract(hard)
+assert len(kr["physical_edges"])==157
+assert len(kr["anchored_demand_edges"])==119
+assert not kr["rootfree_demand_edges"]
 p=analyze(hard);assert verify(hard,p)
 assert p["status"]=="OPEN_KERNEL",p
 assert p["core_nonroot"]==p["anchored_nonroot"]==111,p
