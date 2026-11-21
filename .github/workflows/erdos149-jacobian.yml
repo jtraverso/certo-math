@@ -101,6 +101,11 @@ jobs:
           certo lint examples/erdos149_s599_c15_primal_mix.py
           certo prove examples/erdos149_s599_c15_primal_mix.py --cert out/s599_c15_primal_mix.json
           certo verify out/s599_c15_primal_mix.json
+      - name: S599 Certo uniform 3/5 necessary slack window
+        run: |
+          certo lint examples/erdos149_s599_uniform_three_fifths.py
+          certo prove examples/erdos149_s599_uniform_three_fifths.py --cert out/s599_uniform_three_fifths.json
+          certo verify out/s599_uniform_three_fifths.json
       - name: Bundle audit summary
         if: always()
         run: |
