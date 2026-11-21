@@ -9,7 +9,13 @@ Run:
 """
 import z3
 from certo import Spec
-from erdos149_arco3_cegis_degree import gap_numerator
+K = z3.RealVal("5/4")
+A = z3.RealVal("1/200")
+
+def gap_numerator(d, x):
+    L = K - x
+    dx = d * x
+    return ((1 - x) * (1 - A) - z3.RealVal("1/4")) * dx * L - (1 - x) * L * L + x * A * A * dx * dx
 
 
 def spec():
