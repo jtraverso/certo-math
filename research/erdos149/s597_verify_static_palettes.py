@@ -116,3 +116,20 @@ def check(name):
 if __name__=="__main__":
     check("tree23")
     check("core18")
+    # Both local blocker criteria fail to certify the 23-vertex graph,
+    # even though its fully physical palette has just been checked.
+    import sys
+    from pathlib import Path
+    sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+    import erdos149_s595_cross_flow as c10
+    from erdos149 import s596_c11 as c11
+    tree=decode("tree23")
+    f10=c10.evaluate(tree)
+    f11=c11.evaluate(tree,100000)
+    assert f10["status"]=="INCONCLUSIVE" and f10["nu_cross"]=="6/5",f10
+    assert f11["status"]=="INCONCLUSIVE" and f11["heavy"]==8,f11
+    print(json.dumps({"test":"tree23_blocker_filters","status":"INCONCLUSIVE",
+        "C10_flow":f10["nu_cross"],"C10_threshold":f10["threshold_exact"],
+        "C11_heavy":f11["heavy"],
+        "interpretation":"filters fail but exact global palette succeeds"}))
+
