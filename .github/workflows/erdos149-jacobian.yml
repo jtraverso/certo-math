@@ -114,7 +114,8 @@ jobs:
         run: |
           for f in examples/erdos149_s600_root_margin.py \
                    examples/erdos149_s600_c5_fixed_vertex.py \
-                   examples/erdos149_s600_c5_distance.py; do
+                   examples/erdos149_s600_c5_distance.py \
+                   examples/erdos149_s600_c5_adjacent_capfree.py; do
             certo lint "$f"
             certo prove "$f" --cert "out/$(basename "$f" .py).json"
             certo verify "out/$(basename "$f" .py).json"
