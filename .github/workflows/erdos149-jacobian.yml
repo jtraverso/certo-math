@@ -106,6 +106,19 @@ jobs:
           certo lint examples/erdos149_s599_uniform_three_fifths.py
           certo prove examples/erdos149_s599_uniform_three_fifths.py --cert out/s599_uniform_three_fifths.json
           certo verify out/s599_uniform_three_fifths.json
+      - name: S600 exact physical clique-cut and nonbipartite falsation
+        run: |
+          python research/erdos149/s600_neartight_fixture.py
+          python research/erdos149/s600_nonbip_core_falsation.py
+      - name: S600 Certo root mass gap and five-cycle shielding
+        run: |
+          for f in examples/erdos149_s600_root_margin.py \
+                   examples/erdos149_s600_c5_fixed_vertex.py \
+                   examples/erdos149_s600_c5_distance.py; do
+            certo lint "$f"
+            certo prove "$f" --cert "out/$(basename "$f" .py).json"
+            certo verify "out/$(basename "$f" .py).json"
+          done
       - name: Bundle audit summary
         if: always()
         run: |
